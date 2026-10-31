@@ -1,0 +1,38 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build output
+dist/
+build/
+out/
+release/
+*.tsbuildinfo
+
+# Runtime data (never commit)
+OiJudgeData/
+*.db
+*.db-wal
+*.db-shm
+
+# Logs / test artifacts
+*.log
+coverage/
+playwright-report/
+test-results/
+.vite/
+
+# Native build
+native/runner/build/
+native/runner/out/
+
+# Local env
+.env
+.env.*
+!.env.example
+
+# OS / editor
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/
