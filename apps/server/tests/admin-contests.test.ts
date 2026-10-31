@@ -154,6 +154,28 @@ describe('admin contest management', () => {
     const result = imported.json() as { data: { created: string[]; skipped: string[] } };
     expect(result.data.created).toEqual(['dan']);
     expect(result.data.skipped).toEqual(['carol']);
+
+    const updated = await app.inject({
+      method: 'PUT',
+      url: `/api/admin/users/${classBUser}`,
+      headers: { cookie },
+      payload: { realName: 'Bobby', className: '2班', role: 'contestmanager', status: 'active' },
+    });
+    expect(updated.statusCode).toBe(200);
+
+    const reset = await app.inject({
+      method: 'POST',
+      url: `/api/admin/users/${classBUser}/reset-password`,
+      headers: { cookie },
+      payload: { password: 'newpass123' },
+    });
+    expect(reset.statusCode).toBe(200);
+    const login = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'bob', password: 'newpass123' },
+    });
+    expect(login.statusCode).toBe(200);
   });
 
   it('creates contest via helper for repo sanity', () => {

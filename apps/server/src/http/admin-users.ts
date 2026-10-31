@@ -1,7 +1,7 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import { hashPassword } from '../security/password.js';
-import { createUser, getUserByUsername, listUsers } from '../storage/repos/users.js';
+import { createUser, getUserById, getUserByUsername, listUsers, setUserPasswordHash, updateUserProfile } from '../storage/repos/users.js';
 
 export interface AdminUserRouteOptions {
   db: DatabaseSync;
@@ -107,4 +107,53 @@ export function registerAdminUserRoutes(
     });
     return { ok: true, data: { created, skipped, errors } };
   });
+
+  app.put<{
+    Params: { id: string };
+    Body: {
+      realName?: string | null;
+      className?: string | null;
+      role?: string;
+      status?: string;
+    };
+  }>('/api/admin/users/:id', { preHandler: options.adminGuard }, async (request, reply) => {
+    const id = Number(request.params.id);
+    const user = getUserById(options.db, id);
+    if (!user) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    const body = request.body ?? {};
+    const isAdmin = request.user!.role === 'admin';
+    if (!isAdmin && (body.role !== undefined || body.status !== undefined)) {
+      return reply.code(403).send({ ok: false, error: { code: 'FORBIDDEN' } });
+    }
+    if (id === request.user!.id && (body.role !== undefined || body.status === 'disabled')) {
+      return reply.code(400).send({ ok: false, error: { code: 'SELF_LOCKOUT' } });
+    }
+    if (body.role !== undefined && !['admin', 'setter', 'contestmanager', 'contestant'].includes(body.role)) {
+      return reply.code(400).send({ ok: false, error: { code: 'BAD_ROLE' } });
+    }
+    updateUserProfile(options.db, id, {
+      realName: body.realName,
+      className: body.className,
+      role: isAdmin ? body.role : undefined,
+      status: isAdmin ? body.status : undefined,
+    });
+    return { ok: true, data: null };
+  });
+
+  app.post<{ Params: { id: string }; Body: { password?: string } }>(
+    '/api/admin/users/:id/reset-password',
+    { preHandler: options.adminGuard },
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      if (!getUserById(options.db, id)) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      const password = request.body?.password;
+      if (!password || password.length < 4) {
+        return reply.code(400).send({ ok: false, error: { code: 'BAD_PASSWORD' } });
+      }
+      setUserPasswordHash(options.db, id, hashPassword(password));
+      return { ok: true, data: null };
+    },
+  );
 }
