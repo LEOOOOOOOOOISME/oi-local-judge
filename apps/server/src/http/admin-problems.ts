@@ -237,6 +237,12 @@ export function registerAdminProblemRoutes(
           .prepare('UPDATE problems SET checker_path = ?, checker_mode = ? WHERE id = ?')
           .run(relativePath, mode, problemId);
       }
+      if (kind === 'judger') {
+        // A "judger" asset is a Lemon six-argument checker; wire it as the SPJ.
+        options.db
+          .prepare("UPDATE problems SET checker_path = ?, checker_mode = 'lemon' WHERE id = ?")
+          .run(relativePath, problemId);
+      }
       return reply.code(201).send({ ok: true, data: asset });
     },
   );

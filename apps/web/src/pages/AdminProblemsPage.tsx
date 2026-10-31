@@ -20,9 +20,9 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '../api/client';
 import type {
+  AdminProblemSummary,
   CreateProblemRequest,
   CreateProblemResult,
-  ProblemSummary,
   ProblemType,
 } from '../api/types';
 import { PageHead } from '../components/PageHead';
@@ -67,8 +67,8 @@ export function AdminProblemsPage() {
   const ioMode = Form.useWatch('ioMode', form);
 
   const problemsQuery = useQuery({
-    queryKey: ['problems'],
-    queryFn: () => apiGet<ProblemSummary[]>('/api/problems'),
+    queryKey: ['admin-problems'],
+    queryFn: () => apiGet<AdminProblemSummary[]>('/api/admin/problems'),
     staleTime: 30_000,
   });
 
@@ -91,6 +91,7 @@ export function AdminProblemsPage() {
     onSuccess: (data) => {
       message.success(`题目 #${data.id} 已创建`);
       void queryClient.invalidateQueries({ queryKey: ['problems'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-problems'] });
       setDrawerOpen(false);
       form.resetFields();
       navigate(`/admin/problems/${data.id}`);
@@ -105,7 +106,7 @@ export function AdminProblemsPage() {
     setDrawerOpen(true);
   };
 
-  const columns: TableColumnsType<ProblemSummary> = [
+  const columns: TableColumnsType<AdminProblemSummary> = [
     {
       title: 'ID',
       dataIndex: 'id',
@@ -120,6 +121,17 @@ export function AdminProblemsPage() {
           {record.title}
         </Link>
       ),
+    },
+    {
+      title: '可见性',
+      dataIndex: 'visibility',
+      width: 90,
+      render: (visibility: AdminProblemSummary['visibility']) =>
+        visibility === 'hidden' ? (
+          <Tag color="gold">隐藏</Tag>
+        ) : (
+          <Tag color="green">公开</Tag>
+        ),
     },
     {
       title: '类型',
@@ -165,7 +177,11 @@ export function AdminProblemsPage() {
       render: (_value, record) => (
         <Space size={12}>
           <Link to={`/admin/problems/${record.id}`}>编辑</Link>
-          <Link to={`/problem/${record.id}`}>前台</Link>
+          {record.visibility === 'public' ? (
+            <Link to={`/problem/${record.id}`}>前台</Link>
+          ) : (
+            <span className="muted">前台不可见</span>
+          )}
         </Space>
       ),
     },
@@ -176,7 +192,7 @@ export function AdminProblemsPage() {
       <PageHead
         breadcrumb={[{ label: '管理' }]}
         title="题目管理"
-        subtitle="创建题目并维护标准程序、校验器、测试数据等资产。"
+        subtitle="包含公开与隐藏题目；创建题目并维护标准程序、校验器、测试数据等资产。"
         extra={
           <Space>
             <Button
@@ -201,7 +217,7 @@ export function AdminProblemsPage() {
         ) : problemsQuery.isError ? (
           <ErrorResult error={problemsQuery.error} onRetry={() => void problemsQuery.refetch()} />
         ) : (
-          <Table<ProblemSummary>
+          <Table<AdminProblemSummary>
             className="oij-table"
             rowKey="id"
             size="small"
