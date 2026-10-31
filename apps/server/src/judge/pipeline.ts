@@ -26,6 +26,7 @@ import {
   finishSubmission,
   getSubmission,
   replaceTestResults,
+  setSubmissionStatus,
 } from '../storage/repos/submissions.js';
 import { compileSource } from './compiler.js';
 import { runSandboxed } from './runner.js';
@@ -138,6 +139,7 @@ function persistJudged(
   results: readonly JudgedResult[],
   verdict: Verdict,
   score: number,
+  message = '',
 ): void {
   const timeMs = results.reduce((max, result) => Math.max(max, result.timeMs), 0);
   const memoryKb = results.reduce((max, result) => Math.max(max, result.memoryKb), 0);
@@ -160,6 +162,7 @@ function persistJudged(
       score,
       timeMs,
       memoryKb,
+      message,
     });
   });
   publishUpdate(events, {
@@ -169,6 +172,7 @@ function persistJudged(
     score,
     timeMs,
     memoryKb,
+    message,
     results,
   });
 }
@@ -188,6 +192,7 @@ function markSubmissionFailed(
       score: 0,
       timeMs: 0,
       memoryKb: 0,
+      message: clipped,
     });
   });
   publishUpdate(events, {
@@ -320,6 +325,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
     const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
     const outExe = join(workdir, 'prog.exe');
 
+    setSubmissionStatus(db, submissionId, 'compiling');
     const compiled = await compileSource({
       gxx: config.gxx,
       sourcePath,
@@ -328,10 +334,11 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       language: submission.language,
     });
     if (!compiled.ok) {
-      persistJudged(db, submissionId, events, [], 'CE', 0);
+      persistJudged(db, submissionId, events, [], 'CE', 0, clipMessage(compiled.message));
       return;
     }
 
+    setSubmissionStatus(db, submissionId, 'running');
     const results: JudgedResult[] = [];
     for (const testcase of testcases) {
       results.push(await judgeTestcase({ config, problem, testcase, workdir, outExe }));

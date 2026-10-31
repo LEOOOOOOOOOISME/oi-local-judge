@@ -2,13 +2,30 @@
 
 Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手端，支持比赛模式、Special Judge、交互题、子任务、客观题组卷、榜单与数据分析。
 
-> 状态：设计完成，Phase 0 技术验证进行中。代码尚未开始实现。
+> 状态：Phase 0 技术验证完成；Phase 1A 后端闭环与 Phase 1B Web 前端 MVP 已完成（Electron 壳在开发沙箱中无法启动，待目标机复验）。
 
 ## 文档
 
 - [需求规格 requirement.txt](requirement.txt)：功能需求（180+ 条）、性能指标、红队推演、三期路线图
 - [技术设计](docs/superpowers/specs/2026-10-31-oi-judge-design.md)：进程拓扑、模块边界、评测/沙箱、数据模型、性能与安全设计
+- [Phase 0 结果](docs/research/phase-0-results.md)：runner / SPJ / SQLite / 微基准
+- [Phase 1A 结果](docs/research/phase-1a-results.md)：认证、题库、评测、榜单、E2E
+- [Phase 1B 结果](docs/research/phase-1b-web-results.md)：Web 页面、构建与 Playwright 验证
 - [前人实现调研](docs/research/prior-art.md)：Lemon/Hydro/UOJ/testlib 的可复用性与许可证结论
+
+## 快速开始（Windows）
+
+```powershell
+npm install --ignore-scripts --cache .npm-cache
+node tools/build-runner.mjs
+npm run build
+npm run seed          # 默认数据目录 %LOCALAPPDATA%\OiJudge，可设 OIJ_DATA_DIR
+npm start             # http://127.0.0.1:8787
+```
+
+默认管理员 `admin / admin123`（首次启动自动创建，生产环境请用 `OIJ_ADMIN_PASSWORD` 覆盖并改密）。
+当前可用：登录、题库、题目页、C++17 提交、评测（TLE/MLE/RE/CE/WA/AC）、提交详情、比赛列表/主页/榜单、我的记录。
+评测依赖本机 `ojrunner.exe`（`tools/build-runner.mjs`）与 GCC 16；未配置编译器时评测会报 SE。
 
 ## 目标能力
 

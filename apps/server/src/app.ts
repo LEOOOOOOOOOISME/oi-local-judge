@@ -1,5 +1,8 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
+import fastifyStatic from '@fastify/static';
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { loadConfig, type Config } from './config.js';
 import { healthRoutes } from './http/health.js';
@@ -42,13 +45,24 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   });
   registerSubmissionRoutes(app, { db, config });
 
-  app.get('/', async (_req, reply) =>
-    reply
-      .type('text/html')
-      .send(
-        '<!doctype html><html><head><meta charset="utf-8"><title>OiJudge</title></head><body><h1>OiJudge</h1></body></html>',
-      ),
-  );
+  const webDist = join(process.cwd(), 'apps/web/dist');
+  if (existsSync(webDist)) {
+    await app.register(fastifyStatic, { root: webDist, prefix: '/' });
+    app.setNotFoundHandler((request, reply) => {
+      if (request.url.startsWith('/api/') || request.url.startsWith('/ws')) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      return reply.sendFile('index.html');
+    });
+  } else {
+    app.get('/', async (_req, reply) =>
+      reply
+        .type('text/html')
+        .send(
+          '<!doctype html><html><head><meta charset="utf-8"><title>OiJudge</title></head><body><h1>OiJudge</h1></body></html>',
+        ),
+    );
+  }
 
   app.get('/ws', { websocket: true }, (socket, request) => {
     const authenticated = authenticateRequest(request, { db, config });

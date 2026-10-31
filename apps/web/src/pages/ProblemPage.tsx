@@ -1,0 +1,423 @@
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Empty,
+  Input,
+  Popconfirm,
+  Select,
+  Space,
+  Spin,
+  Tabs,
+  Tag,
+} from 'antd';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiGet, apiPost } from '../api/client';
+import type { Contest, ProblemDetail, RankingRow, Submission } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
+import { MetaList } from '../components/MetaList';
+import { PageHead } from '../components/PageHead';
+import { ErrorResult, PageLoading } from '../components/PageStates';
+import { StatementHtml } from '../components/StatementHtml';
+import { SubmissionTable } from '../components/SubmissionTable';
+import { formatMemoryLimit, formatTimeLimit } from '../utils/format';
+import { difficultyLabel, problemLetter, problemTypeLabel } from '../utils/status';
+
+const DEFAULT_CODE = `#include <bits/stdc++.h>
+using namespace std;
+
+int main() {
+    ios::sync_with_stdio(false);
+    cin.tie(nullptr);
+
+    // 在此编写你的代码
+
+    return 0;
+}
+`;
+
+function readDraft(problemId: number): string | null {
+  try {
+    return window.localStorage.getItem(`oij:draft:${problemId}`);
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(problemId: number, code: string): void {
+  try {
+    window.localStorage.setItem(`oij:draft:${problemId}`, code);
+  } catch {
+    // 本地草稿不可用不影响提交。
+  }
+}
+
+export function ProblemPage() {
+  const params = useParams<{ contestId?: string; problemId: string }>();
+  const problemId = Number(params.problemId);
+  const contestId = params.contestId ? Number(params.contestId) : null;
+  const validProblem = Number.isInteger(problemId) && problemId > 0;
+  const validContest = contestId === null || (Number.isInteger(contestId) && contestId > 0);
+
+  const { user } = useAuth();
+  const { message } = App.useApp();
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
+
+  const [activeTab, setActiveTab] = useState('statement');
+  const [code, setCode] = useState<string>(
+    () => (validProblem ? readDraft(problemId) : null) ?? DEFAULT_CODE,
+  );
+  const lastProblemRef = useRef(problemId);
+
+  useEffect(() => {
+    if (lastProblemRef.current === problemId) return;
+    lastProblemRef.current = problemId;
+    setCode(readDraft(problemId) ?? DEFAULT_CODE);
+  }, [problemId]);
+
+  useEffect(() => {
+    if (validProblem) writeDraft(problemId, code);
+  }, [problemId, code, validProblem]);
+
+  const problemQuery = useQuery({
+    queryKey: ['problem', problemId],
+    queryFn: () => apiGet<ProblemDetail>(`/api/problems/${problemId}`),
+    enabled: validProblem,
+  });
+  const contestsQuery = useQuery({
+    queryKey: ['contests'],
+    queryFn: () => apiGet<Contest[]>('/api/contests'),
+    enabled: contestId !== null,
+    staleTime: 60_000,
+  });
+  const rankingQuery = useQuery({
+    queryKey: ['ranking', contestId],
+    queryFn: () => apiGet<RankingRow[]>(`/api/contests/${contestId}/ranking`),
+    enabled: contestId !== null && validContest,
+    staleTime: 5_000,
+  });
+  const submissionsQuery = useQuery({
+    queryKey: ['submissions', { scope: 'mine', problemId, contestId }],
+    queryFn: () =>
+      apiGet<Submission[]>(
+        `/api/submissions?userId=me&limit=20&problemId=${problemId}${
+          contestId === null ? '' : `&contestId=${contestId}`
+        }`,
+      ),
+    enabled: validProblem && Boolean(user),
+  });
+
+  const submitMutation = useMutation({
+    mutationFn: () =>
+      apiPost<{ id: number; status: string }>('/api/submissions', {
+        problemId,
+        language: 'cpp17',
+        code,
+        contestId,
+      }),
+    onSuccess: (data) => {
+      message.success(`提交 #${data.id} 已加入评测队列`);
+      void queryClient.invalidateQueries({ queryKey: ['submissions'] });
+      navigate(`/submissions/${data.id}`);
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '提交失败');
+    },
+  });
+
+  const contest =
+    contestId !== null ? (contestsQuery.data?.find((item) => item.id === contestId) ?? null) : null;
+  const firstRankingRow = rankingQuery.data?.[0];
+  const ordinalIndex = firstRankingRow
+    ? firstRankingRow.problems.findIndex((cell) => cell.problemId === problemId)
+    : -1;
+  const letter = ordinalIndex >= 0 ? problemLetter(ordinalIndex) : null;
+
+  const loginHref = `/login?next=${encodeURIComponent(
+    contestId !== null ? `/contest/${contestId}/problem/${problemId}` : `/problem/${problemId}`,
+  )}`;
+
+  const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.key !== 'Tab') return;
+    event.preventDefault();
+    const target = event.currentTarget;
+    const start = target.selectionStart ?? 0;
+    const end = target.selectionEnd ?? start;
+    const next = `${code.slice(0, start)}  ${code.slice(end)}`;
+    setCode(next);
+    window.requestAnimationFrame(() => {
+      target.selectionStart = start + 2;
+      target.selectionEnd = start + 2;
+    });
+  };
+
+  if (!validProblem) {
+    return <ErrorResult error={new Error('无效的题目编号')} />;
+  }
+  if (problemQuery.isPending) {
+    return <PageLoading tip="正在加载题面…" />;
+  }
+  if (problemQuery.isError) {
+    return (
+      <ErrorResult error={problemQuery.error} onRetry={() => void problemQuery.refetch()} />
+    );
+  }
+  const problem = problemQuery.data;
+  if (!problem) {
+    return <PageLoading tip="正在加载题面…" />;
+  }
+
+  const statementPanel = (
+    <div className="stack">
+      <Card className="oij-card statement-card">
+        <StatementHtml html={problem.statementHtml} />
+      </Card>
+      {problem.ioMode === 'file' ? (
+        <Alert
+          type="info"
+          showIcon
+          message={`本题使用文件 IO：输入文件 ${problem.inputFile ?? '—'}，输出文件 ${
+            problem.outputFile ?? '—'
+          }`}
+        />
+      ) : null}
+      {problem.samples.length > 0 ? (
+        <Card className="oij-card" title="样例">
+          <div className="stack">
+            {problem.samples.map((sample, index) => (
+              <div className="sample" key={index}>
+                <div className="sample-title">样例 {index + 1}</div>
+                <div className="sample-grid">
+                  <div>
+                    <div className="sample-label">输入</div>
+                    <pre className="sample-pre">{sample.input}</pre>
+                  </div>
+                  <div>
+                    <div className="sample-label">输出</div>
+                    <pre className="sample-pre">{sample.output}</pre>
+                  </div>
+                </div>
+                {sample.explanation ? (
+                  <div className="sample-explanation">说明：{sample.explanation}</div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </Card>
+      ) : null}
+    </div>
+  );
+
+  const submitPanel = !user ? (
+    <Card className="oij-card">
+      <Empty description="登录后即可提交代码">
+        <Link to={loginHref}>
+          <Button type="primary">去登录</Button>
+        </Link>
+      </Empty>
+    </Card>
+  ) : (
+    <Card
+      className="oij-card"
+      title="提交 C++17 代码"
+      extra={<span className="muted">{code.length} 字符 / 上限 256 KB</span>}
+    >
+      <div className="submit-toolbar">
+        <Space size={8} align="center">
+          <span className="muted">语言</span>
+          <Select
+            value="cpp17"
+            options={[{ value: 'cpp17', label: 'C++17' }]}
+            style={{ width: 120 }}
+            disabled
+          />
+        </Space>
+        <span className="muted">编译选项：g++ -O2 -std=c++17 -static</span>
+      </div>
+      <Input.TextArea
+        className="code-editor"
+        value={code}
+        onChange={(event) => setCode(event.target.value)}
+        onKeyDown={handleEditorKeyDown}
+        rows={18}
+        spellCheck={false}
+        style={{
+          fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
+          fontSize: 13,
+          lineHeight: 1.6,
+        }}
+      />
+      <div className="submit-footer">
+        <Popconfirm
+          title="清空当前代码？"
+          description="会恢复为默认模板，本地草稿也会被覆盖。"
+          okText="清空"
+          cancelText="取消"
+          onConfirm={() => setCode(DEFAULT_CODE)}
+        >
+          <Button>重置代码</Button>
+        </Popconfirm>
+        <Button
+          type="primary"
+          onClick={() => submitMutation.mutate()}
+          loading={submitMutation.isPending}
+          disabled={code.trim().length === 0}
+        >
+          提交评测
+        </Button>
+      </div>
+    </Card>
+  );
+
+  const submissionsPanel = !user ? (
+    <Card className="oij-card">
+      <Empty description="登录后查看我的提交">
+        <Link to={loginHref}>
+          <Button type="primary">去登录</Button>
+        </Link>
+      </Empty>
+    </Card>
+  ) : submissionsQuery.isPending ? (
+    <Card className="oij-card">
+      <div className="inline-loading">
+        <Spin />
+      </div>
+    </Card>
+  ) : submissionsQuery.isError ? (
+    <ErrorResult
+      error={submissionsQuery.error}
+      onRetry={() => void submissionsQuery.refetch()}
+    />
+  ) : (
+    <Card
+      className="oij-card"
+      title="我的提交"
+      extra={<Link to="/records">全部记录</Link>}
+    >
+      <SubmissionTable
+        submissions={submissionsQuery.data ?? []}
+        problemTitles={new Map<number, string>([[problem.id, problem.title]])}
+        problemPath={(pid) =>
+          contestId !== null ? `/contest/${contestId}/problem/${pid}` : `/problem/${pid}`
+        }
+        emptyText="还没有提交过本题"
+      />
+    </Card>
+  );
+
+  return (
+    <div>
+      <PageHead
+        breadcrumb={
+          contestId !== null
+            ? [
+                { label: '比赛', to: '/contests' },
+                { label: contest?.name ?? `比赛 #${contestId}`, to: `/contest/${contestId}` },
+                { label: letter ? `${letter}. ${problem.title}` : problem.title },
+              ]
+            : [
+                { label: '题目', to: '/problems' },
+                { label: `#${problem.id} ${problem.title}` },
+              ]
+        }
+        title={letter ? `${letter}. ${problem.title}` : `#${problem.id} ${problem.title}`}
+        tags={
+          <>
+            <Tag color="blue">{problemTypeLabel(problem.type)}</Tag>
+            {letter ? <Tag>比赛题号 {letter}</Tag> : null}
+          </>
+        }
+        subtitle={
+          <span>
+            时间限制 {formatTimeLimit(problem.timeMs)} · 内存限制 {formatMemoryLimit(problem.memoryMb)}
+            {problem.tags.length > 0 ? ` · ${problem.tags.join(' / ')}` : ''}
+          </span>
+        }
+      />
+
+      <div className="content-grid">
+        <Tabs
+          className="problem-tabs"
+          activeKey={activeTab}
+          onChange={setActiveTab}
+          items={[
+            { key: 'statement', label: '题目描述', children: statementPanel },
+            { key: 'submit', label: '提交代码', children: submitPanel },
+            {
+              key: 'submissions',
+              label: `我的提交${
+                user && submissionsQuery.data ? ` (${submissionsQuery.data.length})` : ''
+              }`,
+              children: submissionsPanel,
+            },
+          ]}
+        />
+
+        <div className="stack">
+          <Card className="oij-card" size="small" title="题目信息">
+            <MetaList
+              items={[
+                { label: '时间限制', value: formatTimeLimit(problem.timeMs) },
+                { label: '内存限制', value: formatMemoryLimit(problem.memoryMb) },
+                { label: '题目类型', value: problemTypeLabel(problem.type) },
+                {
+                  label: 'IO 模式',
+                  value:
+                    problem.ioMode === 'file'
+                      ? `${problem.inputFile ?? '—'} / ${problem.outputFile ?? '—'}`
+                      : '标准输入输出',
+                },
+                { label: '难度', value: difficultyLabel(problem.difficulty) },
+                {
+                  label: '标签',
+                  value:
+                    problem.tags.length === 0 ? (
+                      <span className="muted">—</span>
+                    ) : (
+                      <span className="tag-list">
+                        {problem.tags.map((tag) => (
+                          <Tag key={tag} bordered={false}>
+                            {tag}
+                          </Tag>
+                        ))}
+                      </span>
+                    ),
+                },
+              ]}
+            />
+            <Button
+              type="primary"
+              block
+              className="side-action"
+              onClick={() => setActiveTab('submit')}
+            >
+              提交代码
+            </Button>
+          </Card>
+
+          {contestId !== null ? (
+            <Card className="oij-card" size="small" title="所属比赛">
+              <div className="side-contest-name">
+                <Link to={`/contest/${contestId}`}>
+                  {contest?.name ?? `比赛 #${contestId}`}
+                </Link>
+              </div>
+              <div className="muted">{letter ? `题号 ${letter}` : '题目顺序未知'}</div>
+              <Button
+                block
+                className="side-action"
+                onClick={() => navigate(`/contest/${contestId}`)}
+              >
+                返回比赛主页
+              </Button>
+            </Card>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}

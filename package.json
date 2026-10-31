@@ -13,11 +13,14 @@
     "build:runner": "node tools/build-runner.mjs",
     "bench": "node tools/bench/run-all.mjs",
     "seed": "tsx tools/seed/seed.ts",
-    "build": "tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/desktop/tsconfig.json",
+    "build": "tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/desktop/tsconfig.json && npm run build --workspace @oij/web",
     "start": "node apps/server/dist/cli.js",
     "electron:smoke": "electron tools/electron-smoke.cjs",
     "electron:smoke:flags": "electron --no-sandbox --disable-gpu tools/electron-smoke.cjs",
-    "electron:start": "electron apps/desktop/dist/main.js"
+    "electron:start": "electron apps/desktop/dist/main.js",
+    "web:dev": "npm run dev --workspace @oij/web",
+    "web:build": "npm run build --workspace @oij/web",
+    "web:typecheck": "npm run typecheck --workspace @oij/web"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
@@ -26,6 +29,7 @@
     "vitest": "^3.0.0"
   },
   "dependencies": {
+    "@fastify/static": "^10.1.8",
     "@types/markdown-it": "^14.2.0",
     "markdown-it": "^15.0.3"
   }
