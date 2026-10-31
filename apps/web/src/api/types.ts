@@ -119,6 +119,68 @@ export interface SelfTestResult {
   results: SelfTestTestcaseResult[];
 }
 
+/** Phase 1G：generator 造数据与 std/brute 对拍。 */
+export interface GeneratedTestcase {
+  seed: number;
+  input: string;
+  output: string;
+}
+
+export interface GenerateResult {
+  generated: GeneratedTestcase[];
+  total: number;
+}
+
+export interface StressMismatch {
+  seed: number;
+  input: string;
+  stdOutput: string;
+  bruteOutput: string;
+  path: string;
+}
+
+export interface StressResult {
+  passed: number;
+  total: number;
+  mismatch: StressMismatch | null;
+}
+
+/** Phase 1H：批量评测。 */
+export interface BatchUploadResult {
+  uploadId: string;
+  files: string[];
+}
+
+export interface BatchRunItem {
+  student: string;
+  submissionId: number;
+}
+
+export interface BatchRunResult {
+  id: number;
+  count: number;
+  items: BatchRunItem[];
+}
+
+export interface BatchResultItem {
+  student: string;
+  sourcePath: string;
+  submissionId: number | null;
+  status: SubmissionStatus | 'missing';
+  verdict: Verdict | null;
+  score: number;
+  timeMs: number;
+  memoryKb: number;
+}
+
+export interface BatchJob {
+  id: number;
+  problemId: number;
+  status: 'running' | 'finished';
+  studentLevel: number;
+  items: BatchResultItem[];
+}
+
 export interface TestResult {
   testcaseId: number;
   verdict: Verdict;
