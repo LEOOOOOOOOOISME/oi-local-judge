@@ -187,6 +187,49 @@ describe('admin problem assets and data', () => {
     expect(body.data.passed, JSON.stringify(body.data.results)).toBe(2);
   }, 30_000);
 
+  it('runs the uploaded std against imported data', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/admin/problems',
+      headers: { cookie: adminCookie },
+      payload: { title: 'Self Test', type: 'standard', timeMs: 1000, memoryMb: 64 },
+    });
+    const problemId = (created.json() as { data: { id: number } }).data.id;
+    const std = await app.inject({
+      method: 'POST',
+      url: `/api/admin/problems/${problemId}/assets/std?name=std.cpp`,
+      headers: { cookie: adminCookie, 'content-type': 'application/octet-stream' },
+      payload: Buffer.from(
+        '#include <iostream>\nint main(){long long a,b;std::cin>>a>>b;std::cout<<a+b<<"\\n";}',
+      ),
+    });
+    expect(std.statusCode).toBe(201);
+    const zip = zipSync({
+      '1.in': new TextEncoder().encode('1 2\n'),
+      '1.out': new TextEncoder().encode('3\n'),
+      '2.in': new TextEncoder().encode('2 3\n'),
+      '2.out': new TextEncoder().encode('5\n'),
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/admin/problems/${problemId}/data/import`,
+      headers: { cookie: adminCookie, 'content-type': 'application/zip' },
+      payload: Buffer.from(zip),
+    });
+
+    const result = await app.inject({
+      method: 'POST',
+      url: `/api/admin/problems/${problemId}/self-test`,
+      headers: { cookie: adminCookie },
+    });
+    expect(result.statusCode).toBe(200);
+    const body = result.json() as {
+      data: { score: number; results: Array<{ verdict: string }> };
+    };
+    expect(body.data.results.map((row) => row.verdict)).toEqual(['AC', 'AC']);
+    expect(body.data.score).toBe(200);
+  }, 30_000);
+
   it('forbids contestants from the admin API', async () => {
     const res = await app.inject({
       method: 'POST',

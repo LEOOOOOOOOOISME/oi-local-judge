@@ -239,7 +239,7 @@ function markSubmissionFailed(
   });
 }
 
-async function judgeTestcase(args: {
+export async function judgeTestcase(args: {
   config: Config;
   problem: ProblemRow;
   testcase: TestcaseRow;
