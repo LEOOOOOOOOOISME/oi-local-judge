@@ -19,6 +19,7 @@ export function AppShell() {
   const canManage = user?.role === 'admin' || user?.role === 'setter';
   const canManageContests =
     user?.role === 'admin' || user?.role === 'contestmanager';
+  const canAudit = user?.role === 'admin';
 
   const handleLogout = async () => {
     await logout();
@@ -97,6 +98,11 @@ export function AppShell() {
                 </NavLink>
               </>
             ) : null}
+            {canAudit ? (
+              <NavLink to="/admin/audit" className={navClass}>
+                审计日志
+              </NavLink>
+            ) : null}
           </nav>
           <div className="oij-header-right">
             {status === 'loading' ? (
@@ -127,7 +133,7 @@ export function AppShell() {
           <Outlet />
         </Suspense>
       </main>
-      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 3A</footer>
+      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 3C</footer>
     </div>
   );
 }

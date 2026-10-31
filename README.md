@@ -2,7 +2,7 @@
 
 Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手端，支持比赛模式、Special Judge、交互题、子任务、客观题组卷、榜单与数据分析。
 
-> 状态：Phase 0/1A–1H/2A/2B/3A 已完成；Web 端可完整跑通"登录 → 比赛 → 题目 → 提交 → 评测 → 榜单"，支持传统/文件 IO/SPJ/子任务/客观题/混合组卷，以及讨论区/题解审核/比赛答疑/私信/通知；管理端覆盖题目/资产/数据/校验/造数据/对拍/批量评测、比赛控制台、参赛者与班级统计、用户管理、社区审核。Electron 壳在开发沙箱中无法启动，待目标机复验。
+> 状态：Phase 0/1A–1H/2A/2B/3A–3C 已完成；Web 端可完整跑通"登录 → 比赛 → 题目 → 提交 → 评测 → 榜单"，支持传统/文件 IO/SPJ/子任务/客观题/混合组卷，以及讨论区/题解审核/比赛答疑/私信/通知/大屏；管理端覆盖题目/资产/数据/校验/造数据/对拍/批量评测、比赛控制台、参赛者与班级统计、用户管理、社区审核、审计日志。Electron 壳在开发沙箱中无法启动，待目标机复验。
 
 ## 文档
 
@@ -18,6 +18,7 @@ Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手�
 - [Phase 2B 结果](docs/research/phase-2b-objective-results.md)：客观题评分、管理端编辑器、选手作答
 - [Phase 3A 结果](docs/research/phase-3a-community-results.md)：讨论/题解/答疑/私信/通知
 - [Phase 3B 结果](docs/research/phase-3b-problem-package-results.md)：题目包 zip 导出/导入
+- [Phase 3C 结果](docs/research/phase-3c-security-screen-results.md)：登录限流/审计/大屏/CSV
 - [前人实现调研](docs/research/prior-art.md)：Lemon/Hydro/UOJ/testlib 的可复用性与许可证结论
 
 ## 快速开始（Windows）

@@ -531,6 +531,18 @@ export interface NotificationItem {
   createdAt: number;
 }
 
+/** Phase 3C：审计日志。 */
+export interface AuditLog {
+  id: number;
+  actorId: number | null;
+  action: string;
+  targetType: string | null;
+  targetId: string | null;
+  detail: unknown;
+  ip: string | null;
+  createdAt: number;
+}
+
 export interface WsMessage {
   v?: number;
   type: string;

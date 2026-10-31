@@ -239,6 +239,11 @@ export function ContestOverviewPage() {
             {myRow ? ` · 我的排名 第 ${myRow.rank} 名，总分 ${myRow.totalScore}` : null}
           </span>
         }
+        extra={
+          <Link to={`${contestPath}/screen`} target="_blank" rel="noreferrer">
+            <Button>大屏</Button>
+          </Link>
+        }
       />
 
       <Tabs

@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { AdminRoute, CommunityAdminRoute, ContestAdminRoute } from './components/AdminRoute';
+import { AdminOnlyRoute, AdminRoute, CommunityAdminRoute, ContestAdminRoute } from './components/AdminRoute';
 import { AppShell } from './components/AppShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
@@ -69,11 +69,20 @@ const AdminPostsPage = lazy(() =>
 const MessagesPage = lazy(() =>
   import('./pages/MessagesPage').then((module) => ({ default: module.MessagesPage })),
 );
+const ContestScreenPage = lazy(() =>
+  import('./pages/ContestScreenPage').then((module) => ({
+    default: module.ContestScreenPage,
+  })),
+);
+const AdminAuditPage = lazy(() =>
+  import('./pages/AdminAuditPage').then((module) => ({ default: module.AdminAuditPage })),
+);
 
 export function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/contest/:contestId/screen" element={<ContestScreenPage />} />
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/contests" replace />} />
         <Route path="/contests" element={<ContestsPage />} />
@@ -145,6 +154,14 @@ export function AppRoutes() {
             <ContestAdminRoute>
               <AdminUsersPage />
             </ContestAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/audit"
+          element={
+            <AdminOnlyRoute>
+              <AdminAuditPage />
+            </AdminOnlyRoute>
           }
         />
         <Route path="/discuss" element={<DiscussPage />} />

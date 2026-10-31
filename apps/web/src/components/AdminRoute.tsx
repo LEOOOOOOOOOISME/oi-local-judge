@@ -96,3 +96,34 @@ export function CommunityAdminRoute({ children }: { children: ReactNode }) {
   }
   return <>{children}</>;
 }
+
+/**
+ * 系统审计路由守卫：仅 admin。
+ */
+export function AdminOnlyRoute({ children }: { children: ReactNode }) {
+  const { user, status } = useAuth();
+  const location = useLocation();
+
+  if (status === 'loading') {
+    return <PageLoading tip="正在校验管理权限…" />;
+  }
+  if (!user) {
+    const next = `${location.pathname}${location.search}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
+  if (user.role !== 'admin') {
+    return (
+      <Result
+        status="403"
+        title="无权访问"
+        subTitle="审计日志仅对管理员开放。"
+        extra={
+          <Link to="/admin/problems">
+            <Button type="primary">返回管理后台</Button>
+          </Link>
+        }
+      />
+    );
+  }
+  return <>{children}</>;
+}
