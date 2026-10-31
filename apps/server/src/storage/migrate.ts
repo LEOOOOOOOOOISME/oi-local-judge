@@ -117,6 +117,12 @@ CREATE TABLE IF NOT EXISTS notifications(
   payload_json TEXT NOT NULL DEFAULT '{}', read_at INTEGER, created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, id DESC);
+CREATE TABLE IF NOT EXISTS audit_logs(
+  id INTEGER PRIMARY KEY, actor_id INTEGER, action TEXT NOT NULL,
+  target_type TEXT, target_id TEXT, detail_json TEXT NOT NULL DEFAULT '{}',
+  ip TEXT, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(id DESC);
 `;
 
 export function migrate(db: DatabaseSync): void {
