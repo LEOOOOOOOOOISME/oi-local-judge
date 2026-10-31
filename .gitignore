@@ -13,6 +13,7 @@ release/
 
 # Runtime data (never commit)
 OiJudgeData/
+.devdata/
 *.db
 *.db-wal
 *.db-shm

@@ -2,13 +2,19 @@
   "name": "oi-local-judge",
   "private": true,
   "type": "module",
-  "workspaces": ["apps/*", "packages/*"],
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "build:runner": "node tools/build-runner.mjs",
     "bench": "node tools/bench/run-all.mjs",
+    "seed": "tsx tools/seed/seed.ts",
+    "build": "tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/desktop/tsconfig.json",
+    "start": "node apps/server/dist/cli.js",
     "electron:smoke": "electron tools/electron-smoke.cjs",
     "electron:smoke:flags": "electron --no-sandbox --disable-gpu tools/electron-smoke.cjs",
     "electron:start": "electron apps/desktop/dist/main.js"
@@ -18,5 +24,9 @@
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
+  },
+  "dependencies": {
+    "@types/markdown-it": "^14.2.0",
+    "markdown-it": "^15.0.3"
   }
 }

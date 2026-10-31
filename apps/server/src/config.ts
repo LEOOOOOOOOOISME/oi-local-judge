@@ -8,6 +8,7 @@ export interface Config {
   dataDir: string;
   judgeConcurrency: number;
   gxx: string;
+  runnerPath: string;
   adminUsername: string;
   adminPassword: string;
   sessionSecret: string;
@@ -46,6 +47,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     dataDir,
     judgeConcurrency: Math.max(1, Number(env.OIJ_JUDGE_CONCURRENCY ?? 2)),
     gxx: detectGxx(env),
+    runnerPath: env.OIJ_RUNNER ?? join(process.cwd(), 'native/runner/out/ojrunner.exe'),
     adminUsername: env.OIJ_ADMIN_USERNAME ?? 'admin',
     adminPassword: env.OIJ_ADMIN_PASSWORD ?? 'admin123',
     sessionSecret: env.OIJ_SESSION_SECRET ?? 'dev-only-change-me',
