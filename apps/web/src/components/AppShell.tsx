@@ -5,6 +5,7 @@ import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useRealtime } from '../hooks/useRealtime';
 import { ROLE_LABEL } from '../utils/status';
+import { NotificationBell } from './NotificationBell';
 import { PageLoading } from './PageStates';
 
 function navClass({ isActive }: { isActive: boolean }): string {
@@ -63,10 +64,18 @@ export function AppShell() {
             <NavLink to="/problems" className={navClass}>
               题目
             </NavLink>
+            <NavLink to="/discuss" className={navClass}>
+              讨论
+            </NavLink>
             {user ? (
-              <NavLink to="/records" className={navClass}>
-                我的记录
-              </NavLink>
+              <>
+                <NavLink to="/records" className={navClass}>
+                  我的记录
+                </NavLink>
+                <NavLink to="/messages" className={navClass}>
+                  消息
+                </NavLink>
+              </>
             ) : null}
             {canManage ? (
               <>
@@ -93,13 +102,16 @@ export function AppShell() {
             {status === 'loading' ? (
               <span className="oij-header-muted">…</span>
             ) : user ? (
-              <Dropdown menu={{ items: menuItems, onClick: onMenuClick }} trigger={['click']}>
-                <button type="button" className="oij-user-button">
-                  <Avatar size={22} icon={<UserOutlined />} />
-                  <span className="oij-user-name">{user.realName ?? user.username}</span>
-                  <DownOutlined className="oij-user-caret" />
-                </button>
-              </Dropdown>
+              <>
+                <NotificationBell />
+                <Dropdown menu={{ items: menuItems, onClick: onMenuClick }} trigger={['click']}>
+                  <button type="button" className="oij-user-button">
+                    <Avatar size={22} icon={<UserOutlined />} />
+                    <span className="oij-user-name">{user.realName ?? user.username}</span>
+                    <DownOutlined className="oij-user-caret" />
+                  </button>
+                </Dropdown>
+              </>
             ) : (
               <Link to={`/login?next=${encodeURIComponent('/contests')}`}>
                 <Button size="small" type="primary" ghost>
@@ -115,7 +127,7 @@ export function AppShell() {
           <Outlet />
         </Suspense>
       </main>
-      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 2B</footer>
+      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 3A</footer>
     </div>
   );
 }
