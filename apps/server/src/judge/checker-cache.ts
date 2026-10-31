@@ -26,7 +26,7 @@ export async function ensureChecker(options: CheckerCacheOptions): Promise<Check
   const source = readFileSync(options.sourcePath);
   const key = createHash('sha256')
     .update(source)
-    .update(`\0${options.gxx}\0-std=c++17\0-static\0testlib`)
+    .update(`\0${options.gxx}\0-std=c++17\0shared-runtime\0testlib`)
     .digest('hex');
   const cacheDir = join(options.dataDir, 'cache', 'checkers', key);
   const cachedExe = join(cacheDir, 'checker.exe');
@@ -43,6 +43,7 @@ export async function ensureChecker(options: CheckerCacheOptions): Promise<Check
       outExe: join(tempDir, 'checker.exe'),
       workdir: tempDir,
       language: 'cpp17',
+      staticLink: false,
       extraArgs: options.includeDir ? ['-I', options.includeDir] : [],
     });
     if (!compiled.ok) {

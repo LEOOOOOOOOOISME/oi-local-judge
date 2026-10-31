@@ -26,6 +26,8 @@ export interface CompileOptions {
   timeoutMs?: number;
   /** Extra compiler arguments appended after the defaults. */
   extraArgs?: readonly string[];
+  /** Link libstdc++/libgcc statically (default true; trusted checkers can skip). */
+  staticLink?: boolean;
 }
 
 export interface CompileResult {
@@ -148,7 +150,7 @@ export async function compileSource(options: CompileOptions): Promise<CompileRes
   const args = [
     '-O2',
     '-std=c++17',
-    '-static',
+    ...(options.staticLink === false ? [] : ['-static']),
     '-o',
     options.outExe,
     options.sourcePath,
