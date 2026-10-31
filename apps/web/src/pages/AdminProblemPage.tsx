@@ -294,7 +294,7 @@ export function AdminProblemPage() {
   const basicType = Form.useWatch('type', basicForm);
   const [objectiveDraft, setObjectiveDraft] = useState<ObjectiveQuestion[]>([]);
   const [savingObjective, setSavingObjective] = useState(false);
-  const [exporting, setExporting] = useState<'oi' | 'cena' | null>(null);
+  const [exporting, setExporting] = useState<'oi' | 'cena' | 'lemon' | null>(null);
   const objectiveInitializedRef = useRef(false);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidateResult | null>(null);
@@ -649,15 +649,22 @@ export function AdminProblemPage() {
     }
   };
 
-  const downloadProblemExport = async (format: 'oi' | 'cena') => {
+  const downloadProblemExport = async (format: 'oi' | 'cena' | 'lemon') => {
     setExporting(format);
     try {
-      const response = await fetch(
-        `/api/admin/problems/${problemId}/${format === 'cena' ? 'export-cena' : 'export'}`,
-        { credentials: 'include' },
-      );
+      const endpoint =
+        format === 'cena' ? 'export-cena' : format === 'lemon' ? 'export-lemon' : 'export';
+      const response = await fetch(`/api/admin/problems/${problemId}/${endpoint}`, {
+        credentials: 'include',
+      });
       if (!response.ok) {
-        message.error(format === 'cena' ? '导出 Cena 题包失败' : '导出 OI 题包失败');
+        message.error(
+          format === 'cena'
+            ? '导出 Cena 题包失败'
+            : format === 'lemon'
+              ? '导出 Lemon 题包失败'
+              : '导出 OI 题包失败',
+        );
         return;
       }
       const blob = await response.blob();
@@ -665,12 +672,22 @@ export function AdminProblemPage() {
       const anchor = document.createElement('a');
       anchor.href = url;
       anchor.download =
-        format === 'cena' ? `cena-${problemId}.zip` : `problem-${problemId}.zip`;
+        format === 'cena'
+          ? `cena-${problemId}.zip`
+          : format === 'lemon'
+            ? `lemon-${problemId}.zip`
+            : `problem-${problemId}.zip`;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();
       URL.revokeObjectURL(url);
-      message.success(format === 'cena' ? 'Cena 题包已导出' : 'OI 题包已导出');
+      message.success(
+        format === 'cena'
+          ? 'Cena 题包已导出'
+          : format === 'lemon'
+            ? 'Lemon 题包已导出'
+            : 'OI 题包已导出',
+      );
     } catch (error) {
       message.error(error instanceof Error ? error.message : '导出失败');
     } finally {
@@ -1924,6 +1941,13 @@ export function AdminProblemPage() {
               onClick={() => void downloadProblemExport('cena')}
             >
               导出 Cena 题包
+            </Button>
+            <Button
+              loading={exporting === 'lemon'}
+              disabled={exporting !== null}
+              onClick={() => void downloadProblemExport('lemon')}
+            >
+              导出 Lemon 题包
             </Button>
             {problem.visibility === 'public' ? (
               <Link to={`/problem/${problem.id}`}>

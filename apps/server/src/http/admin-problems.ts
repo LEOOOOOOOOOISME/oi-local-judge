@@ -28,6 +28,7 @@ import {
 } from '../storage/repos/problems.js';
 import { getProblemDetail, importProblemDirectory, problemToSummary } from '../services/problems.js';
 import { importCenaProblem } from '../services/cena.js';
+import { buildCdf, importLemonProblem } from '../services/lemon.js';
 
 const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
 const ALLOWED_SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx', '.c', '.py', '.exe', '.txt']);
@@ -173,6 +174,56 @@ export function registerAdminProblemRoutes(
     },
   );
 
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/problems/:id/export-lemon',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      const problem = getProblem(options.db, problemId);
+      if (!problem) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      const files: Record<string, Uint8Array> = {};
+      const usedNames = new Set<string>();
+      const points: number[] = [];
+      for (const testcase of listAllTestcases(options.db, problemId)) {
+        let inputName = basename(testcase.input_path);
+        let outputName = basename(testcase.output_path);
+        if (usedNames.has(inputName) || usedNames.has(outputName)) {
+          inputName = `${testcase.id}-${inputName}`;
+          outputName = `${testcase.id}-${outputName}`;
+        }
+        usedNames.add(inputName);
+        usedNames.add(outputName);
+        files[`data/${inputName}`] = readFileSync(join(options.config.dataDir, testcase.input_path));
+        files[`data/${outputName}`] = readFileSync(join(options.config.dataDir, testcase.output_path));
+        points.push(testcase.points);
+      }
+      const assetNames: Record<string, string> = {
+        std: 'std.cpp',
+        checker: 'checker.cpp',
+        generator: 'maker.cpp',
+      };
+      for (const asset of listAssets(options.db, problemId)) {
+        const target = assetNames[asset.kind];
+        if (target) files[target] = readFileSync(join(options.config.dataDir, asset.path));
+      }
+      files['problem.cdf'] = new TextEncoder().encode(
+        buildCdf({
+          name: problem.title,
+          timeMs: problem.time_ms,
+          memoryMb: problem.memory_mb,
+          inputFile: problem.input_file,
+          outputFile: problem.output_file,
+          points,
+        }),
+      );
+      const zip = zipSync(files, { level: 6 });
+      return reply
+        .header('content-type', 'application/zip')
+        .header('content-disposition', `attachment; filename="lemon-${problemId}.zip"`)
+        .send(Buffer.from(zip));
+    },
+  );
+
   app.post(
     '/api/admin/problems/import-zip',
     { preHandler: guard, bodyLimit: 100 * 1024 * 1024 },
@@ -218,13 +269,22 @@ export function registerAdminProblemRoutes(
             });
             return reply.code(201).send({ ok: true, data: { id, format: 'cena' } });
           } catch (err) {
-            return reply.code(400).send({
-              ok: false,
-              error: {
-                code: 'NO_MANIFEST',
-                message: `problem.json not found and Cena import failed: ${(err as Error).message}`,
-              },
-            });
+            try {
+              const id = importLemonProblem({
+                db: options.db,
+                config: options.config,
+                sourceDir: root,
+              });
+              return reply.code(201).send({ ok: true, data: { id, format: 'lemon' } });
+            } catch (lemonErr) {
+              return reply.code(400).send({
+                ok: false,
+                error: {
+                  code: 'NO_MANIFEST',
+                  message: `problem.json not found; Cena: ${(err as Error).message}; Lemon: ${(lemonErr as Error).message}`,
+                },
+              });
+            }
           }
         }
         const id = importProblemDirectory({ db: options.db, config: options.config, sourceDir: root });
