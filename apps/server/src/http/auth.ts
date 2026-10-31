@@ -11,6 +11,18 @@ import {
   serializeSessionCookie,
 } from '../security/auth.js';
 import { login, logout, me } from '../services/auth.js';
+import { recordAudit } from '../storage/repos/audit.js';
+
+const loginFailures = new Map<string, number[]>();
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+const LOGIN_MAX_FAILURES = 5;
+
+function tooManyFailures(key: string): boolean {
+  const now = Date.now();
+  const recent = (loginFailures.get(key) ?? []).filter((value) => now - value < LOGIN_WINDOW_MS);
+  loginFailures.set(key, recent);
+  return recent.length >= LOGIN_MAX_FAILURES;
+}
 
 export interface AuthRoutesOptions {
   db: DatabaseSync;
@@ -40,11 +52,36 @@ export async function registerAuthRoutes(
 
     const result = login(db, config, username, password);
     if (!result) {
+      const key = `${request.ip}:${username.toLowerCase()}`;
+      const failures = loginFailures.get(key) ?? [];
+      failures.push(Date.now());
+      loginFailures.set(key, failures);
+      recordAudit(db, {
+        action: 'auth.login_failed',
+        detail: { username },
+        ip: request.ip,
+      });
+      if (tooManyFailures(key)) {
+        reply.header('retry-after', '600');
+        return reply.code(429).send({
+          ok: false,
+          error: { code: 'TOO_MANY_ATTEMPTS', message: 'too many failed logins, try again later' },
+        });
+      }
       return reply.code(401).send({
         ok: false,
         error: { code: 'INVALID_CREDENTIALS', message: 'invalid username or password' },
       });
     }
+
+    loginFailures.delete(`${request.ip}:${username.toLowerCase()}`);
+    recordAudit(db, {
+      actorId: result.user.id,
+      action: 'auth.login',
+      targetType: 'user',
+      targetId: result.user.id,
+      ip: request.ip,
+    });
 
     reply.header('set-cookie', serializeSessionCookie(result.token, config.sessionTtlSec));
     reply.header('cache-control', 'no-store');

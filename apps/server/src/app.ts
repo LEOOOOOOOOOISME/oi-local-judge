@@ -15,6 +15,8 @@ import { registerAdminUserRoutes } from './http/admin-users.js';
 import { registerCommunityRoutes } from './http/community.js';
 import { registerContestRoutes } from './http/contests.js';
 import { registerSubmissionRoutes } from './http/submissions.js';
+import { registerAdminSystemRoutes } from './http/admin-system.js';
+import { recordAudit } from './storage/repos/audit.js';
 import { createHub, type Hub } from './realtime/hub.js';
 import { authenticateRequest, requireRole } from './security/auth.js';
 import { migrate } from './storage/migrate.js';
@@ -35,6 +37,17 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   const hub = opts.hub ?? createHub();
 
   const app = Fastify({ logger: opts.logger ?? false });
+  app.addHook('onResponse', async (request, reply) => {
+    if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return;
+    if (!request.url.startsWith('/api/admin')) return;
+    if (!request.user) return;
+    recordAudit(db, {
+      actorId: request.user.id,
+      action: `${request.method} ${request.url.split('?')[0]}`,
+      detail: { statusCode: reply.statusCode },
+      ip: request.ip,
+    });
+  });
   app.addContentTypeParser(
     ['application/octet-stream', 'application/zip'],
     { parseAs: 'buffer', bodyLimit: 80 * 1024 * 1024 },
@@ -69,7 +82,10 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
   });
   registerCommunityRoutes(app, { db, config });
-  registerContestRoutes(app, {
+  registerAdminSystemRoutes(app, {
+    db,
+    adminGuard: requireRole(['admin'], { db, config }),
+  });  registerContestRoutes(app, {
     db,
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
   });
