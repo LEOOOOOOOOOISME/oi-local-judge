@@ -2,7 +2,7 @@
 
 Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手端，支持比赛模式、Special Judge、交互题、子任务、客观题组卷、榜单与数据分析。
 
-> 状态：Phase 0/1A/1B/1C/1D–1F/1G–1H 已完成；Web 端可完整跑通"登录 → 比赛 → 题目 → 提交 → 评测 → 榜单"；管理端可创建/编辑题目、上传 7 类资产、zip 导入数据、validator/std 自测、generator 造数据、std/brute 对拍、zip 批量评测（含目录层级映射与 CSV 导出）。Electron 壳在开发沙箱中无法启动，待目标机复验。
+> 状态：Phase 0/1A–1H/2A 已完成；Web 端可完整跑通"登录 → 比赛 → 题目 → 提交 → 评测 → 榜单"；管理端覆盖题目/资产/数据/校验/造数据/对拍/批量评测、比赛控制台、参赛者与班级统计、用户管理。Electron 壳在开发沙箱中无法启动，待目标机复验。
 
 ## 文档
 
@@ -14,6 +14,7 @@ Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手�
 - [Phase 1C 结果](docs/research/phase-1c-results.md)：文件 IO/SPJ/子任务/缓存/比赛详情/懒加载
 - [Phase 1D–1F 结果](docs/research/phase-1d-admin-visual-results.md)：管理端、资产上传、validator/std 自测、可见性
 - [Phase 1G–1H 结果](docs/research/phase-1g-batch-results.md)：generator 造数据、对拍、批量评测向导
+- [Phase 2A 结果](docs/research/phase-2a-contest-user-results.md)：比赛控制台、参赛者、班级统计、用户管理
 - [前人实现调研](docs/research/prior-art.md)：Lemon/Hydro/UOJ/testlib 的可复用性与许可证结论
 
 ## 快速开始（Windows）

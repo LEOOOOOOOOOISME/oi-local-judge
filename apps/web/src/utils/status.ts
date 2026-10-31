@@ -10,6 +10,18 @@ export const CONTEST_PHASE_LABEL: Record<ContestPhase, string> = {
   ended: '已结束',
 };
 
+/** 管理端直接展示数据库中的比赛状态。 */
+export const ADMIN_CONTEST_STATUS_LABEL: Record<string, string> = {
+  draft: '草稿',
+  running: '进行中',
+  frozen: '已封榜',
+  ended: '已结束',
+};
+
+export function contestStatusLabel(status: string): string {
+  return ADMIN_CONTEST_STATUS_LABEL[status] ?? status;
+}
+
 /** 比赛阶段以起止时间为准；status 只用于封榜等人工状态。 */
 export function contestPhase(
   contest: Pick<Contest, 'start_at' | 'end_at' | 'status'>,

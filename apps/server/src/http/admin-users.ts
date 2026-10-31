@@ -66,4 +66,45 @@ export function registerAdminUserRoutes(
     });
     return reply.code(201).send({ ok: true, data: { id } });
   });
+
+  app.post<{
+    Body: { csv?: string; defaultPassword?: string };
+  }>('/api/admin/users/import', { preHandler: options.adminGuard }, async (request, reply) => {
+    const text = request.body?.csv;
+    if (!text || typeof text !== 'string') {
+      return reply.code(400).send({ ok: false, error: { code: 'EMPTY_CSV' } });
+    }
+    const defaultPassword = request.body?.defaultPassword ?? '123456';
+    const created: string[] = [];
+    const skipped: string[] = [];
+    const errors: Array<{ line: number; message: string }> = [];
+    const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((line) => line.trim() !== '');
+    lines.forEach((line, index) => {
+      if (index === 0 && /username|用户名/i.test(line)) return;
+      const parts = line.split(',').map((part) => part.trim());
+      const username = parts[0];
+      const password = parts[1] || defaultPassword;
+      if (!username) {
+        errors.push({ line: index + 1, message: 'missing username' });
+        return;
+      }
+      if (password.length < 4) {
+        errors.push({ line: index + 1, message: 'password too short' });
+        return;
+      }
+      if (getUserByUsername(options.db, username)) {
+        skipped.push(username);
+        return;
+      }
+      createUser(options.db, {
+        username,
+        passwordHash: hashPassword(password),
+        realName: parts[2] || null,
+        className: parts[3] || null,
+        role: parts[4] === 'admin' || parts[4] === 'setter' ? parts[4] : 'contestant',
+      });
+      created.push(username);
+    });
+    return { ok: true, data: { created, skipped, errors } };
+  });
 }
