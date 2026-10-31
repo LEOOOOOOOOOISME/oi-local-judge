@@ -8,7 +8,10 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "build:runner": "node tools/build-runner.mjs",
-    "bench": "node tools/bench/run-all.mjs"
+    "bench": "node tools/bench/run-all.mjs",
+    "electron:smoke": "electron tools/electron-smoke.cjs",
+    "electron:smoke:flags": "electron --no-sandbox --disable-gpu tools/electron-smoke.cjs",
+    "electron:start": "electron apps/desktop/dist/main.js"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
