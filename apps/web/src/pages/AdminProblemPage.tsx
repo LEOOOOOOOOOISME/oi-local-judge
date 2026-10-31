@@ -1862,6 +1862,26 @@ export function AdminProblemPage() {
         )}`}
         extra={
           <Space>
+            <Button
+              onClick={async () => {
+                const response = await fetch(`/api/admin/problems/${problem.id}/export`, {
+                  credentials: 'include',
+                });
+                if (!response.ok) {
+                  message.error('导出题包失败');
+                  return;
+                }
+                const blob = await response.blob();
+                const url = URL.createObjectURL(blob);
+                const anchor = document.createElement('a');
+                anchor.href = url;
+                anchor.download = `problem-${problem.id}.zip`;
+                anchor.click();
+                URL.revokeObjectURL(url);
+              }}
+            >
+              导出题包
+            </Button>
             {problem.visibility === 'public' ? (
               <Link to={`/problem/${problem.id}`}>
                 <Button>前台查看</Button>
