@@ -1,6 +1,6 @@
-import { useMemo } from 'react';
-import { Button, Card, Empty, Result, Spin, Tag } from 'antd';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useEffect, useMemo, useState } from 'react';
+import { Button, Card, Empty, Result, Spin, Tabs, Tag } from 'antd';
+import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
 import type {
@@ -11,6 +11,7 @@ import type {
   Submission,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { ContestClarifications } from '../components/ContestClarifications';
 import { ContestCountdown } from '../components/Countdown';
 import { MetaList } from '../components/MetaList';
 import { PageHead } from '../components/PageHead';
@@ -41,6 +42,22 @@ export function ContestOverviewPage() {
   const { user } = useAuth();
   const navigate = useNavigate();
   const now = useNow(1000);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [activeTab, setActiveTab] = useState(
+    searchParams.get('tab') === 'clarifications' ? 'clarifications' : 'overview',
+  );
+
+  useEffect(() => {
+    if (searchParams.get('tab') === 'clarifications') setActiveTab('clarifications');
+  }, [searchParams]);
+
+  const handleTabChange = (key: string) => {
+    setActiveTab(key);
+    const next = new URLSearchParams(searchParams);
+    if (key === 'clarifications') next.set('tab', 'clarifications');
+    else next.delete('tab');
+    setSearchParams(next, { replace: true });
+  };
 
   // 首选比赛详情接口（比赛元信息 + 题目/分值 + 参赛人数）。
   const detailQuery = useQuery({
@@ -224,7 +241,16 @@ export function ContestOverviewPage() {
         }
       />
 
-      <div className="content-grid">
+      <Tabs
+        className="problem-tabs contest-tabs"
+        activeKey={activeTab}
+        onChange={handleTabChange}
+        items={[
+          {
+            key: 'overview',
+            label: '比赛信息',
+            children: (
+              <div className="content-grid">
         <div className="stack">
           <Card
             className="oij-card"
@@ -341,7 +367,16 @@ export function ContestOverviewPage() {
             </Button>
           </Card>
         </div>
-      </div>
+              </div>
+            ),
+          },
+          {
+            key: 'clarifications',
+            label: '答疑',
+            children: <ContestClarifications contestId={contest.id} />,
+          },
+        ]}
+      />
     </div>
   );
 }

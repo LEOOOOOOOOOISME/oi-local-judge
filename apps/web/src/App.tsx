@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { AdminRoute, ContestAdminRoute } from './components/AdminRoute';
+import { AdminRoute, CommunityAdminRoute, ContestAdminRoute } from './components/AdminRoute';
 import { AppShell } from './components/AppShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
@@ -56,6 +56,18 @@ const AdminContestConsolePage = lazy(() =>
 );
 const AdminUsersPage = lazy(() =>
   import('./pages/AdminUsersPage').then((module) => ({ default: module.AdminUsersPage })),
+);
+const DiscussPage = lazy(() =>
+  import('./pages/DiscussPage').then((module) => ({ default: module.DiscussPage })),
+);
+const DiscussPostPage = lazy(() =>
+  import('./pages/DiscussPostPage').then((module) => ({ default: module.DiscussPostPage })),
+);
+const AdminPostsPage = lazy(() =>
+  import('./pages/AdminPostsPage').then((module) => ({ default: module.AdminPostsPage })),
+);
+const MessagesPage = lazy(() =>
+  import('./pages/MessagesPage').then((module) => ({ default: module.MessagesPage })),
 );
 
 export function AppRoutes() {
@@ -133,6 +145,24 @@ export function AppRoutes() {
             <ContestAdminRoute>
               <AdminUsersPage />
             </ContestAdminRoute>
+          }
+        />
+        <Route path="/discuss" element={<DiscussPage />} />
+        <Route path="/discuss/:postId" element={<DiscussPostPage />} />
+        <Route
+          path="/messages"
+          element={
+            <ProtectedRoute>
+              <MessagesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/posts"
+          element={
+            <CommunityAdminRoute>
+              <AdminPostsPage />
+            </CommunityAdminRoute>
           }
         />
         <Route path="*" element={<NotFoundPage />} />

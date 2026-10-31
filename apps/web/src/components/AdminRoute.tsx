@@ -65,3 +65,34 @@ export function ContestAdminRoute({ children }: { children: ReactNode }) {
   }
   return <>{children}</>;
 }
+
+/**
+ * 社区审核路由守卫：admin / setter / contestmanager 可进。
+ */
+export function CommunityAdminRoute({ children }: { children: ReactNode }) {
+  const { user, status } = useAuth();
+  const location = useLocation();
+
+  if (status === 'loading') {
+    return <PageLoading tip="正在校验管理权限…" />;
+  }
+  if (!user) {
+    const next = `${location.pathname}${location.search}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
+  if (!['admin', 'setter', 'contestmanager'].includes(user.role)) {
+    return (
+      <Result
+        status="403"
+        title="无权访问"
+        subTitle="社区审核仅对管理员、出题人和比赛管理员开放。"
+        extra={
+          <Link to="/discuss">
+            <Button type="primary">返回讨论区</Button>
+          </Link>
+        }
+      />
+    );
+  }
+  return <>{children}</>;
+}

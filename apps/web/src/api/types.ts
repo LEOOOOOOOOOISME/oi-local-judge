@@ -418,6 +418,119 @@ export interface RankingRow {
   className: string | null;
 }
 
+// Phase 3A：讨论区 / 答疑 / 私信 / 通知。
+
+export type PostCategory = 'discuss' | 'solution' | 'announcement';
+
+export interface CommunityAuthor {
+  id: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+}
+
+export interface PostSummary {
+  id: number;
+  category: PostCategory;
+  title: string;
+  author: CommunityAuthor;
+  problemId: number | null;
+  contestId: number | null;
+  pinned: boolean;
+  locked: boolean;
+  status?: string;
+  createdAt: number;
+}
+
+export interface PostComment {
+  id: number;
+  bodyHtml: string;
+  author: CommunityAuthor;
+  createdAt: number;
+}
+
+export interface PostDetail {
+  id: number;
+  category: PostCategory;
+  title: string;
+  bodyHtml: string;
+  author: CommunityAuthor;
+  problemId: number | null;
+  contestId: number | null;
+  pinned: boolean;
+  locked: boolean;
+  createdAt: number;
+  comments: PostComment[];
+}
+
+export interface CreatePostRequest {
+  category: PostCategory;
+  title: string;
+  body: string;
+  problemId?: number | null;
+  contestId?: number | null;
+}
+
+export interface CreatePostResult {
+  id: number;
+  status: string;
+}
+
+/** 管理端审核列表直接返回数据库行。 */
+export interface AdminPostRow {
+  id: number;
+  category: PostCategory;
+  title: string;
+  body_md: string;
+  problem_id: number | null;
+  contest_id: number | null;
+  author_id: number;
+  status: 'pending' | 'published' | 'hidden';
+  pinned: number;
+  locked: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface Clarification {
+  id: number;
+  question: string;
+  answer: string | null;
+  isPublic: boolean;
+  user: CommunityAuthor;
+  createdAt: number;
+  answeredAt: number | null;
+}
+
+export interface ConversationPartner {
+  user: CommunityAuthor;
+  lastMessage: string;
+  lastAt: number;
+  unread: number;
+}
+
+export interface DirectMessage {
+  id: number;
+  senderId: number;
+  recipientId: number;
+  body: string;
+  createdAt: number;
+  readAt: number | null;
+}
+
+export interface ConversationThread {
+  user: CommunityAuthor;
+  messages: DirectMessage[];
+}
+
+export interface NotificationItem {
+  id: number;
+  type: string;
+  payload: unknown;
+  readAt: number | null;
+  createdAt: number;
+}
+
 export interface WsMessage {
   v?: number;
   type: string;
