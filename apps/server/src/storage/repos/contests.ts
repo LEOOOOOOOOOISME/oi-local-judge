@@ -56,6 +56,86 @@ export function setContestStatus(db: DatabaseSync, id: number, status: string): 
   db.prepare('UPDATE contests SET status = ? WHERE id = ?').run(status, id);
 }
 
+export interface UpdateContestPatch {
+  name?: string;
+  mode?: string;
+  startAt?: number | null;
+  endAt?: number | null;
+  freezeAt?: number | null;
+  unfreezeAt?: number | null;
+  rulesJson?: string;
+}
+
+export function updateContest(db: DatabaseSync, id: number, patch: UpdateContestPatch): boolean {
+  const sets: string[] = [];
+  const values: Array<string | number | null> = [];
+  const add = (column: string, value: string | number | null | undefined) => {
+    if (value === undefined) return;
+    sets.push(`${column} = ?`);
+    values.push(value);
+  };
+  add('name', patch.name);
+  add('mode', patch.mode);
+  add('start_at', patch.startAt);
+  add('end_at', patch.endAt);
+  add('freeze_at', patch.freezeAt);
+  add('unfreeze_at', patch.unfreezeAt);
+  add('rules_json', patch.rulesJson);
+  if (sets.length === 0) return false;
+  const result = db
+    .prepare(`UPDATE contests SET ${sets.join(', ')} WHERE id = ?`)
+    .run(...values, id);
+  return Number(result.changes) > 0;
+}
+
+export function setContestProblems(
+  db: DatabaseSync,
+  contestId: number,
+  entries: Array<{ problemId: number; points: number }>,
+): void {
+  db.prepare('DELETE FROM contest_problems WHERE contest_id = ?').run(contestId);
+  const insert = db.prepare(
+    'INSERT INTO contest_problems(contest_id, problem_id, ordinal, points) VALUES (?, ?, ?, ?)',
+  );
+  entries.forEach((entry, index) => {
+    insert.run(contestId, entry.problemId, index + 1, entry.points);
+  });
+}
+
+export function listContestParticipants(
+  db: DatabaseSync,
+  contestId: number,
+): Array<{
+  user_id: number;
+  username: string;
+  real_name: string | null;
+  class_name: string | null;
+  status: string;
+  extra_time: number;
+}> {
+  return db
+    .prepare(
+      `SELECT p.user_id, u.username, u.real_name, u.class_name, p.status, p.extra_time
+       FROM contest_participants p JOIN users u ON u.id = p.user_id
+       WHERE p.contest_id = ? ORDER BY u.class_name, u.username`,
+    )
+    .all(contestId) as unknown as Array<{
+    user_id: number;
+    username: string;
+    real_name: string | null;
+    class_name: string | null;
+    status: string;
+    extra_time: number;
+  }>;
+}
+
+export function removeParticipant(db: DatabaseSync, contestId: number, userId: number): void {
+  db.prepare('DELETE FROM contest_participants WHERE contest_id = ? AND user_id = ?').run(
+    contestId,
+    userId,
+  );
+}
+
 export function getContestProblemIds(db: DatabaseSync, contestId: number): number[] {
   return (
     db

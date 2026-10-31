@@ -101,8 +101,53 @@ export function startContest(db: DatabaseSync, contestId: number): void {
 
 export function freezeContest(db: DatabaseSync, contestId: number): void {
   setContestStatus(db, contestId, 'frozen');
+  db.prepare('UPDATE contests SET freeze_at = ? WHERE id = ? AND freeze_at IS NULL').run(
+    Date.now(),
+    contestId,
+  );
+}
+
+export function unfreezeContest(db: DatabaseSync, contestId: number): void {
+  setContestStatus(db, contestId, 'running');
+  db.prepare('UPDATE contests SET unfreeze_at = ? WHERE id = ?').run(Date.now(), contestId);
 }
 
 export function endContest(db: DatabaseSync, contestId: number): void {
   setContestStatus(db, contestId, 'ended');
+}
+
+export interface ClassStatRow {
+  className: string;
+  participants: number;
+  totalScore: number;
+  averageScore: number;
+  acParticipants: number;
+  bestRank: number;
+}
+
+export function getClassStats(db: DatabaseSync, contestId: number): ClassStatRow[] | null {
+  const ranking = getContestRanking(db, contestId);
+  if (!ranking) return null;
+  const groups = new Map<string, { scores: number[]; ac: number; best: number }>();
+  for (const row of ranking.rows) {
+    const key = row.className?.trim() || '未分班';
+    const group = groups.get(key) ?? { scores: [], ac: 0, best: Number.MAX_SAFE_INTEGER };
+    group.scores.push(row.totalScore);
+    if (row.solved > 0) group.ac += 1;
+    group.best = Math.min(group.best, row.rank);
+    groups.set(key, group);
+  }
+  return [...groups.entries()]
+    .map(([className, group]) => ({
+      className,
+      participants: group.scores.length,
+      totalScore: group.scores.reduce((sum, value) => sum + value, 0),
+      averageScore:
+        Math.round(
+          (group.scores.reduce((sum, value) => sum + value, 0) / group.scores.length) * 10,
+        ) / 10,
+      acParticipants: group.ac,
+      bestRank: group.best,
+    }))
+    .sort((a, b) => b.averageScore - a.averageScore || a.className.localeCompare(b.className));
 }
