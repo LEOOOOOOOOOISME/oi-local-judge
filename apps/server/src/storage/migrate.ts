@@ -87,6 +87,36 @@ CREATE TABLE IF NOT EXISTS batch_items(
   FOREIGN KEY(batch_id) REFERENCES batch_jobs(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_batch_items_batch ON batch_items(batch_id);
+CREATE TABLE IF NOT EXISTS posts(
+  id INTEGER PRIMARY KEY, category TEXT NOT NULL, title TEXT NOT NULL,
+  body_md TEXT NOT NULL, problem_id INTEGER, contest_id INTEGER,
+  author_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'published',
+  pinned INTEGER NOT NULL DEFAULT 0, locked INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_posts_list ON posts(status, category, id DESC);
+CREATE TABLE IF NOT EXISTS comments(
+  id INTEGER PRIMARY KEY, post_id INTEGER NOT NULL, author_id INTEGER NOT NULL,
+  body_md TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'published',
+  created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_comments_post ON comments(post_id, id);
+CREATE TABLE IF NOT EXISTS clarifications(
+  id INTEGER PRIMARY KEY, contest_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
+  question TEXT NOT NULL, answer TEXT, is_public INTEGER NOT NULL DEFAULT 1,
+  answered_by INTEGER, created_at INTEGER NOT NULL, answered_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_clarifications_contest ON clarifications(contest_id, id);
+CREATE TABLE IF NOT EXISTS messages(
+  id INTEGER PRIMARY KEY, sender_id INTEGER NOT NULL, recipient_id INTEGER NOT NULL,
+  body TEXT NOT NULL, read_at INTEGER, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_messages_pair ON messages(sender_id, recipient_id, id);
+CREATE TABLE IF NOT EXISTS notifications(
+  id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL, type TEXT NOT NULL,
+  payload_json TEXT NOT NULL DEFAULT '{}', read_at INTEGER, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id, id DESC);
 `;
 
 export function migrate(db: DatabaseSync): void {
