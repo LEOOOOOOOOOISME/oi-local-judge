@@ -82,6 +82,7 @@ export function isPendingStatus(status: SubmissionStatus | undefined): boolean {
 export function languageLabel(language: string): string {
   if (language === 'cpp17') return 'C++17';
   if (language === 'c11') return 'C11';
+  if (language === 'objective') return '客观题';
   return language.toUpperCase();
 }
 

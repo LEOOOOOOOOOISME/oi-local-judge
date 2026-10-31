@@ -10,7 +10,13 @@ import { openDatabase } from '../src/storage/db.js';
 
 const dirs: string[] = [];
 afterEach(() => {
-  for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  for (const dir of dirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    } catch {
+      // Windows may briefly lock SQLite/WAL files after close.
+    }
+  }
 });
 
 function setup() {
@@ -39,7 +45,7 @@ describe('problem import and read API', () => {
     expect(list.json().data).toHaveLength(1);
 
     const detail = await app.inject({ method: 'GET', url: `/api/problems/${imported.data.id}` });
-    expect(detail.statusCode).toBe(200);
+    expect(detail.statusCode, detail.body).toBe(200);
     const body = detail.json() as {
       data: {
         title: string;

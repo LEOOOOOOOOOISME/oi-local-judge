@@ -85,6 +85,7 @@ export function AdminProblemsPage() {
         inputFile: values.ioMode === 'file' ? values.inputFile?.trim() || null : null,
         outputFile: values.ioMode === 'file' ? values.outputFile?.trim() || null : null,
         statement: values.statement ?? '',
+        ...(values.type === 'objective' ? { objective: { questions: [] } } : {}),
       };
       return apiPost<CreateProblemResult>('/api/admin/problems', payload);
     },

@@ -4,9 +4,11 @@ import { CopyOutlined } from '@ant-design/icons';
 export function CodeBlock({
   code,
   maxHeight,
+  title = '源代码',
 }: {
   code: string;
   maxHeight?: number;
+  title?: string;
 }) {
   const { message } = App.useApp();
   const lines = code.length > 0 ? code.split('\n') : [''];
@@ -23,7 +25,7 @@ export function CodeBlock({
   return (
     <div className="code-view">
       <div className="code-view-bar">
-        <span className="code-view-title">源代码</span>
+        <span className="code-view-title">{title}</span>
         <Button
           type="text"
           size="small"

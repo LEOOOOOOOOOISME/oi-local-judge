@@ -49,6 +49,36 @@ export interface Sample {
 
 export type ProblemType = 'standard' | 'file-io' | 'interactive' | 'output-only' | 'objective';
 
+export type ObjectiveQuestionKind = 'single' | 'multiple' | 'judge' | 'fill';
+
+export interface ObjectiveOption {
+  key: string;
+  text: string;
+}
+
+export interface ObjectiveQuestion {
+  id: number;
+  kind: ObjectiveQuestionKind;
+  stem: string;
+  options?: ObjectiveOption[];
+  answers?: string[];
+  points: number;
+  partial?: boolean;
+  ignoreCase?: boolean;
+  ignoreWhitespace?: boolean;
+}
+
+export interface ObjectiveConfig {
+  questions: ObjectiveQuestion[];
+}
+
+export type ObjectiveAnswerValue = string | string[];
+
+export interface ObjectiveAnswer {
+  questionId: number;
+  value: ObjectiveAnswerValue;
+}
+
 export interface ProblemSummary {
   id: number;
   title: string;
@@ -68,6 +98,7 @@ export interface ProblemDetail extends ProblemSummary {
   visibility: 'public' | 'hidden';
   statementHtml: string;
   samples: Sample[];
+  objective?: ObjectiveConfig;
 }
 
 /** Phase 1F 管理端列表项（包含隐藏题与可见性）。 */
@@ -90,6 +121,7 @@ export interface UpdateProblemRequest {
   visibility?: 'public' | 'hidden';
   checkerMode?: 'builtin' | 'testlib' | 'lemon';
   compareMode?: string;
+  objective?: ObjectiveConfig;
 }
 
 export interface ValidateTestcaseResult {
@@ -360,6 +392,7 @@ export interface CreateProblemRequest {
   inputFile?: string | null;
   outputFile?: string | null;
   statement?: string;
+  objective?: ObjectiveConfig;
 }
 
 export interface CreateProblemResult {
