@@ -1,4 +1,4 @@
-/* Phase 1D 管理端样式（仅随管理端懒加载 chunk 加载） */
+/* Phase 1D/1E 管理端样式（仅随管理端懒加载 chunk 加载） */
 
 .admin-tabs > .ant-tabs-nav {
   margin-bottom: 14px;
@@ -8,6 +8,81 @@
   max-height: 520px;
   overflow: auto;
   padding: 2px;
+}
+
+.basic-form-footer {
+  margin-top: -2px;
+  font-size: 12px;
+}
+
+.validator-hint {
+  margin-bottom: 10px;
+  font-size: 12px;
+}
+
+.selftest-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1200px) {
+  .selftest-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.validator-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.validator-alert {
+  margin: 10px 0;
+}
+
+.validator-result {
+  margin-top: 12px;
+}
+
+.validator-summary {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.validator-summary-ok {
+  border-color: #c8e9d5;
+  background: #ecf8f1;
+}
+
+.validator-summary-warn {
+  border-color: #f0e2b8;
+  background: #fdf8e8;
+}
+
+.validator-summary-main {
+  font-family: var(--mono);
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.validator-message {
+  display: inline-block;
+  max-width: 760px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
 }
 
 .asset-grid {

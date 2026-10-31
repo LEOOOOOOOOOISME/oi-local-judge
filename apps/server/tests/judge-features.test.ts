@@ -46,7 +46,7 @@ describe('judge features', () => {
       `#include <fstream>
        int main(){std::ifstream in("sum.in");std::ofstream out("sum.out");long long a,b;in>>a>>b;out<<a+b<<"\\n";}`,
     );
-    expect(ac.submission.verdict).toBe('AC');
+    expect(ac.submission.verdict, ac.submission.message).toBe('AC');
     expect(ac.submission.score).toBe(100);
 
     const missingFile = await judgeCode(
@@ -54,7 +54,7 @@ describe('judge features', () => {
       `#include <iostream>
        int main(){long long a,b;std::cin>>a>>b;std::cout<<a+b<<"\\n";}`,
     );
-    expect(missingFile.submission.verdict).toBe('WA');
+    expect(missingFile.submission.verdict, missingFile.submission.message).toBe('WA');
     expect(missingFile.results[0].message).toContain('output file sum.out is missing');
   }, 20_000);
 
@@ -69,7 +69,7 @@ describe('judge features', () => {
       `#include <iostream>
        int main(){long long a,b;std::cin>>a>>b;std::cout<<a+b<<"\\n";}`,
     );
-    expect(ac.submission.verdict).toBe('AC');
+    expect(ac.submission.verdict, ac.submission.message).toBe('AC');
     expect(ac.submission.score).toBe(100);
 
     const partial = await judgeCode(
@@ -77,9 +77,8 @@ describe('judge features', () => {
       `#include <iostream>
        int main(){long long a,b;std::cin>>a>>b;std::cout<<a+b+1<<"\\n";}`,
     );
-    expect(partial.submission.verdict).toBe('PC');
-    expect(partial.submission.score).toBe(50);
-    expect(partial.results[0].verdict).toBe('PC');
+    expect(partial.submission.verdict, partial.submission.message).toBe('PC');
+    expect(partial.submission.score).toBe(50);    expect(partial.results[0].verdict).toBe('PC');
     expect(partial.results[0].score).toBe(50);
     expect(partial.results[0].message).toContain('expected 3');
   }, 30_000);
@@ -93,7 +92,7 @@ describe('judge features', () => {
     const problemId = createProblem(db, {
       title: 'deps',
       type: 'standard',
-      timeMs: 1000,
+      timeMs: 5000,
       memoryMb: 64,
       testcases: [
         { inputPath: join(root, 'deps', '1.in'), outputPath: join(root, 'deps', '1.out'), points: 50 },

@@ -63,8 +63,60 @@ export interface ProblemDetail extends ProblemSummary {
   ioMode: 'stdio' | 'file';
   inputFile: string | null;
   outputFile: string | null;
+  checkerMode: 'builtin' | 'testlib' | 'lemon';
+  compareMode: string;
+  visibility: 'public' | 'hidden';
   statementHtml: string;
   samples: Sample[];
+}
+
+/** Phase 1F 管理端列表项（包含隐藏题与可见性）。 */
+export interface AdminProblemSummary extends ProblemSummary {
+  visibility: 'public' | 'hidden';
+}
+
+/** Phase 1E 管理端：题目基础信息更新（所有字段可选）。 */
+export interface UpdateProblemRequest {
+  title?: string;
+  type?: string;
+  difficulty?: number | null;
+  tags?: string[];
+  timeMs?: number;
+  memoryMb?: number;
+  ioMode?: 'stdio' | 'file';
+  inputFile?: string | null;
+  outputFile?: string | null;
+  statementHtml?: string;
+  visibility?: 'public' | 'hidden';
+  checkerMode?: 'builtin' | 'testlib' | 'lemon';
+  compareMode?: string;
+}
+
+export interface ValidateTestcaseResult {
+  testcaseId: number;
+  ok: boolean;
+  message: string;
+}
+
+export interface ValidateResult {
+  passed: number;
+  total: number;
+  results: ValidateTestcaseResult[];
+}
+
+/** Phase 1F：std 自测结果。 */
+export interface SelfTestTestcaseResult {
+  testcaseId: number;
+  verdict: Verdict;
+  timeMs: number;
+  memoryKb: number;
+  score: number;
+  message: string;
+}
+
+export interface SelfTestResult {
+  score: number;
+  results: SelfTestTestcaseResult[];
 }
 
 export interface TestResult {
