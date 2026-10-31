@@ -136,6 +136,52 @@ export function getTestcases(db: DatabaseSync, problemId: number): TestcaseRow[]
     .all(problemId) as unknown as TestcaseRow[];
 }
 
+export function listAllTestcases(db: DatabaseSync, problemId: number): TestcaseRow[] {
+  return db
+    .prepare('SELECT * FROM problem_testcases WHERE problem_id = ? ORDER BY ordinal')
+    .all(problemId) as unknown as TestcaseRow[];
+}
+
+export function replaceTestcases(
+  db: DatabaseSync,
+  problemId: number,
+  items: Array<{
+    inputPath: string;
+    outputPath: string;
+    points: number;
+    subtaskId?: number | null;
+    dependsOn?: string | null;
+  }>,
+): void {
+  db.prepare('DELETE FROM problem_testcases WHERE problem_id = ?').run(problemId);
+  const insert = db.prepare(
+    `INSERT INTO problem_testcases(problem_id, ordinal, input_path, output_path, points,
+       subtask_id, depends_on, enabled) VALUES (?, ?, ?, ?, ?, ?, ?, 1)`,
+  );
+  items.forEach((item, index) => {
+    insert.run(
+      problemId,
+      index + 1,
+      item.inputPath,
+      item.outputPath,
+      item.points,
+      item.subtaskId ?? null,
+      item.dependsOn ?? null,
+    );
+  });
+}
+
+export function updateTestcasePoints(
+  db: DatabaseSync,
+  problemId: number,
+  items: Array<{ id: number; points: number }>,
+): void {
+  const update = db.prepare(
+    'UPDATE problem_testcases SET points = ? WHERE id = ? AND problem_id = ?',
+  );
+  for (const item of items) update.run(item.points, item.id, problemId);
+}
+
 export function getSubtasks(db: DatabaseSync, problemId: number): SubtaskRow[] {
   return db
     .prepare('SELECT * FROM problem_subtasks WHERE problem_id = ? ORDER BY id')
