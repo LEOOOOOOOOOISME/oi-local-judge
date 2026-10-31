@@ -126,6 +126,51 @@ export function getProblem(db: DatabaseSync, id: number): ProblemRow | null {
   return (db.prepare('SELECT * FROM problems WHERE id = ?').get(id) as unknown as ProblemRow) ?? null;
 }
 
+export interface UpdateProblemPatch {
+  title?: string;
+  type?: string;
+  difficulty?: number | null;
+  tags?: string[];
+  timeMs?: number;
+  memoryMb?: number;
+  ioMode?: 'stdio' | 'file';
+  inputFile?: string | null;
+  outputFile?: string | null;
+  statementHtml?: string;
+  visibility?: string;
+  checkerMode?: 'builtin' | 'testlib' | 'lemon';
+  compareMode?: string;
+}
+
+export function updateProblem(db: DatabaseSync, id: number, patch: UpdateProblemPatch): boolean {
+  const sets: string[] = [];
+  const values: Array<string | number | null> = [];
+  const add = (column: string, value: string | number | null | undefined) => {
+    if (value === undefined) return;
+    sets.push(`${column} = ?`);
+    values.push(value);
+  };
+  add('title', patch.title);
+  add('type', patch.type);
+  add('difficulty', patch.difficulty === undefined ? undefined : patch.difficulty);
+  add('tags_json', patch.tags === undefined ? undefined : JSON.stringify(patch.tags));
+  add('time_ms', patch.timeMs);
+  add('memory_mb', patch.memoryMb);
+  add('io_mode', patch.ioMode);
+  add('input_file', patch.inputFile === undefined ? undefined : patch.inputFile);
+  add('output_file', patch.outputFile === undefined ? undefined : patch.outputFile);
+  add('statement_html', patch.statementHtml);
+  add('visibility', patch.visibility);
+  add('checker_mode', patch.checkerMode);
+  add('compare_mode', patch.compareMode);
+  if (sets.length === 0) return false;
+  sets.push('version = version + 1');
+  const result = db
+    .prepare(`UPDATE problems SET ${sets.join(', ')} WHERE id = ?`)
+    .run(...values, id);
+  return Number(result.changes) > 0;
+}
+
 export function listProblems(db: DatabaseSync): ProblemRow[] {
   return db.prepare('SELECT * FROM problems WHERE visibility != ? ORDER BY id DESC').all('hidden') as unknown as ProblemRow[];
 }

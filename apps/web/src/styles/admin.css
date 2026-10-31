@@ -1,0 +1,160 @@
+/* Phase 1D 管理端样式（仅随管理端懒加载 chunk 加载） */
+
+.admin-tabs > .ant-tabs-nav {
+  margin-bottom: 14px;
+}
+
+.admin-statement {
+  max-height: 520px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.asset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.asset-card {
+  border-radius: var(--radius);
+}
+
+.asset-card .ant-card-head {
+  min-height: 36px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+.asset-card .ant-card-body {
+  padding: 10px;
+}
+
+.asset-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.asset-kind {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #f3f4f6;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.asset-hint {
+  min-height: 36px;
+  margin-bottom: 8px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.asset-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 8px;
+  padding: 7px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+  font-size: 12px;
+}
+
+.asset-name {
+  display: inline-block;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.asset-actions {
+  margin-bottom: 8px;
+}
+
+.asset-compile {
+  margin-bottom: 8px;
+}
+
+.asset-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+
+.asset-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 64px;
+  padding: 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: #fcfcfd;
+  color: var(--text-2);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.asset-drop:hover {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+  color: var(--accent);
+}
+
+.asset-drop-hint {
+  font-size: 11px;
+}
+
+.asset-drop-busy {
+  cursor: wait;
+}
+
+.admin-file-input {
+  display: none;
+}
+
+.data-import-note {
+  margin-bottom: 12px;
+}
+
+.zip-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.zip-upload input[type='file'] {
+  max-width: 300px;
+  font-size: 12px;
+}
+
+.zip-points {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.data-import-result {
+  margin-top: 12px;
+}
+
+.data-path {
+  display: inline-block;
+  max-width: 300px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}

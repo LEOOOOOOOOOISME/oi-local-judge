@@ -7,6 +7,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { ensureChecker } from '../judge/checker-cache.js';
 import { ensureCompiledProgram } from '../judge/compile-cache.js';
+import { runValidator } from '../judge/validator.js';
 import {
   ASSET_KINDS,
   deleteAsset,
@@ -20,6 +21,7 @@ import {
   getProblem,
   listAllTestcases,
   replaceTestcases,
+  updateProblem,
   updateTestcasePoints,
 } from '../storage/repos/problems.js';
 
@@ -94,6 +96,39 @@ export function registerAdminProblemRoutes(
       data: listAssets(options.db, Number(request.params.id)),
     }),
   );
+
+  app.put<{
+    Params: { id: string };
+    Body: Record<string, unknown>;
+  }>('/api/admin/problems/:id', { preHandler: guard }, async (request, reply) => {
+    const problemId = Number(request.params.id);
+    if (!getProblem(options.db, problemId)) {
+      return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    }
+    const body = request.body ?? {};
+    const updated = updateProblem(options.db, problemId, {
+      title: typeof body.title === 'string' ? body.title : undefined,
+      type: typeof body.type === 'string' ? body.type : undefined,
+      difficulty: typeof body.difficulty === 'number' ? body.difficulty : undefined,
+      tags: Array.isArray(body.tags) ? (body.tags as string[]) : undefined,
+      timeMs: typeof body.timeMs === 'number' ? body.timeMs : undefined,
+      memoryMb: typeof body.memoryMb === 'number' ? body.memoryMb : undefined,
+      ioMode: body.ioMode === 'file' ? 'file' : body.ioMode === 'stdio' ? 'stdio' : undefined,
+      inputFile: typeof body.inputFile === 'string' ? body.inputFile : undefined,
+      outputFile: typeof body.outputFile === 'string' ? body.outputFile : undefined,
+      statementHtml: typeof body.statementHtml === 'string' ? body.statementHtml : undefined,
+      visibility: typeof body.visibility === 'string' ? body.visibility : undefined,
+      checkerMode:
+        body.checkerMode === 'builtin' || body.checkerMode === 'testlib' || body.checkerMode === 'lemon'
+          ? body.checkerMode
+          : undefined,
+      compareMode: typeof body.compareMode === 'string' ? body.compareMode : undefined,
+    });
+    if (!updated) {
+      return reply.code(400).send({ ok: false, error: { code: 'NO_FIELDS' } });
+    }
+    return { ok: true, data: { id: problemId } };
+  });
 
   app.get<{ Params: { id: string; kind: string } }>(
     '/api/admin/problems/:id/assets/:kind/source',
@@ -234,6 +269,59 @@ export function registerAdminProblemRoutes(
       ok: true,
       data: listAllTestcases(options.db, Number(request.params.id)),
     }),
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/problems/:id/validate',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      const validator = getAsset(options.db, problemId, 'validator');
+      if (!validator) {
+        return reply.code(404).send({
+          ok: false,
+          error: { code: 'NO_VALIDATOR', message: 'upload a validator first' },
+        });
+      }
+      if (!validator.language) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'BINARY_VALIDATOR', message: 'validator must be a source file' },
+        });
+      }
+      const compiled = await ensureCompiledProgram({
+        gxx: options.config.gxx,
+        dataDir: options.config.dataDir,
+        sourcePath: join(options.config.dataDir, validator.path),
+        language: validator.language,
+        includeDir: join(process.cwd(), 'vendor'),
+      });
+      if (!compiled.ok || !compiled.exe) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'VALIDATOR_COMPILE_FAILED', message: compiled.message },
+        });
+      }
+      const workdir = join(options.config.dataDir, 'tmp');
+      mkdirSync(workdir, { recursive: true });
+      const results = [];
+      for (const testcase of listAllTestcases(options.db, problemId)) {
+        const result = await runValidator({
+          validator: compiled.exe,
+          input: join(options.config.dataDir, testcase.input_path),
+          workdir,
+        });
+        results.push({ testcaseId: testcase.id, ...result });
+      }
+      return {
+        ok: true,
+        data: {
+          passed: results.filter((result) => result.ok).length,
+          total: results.length,
+          results,
+        },
+      };
+    },
   );
 
   app.put<{

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -140,6 +140,52 @@ describe('admin problem assets and data', () => {
     expect(res.statusCode).toBe(400);
     expect((res.json() as { error: { code: string } }).error.code).toBe('UNSAFE_PATH');
   });
+
+  it('compiles and runs a validator against imported data', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/admin/problems',
+      headers: { cookie: adminCookie },
+      payload: { title: 'Validator Test', type: 'standard', timeMs: 1000, memoryMb: 64 },
+    });
+    const problemId = (created.json() as { data: { id: number } }).data.id;
+
+    const validatorSource = readFileSync(
+      join(process.cwd(), 'tests/fixtures/validator/sum-validator.cpp'),
+    );
+    const upload = await app.inject({
+      method: 'POST',
+      url: `/api/admin/problems/${problemId}/assets/validator?name=validator.cpp`,
+      headers: { cookie: adminCookie, 'content-type': 'application/octet-stream' },
+      payload: validatorSource,
+    });
+    expect(upload.statusCode).toBe(201);
+
+    const zip = zipSync({
+      '1.in': new TextEncoder().encode('1 2\n'),
+      '1.out': new TextEncoder().encode('3\n'),
+      '2.in': new TextEncoder().encode('2 3\n'),
+      '2.out': new TextEncoder().encode('5\n'),
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/admin/problems/${problemId}/data/import`,
+      headers: { cookie: adminCookie, 'content-type': 'application/zip' },
+      payload: Buffer.from(zip),
+    });
+
+    const validated = await app.inject({
+      method: 'POST',
+      url: `/api/admin/problems/${problemId}/validate`,
+      headers: { cookie: adminCookie },
+    });
+    expect(validated.statusCode, validated.body).toBe(200);
+    const body = validated.json() as {
+      data: { passed: number; total: number; results: Array<{ ok: boolean; message: string }> };
+    };
+    expect(body.data.total).toBe(2);
+    expect(body.data.passed, JSON.stringify(body.data.results)).toBe(2);
+  }, 30_000);
 
   it('forbids contestants from the admin API', async () => {
     const res = await app.inject({

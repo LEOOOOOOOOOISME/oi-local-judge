@@ -59,6 +59,8 @@ export function getProblemDetail(db: DatabaseSync, id: number): ProblemDetailDto
     ioMode: row.io_mode as 'stdio' | 'file',
     inputFile: row.input_file,
     outputFile: row.output_file,
+    checkerMode: row.checker_mode as 'builtin' | 'testlib' | 'lemon',
+    compareMode: row.compare_mode,
     statementHtml: row.statement_html,
     samples: JSON.parse(row.samples_json) as ProblemDetailDto['samples'],
   };

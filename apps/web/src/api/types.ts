@@ -125,6 +125,72 @@ export interface ContestDetail {
   participantCount: number;
 }
 
+/** Phase 1D 管理端：程序资产。 */
+export type AssetKind =
+  | 'std'
+  | 'checker'
+  | 'validator'
+  | 'generator'
+  | 'interactor'
+  | 'judger'
+  | 'brute';
+
+export interface ProblemAsset {
+  id: number;
+  problem_id: number;
+  kind: AssetKind;
+  name: string;
+  path: string;
+  language: string | null;
+  sha256: string;
+  size: number;
+  updated_at: number;
+}
+
+export interface ProblemAssetSource extends ProblemAsset {
+  source: string;
+}
+
+export interface CompileAssetResult {
+  compiled: boolean;
+  exe?: string;
+  cached?: boolean;
+  message: string;
+}
+
+export interface AdminTestcase {
+  id: number;
+  problem_id: number;
+  ordinal: number;
+  input_path: string;
+  output_path: string;
+  points: number;
+  subtask_id: number | null;
+  depends_on: string | null;
+  enabled: number;
+}
+
+export interface AdminDataImportResult {
+  testcases: Array<{ stem: string; input: string; output: string }>;
+}
+
+export interface CreateProblemRequest {
+  title: string;
+  type: string;
+  timeMs: number;
+  memoryMb: number;
+  difficulty?: number | null;
+  tags?: string[];
+  ioMode?: 'stdio' | 'file';
+  inputFile?: string | null;
+  outputFile?: string | null;
+  statement?: string;
+}
+
+export interface CreateProblemResult {
+  id: number;
+}
+
 export interface RankingCell {
   problemId: number;
   score: number;

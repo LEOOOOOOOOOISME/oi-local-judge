@@ -8,6 +8,8 @@ export interface CompileCacheOptions {
   dataDir: string;
   sourcePath: string;
   language: string;
+  /** Optional include directory (testlib.h for validators/checkers). */
+  includeDir?: string;
 }
 
 export interface CompileCacheResult {
@@ -28,7 +30,7 @@ export async function ensureCompiledProgram(
   const source = readFileSync(options.sourcePath);
   const key = createHash('sha256')
     .update(source)
-    .update(`\0${options.language}\0${options.gxx}\0-O2\0-static`)
+    .update(`\0${options.language}\0${options.gxx}\0-O2\0-static\0${options.includeDir ?? ''}`)
     .digest('hex');
   const cacheDir = join(options.dataDir, 'cache', 'programs', key);
   const cachedExe = join(cacheDir, 'prog.exe');
@@ -45,6 +47,7 @@ export async function ensureCompiledProgram(
       outExe: join(tempDir, 'prog.exe'),
       workdir: tempDir,
       language: options.language,
+      extraArgs: options.includeDir ? ['-I', options.includeDir] : [],
     });
     if (!compiled.ok) {
       return { ok: false, cached: false, message: compiled.message };

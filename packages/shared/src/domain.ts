@@ -26,6 +26,8 @@ export interface ProblemDetailDto extends ProblemSummaryDto {
   ioMode: 'stdio' | 'file';
   inputFile: string | null;
   outputFile: string | null;
+  checkerMode: 'builtin' | 'testlib' | 'lemon';
+  compareMode: string;
   statementHtml: string;
   samples: Array<{ input: string; output: string; explanation?: string }>;
 }
