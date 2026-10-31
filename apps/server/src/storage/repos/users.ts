@@ -1,4 +1,4 @@
-﻿import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 
 export type Role = 'admin' | 'setter' | 'contestmanager' | 'contestant';
 
@@ -49,4 +49,25 @@ export function getUserById(db: DatabaseSync, id: number): UserRow | null {
 
 export function bumpSessionVersion(db: DatabaseSync, userId: number): void {
   db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').run(userId);
+}
+
+export function listUsers(
+  db: DatabaseSync,
+  filter: { query?: string; className?: string; limit?: number } = {},
+): UserRow[] {
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+  if (filter.query) {
+    clauses.push('(username LIKE ? OR real_name LIKE ?)');
+    params.push(`%${filter.query}%`, `%${filter.query}%`);
+  }
+  if (filter.className) {
+    clauses.push('class_name = ?');
+    params.push(filter.className);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
+  const limit = Math.min(Math.max(filter.limit ?? 100, 1), 500);
+  return db
+    .prepare(`SELECT * FROM users ${where} ORDER BY class_name, username LIMIT ?`)
+    .all(...params, limit) as unknown as UserRow[];
 }
