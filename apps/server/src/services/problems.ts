@@ -1,9 +1,14 @@
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
 import MarkdownIt from 'markdown-it';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import type { ProblemDetailDto, ProblemSummaryDto } from '@oij/shared';
+import {
+  ASSET_KINDS,
+  upsertAsset,
+} from '../storage/repos/assets.js';
 import {
   createProblem,
   getProblem,
@@ -33,6 +38,7 @@ interface ProblemJson {
     compare?: string;
   };
   objective?: { questions?: unknown[] };
+  assets?: Record<string, string>;
   testcases: Array<{ input: string; output: string; points: number; subtaskId?: number }>;
 }
 
@@ -190,6 +196,40 @@ export function importProblemDirectory(options: {
     options.db
       .prepare('UPDATE problems SET checker_path = ? WHERE id = ?')
       .run(`problems/${problemId}/src/${fileName}`, problemId);
+  }
+
+  const assetsRoot = join(options.config.dataDir, 'problems', String(problemId), 'src');
+  for (const [kind, relative] of Object.entries(manifest.assets ?? {})) {
+    if (!(ASSET_KINDS as readonly string[]).includes(kind)) continue;
+    const sourcePath = join(sourceDir, relative);
+    if (!existsSync(sourcePath)) continue;
+    mkdirSync(assetsRoot, { recursive: true });
+    const fileName = `${kind}-${basename(relative)}`;
+    const destination = join(assetsRoot, fileName);
+    copyFileSync(sourcePath, destination);
+    const extension = basename(relative).slice(basename(relative).lastIndexOf('.'));
+    const language =
+      extension === '.cpp' || extension === '.cc' || extension === '.cxx'
+        ? 'cpp17'
+        : extension === '.c'
+          ? 'c11'
+          : extension === '.py'
+            ? 'python'
+            : null;
+    upsertAsset(options.db, {
+      problemId,
+      kind: kind as (typeof ASSET_KINDS)[number],
+      name: basename(relative),
+      path: `problems/${problemId}/src/${fileName}`,
+      language,
+      sha256: createHash('sha256').update(readFileSync(destination)).digest('hex'),
+      size: statSync(destination).size,
+    });
+    if (kind === 'checker') {
+      options.db
+        .prepare('UPDATE problems SET checker_path = ?, checker_mode = ? WHERE id = ?')
+        .run(`problems/${problemId}/src/${fileName}`, checkerMode === 'builtin' ? 'testlib' : checkerMode, problemId);
+    }
   }
 
   return problemId;

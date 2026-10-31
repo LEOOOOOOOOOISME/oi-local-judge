@@ -17,6 +17,7 @@ Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手�
 - [Phase 2A 结果](docs/research/phase-2a-contest-user-results.md)：比赛控制台、参赛者、班级统计、用户管理
 - [Phase 2B 结果](docs/research/phase-2b-objective-results.md)：客观题评分、管理端编辑器、选手作答
 - [Phase 3A 结果](docs/research/phase-3a-community-results.md)：讨论/题解/答疑/私信/通知
+- [Phase 3B 结果](docs/research/phase-3b-problem-package-results.md)：题目包 zip 导出/导入
 - [前人实现调研](docs/research/prior-art.md)：Lemon/Hydro/UOJ/testlib 的可复用性与许可证结论
 
 ## 快速开始（Windows）

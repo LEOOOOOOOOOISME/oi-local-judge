@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize } from 'node:path';
-import { unzipSync } from 'fflate';
+import { zipSync, unzipSync } from 'fflate';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
@@ -26,7 +26,7 @@ import {
   updateProblem,
   updateTestcasePoints,
 } from '../storage/repos/problems.js';
-import { getProblemDetail, problemToSummary } from '../services/problems.js';
+import { getProblemDetail, importProblemDirectory, problemToSummary } from '../services/problems.js';
 
 const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
 const ALLOWED_SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx', '.c', '.py', '.exe', '.txt']);
@@ -53,6 +53,132 @@ export function registerAdminProblemRoutes(
   options: AdminProblemRouteOptions,
 ): void {
   const guard = options.adminGuard;
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/problems/:id/export',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      const problem = getProblem(options.db, problemId);
+      if (!problem) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      const files: Record<string, Uint8Array> = {};
+      const assets = listAssets(options.db, problemId);
+      const manifestAssets: Record<string, string> = {};
+      for (const asset of assets) {
+        const absolute = join(options.config.dataDir, asset.path);
+        if (!absolute.startsWith(options.config.dataDir)) continue;
+        const zipPath = `assets/${asset.kind}/${basename(asset.path)}`;
+        files[zipPath] = readFileSync(absolute);
+        manifestAssets[asset.kind] = zipPath;
+      }
+      const manifest: Record<string, unknown> = {
+        title: problem.title,
+        type: problem.type,
+        difficulty: problem.difficulty,
+        tags: JSON.parse(problem.tags_json),
+        timeMs: problem.time_ms,
+        memoryMb: problem.memory_mb,
+        ioMode: problem.io_mode,
+        inputFile: problem.input_file,
+        outputFile: problem.output_file,
+        statementHtml: problem.statement_html,
+        samples: JSON.parse(problem.samples_json),
+        visibility: problem.visibility,
+        assets: manifestAssets,
+        testcases: [] as Array<Record<string, unknown>>,
+      };
+      if (problem.type === 'objective') {
+        manifest.objective = JSON.parse(problem.objective_json);
+      }
+      if (problem.checker_mode !== 'builtin') {
+        const checker = assets.find((asset) => asset.kind === 'checker');
+        manifest.checker = {
+          mode: problem.checker_mode,
+          source: checker ? manifestAssets.checker : problem.checker_path,
+          compare: problem.compare_mode,
+        };
+      }
+      const testcaseEntries: Array<Record<string, unknown>> = [];
+      const usedNames = new Set<string>();
+      for (const testcase of listAllTestcases(options.db, problemId)) {
+        const inputSource = join(options.config.dataDir, testcase.input_path);
+        const outputSource = join(options.config.dataDir, testcase.output_path);
+        if (!inputSource.startsWith(options.config.dataDir) || !outputSource.startsWith(options.config.dataDir)) {
+          continue;
+        }
+        let inputName = basename(testcase.input_path);
+        let outputName = basename(testcase.output_path);
+        if (usedNames.has(inputName) || usedNames.has(outputName)) {
+          inputName = `${testcase.id}-${inputName}`;
+          outputName = `${testcase.id}-${outputName}`;
+        }
+        usedNames.add(inputName);
+        usedNames.add(outputName);
+        files[`data/${inputName}`] = readFileSync(inputSource);
+        files[`data/${outputName}`] = readFileSync(outputSource);
+        testcaseEntries.push({
+          input: `data/${inputName}`,
+          output: `data/${outputName}`,
+          points: testcase.points,
+          subtaskId: testcase.subtask_id,
+        });
+      }
+      manifest.testcases = testcaseEntries;
+      files['problem.json'] = new TextEncoder().encode(JSON.stringify(manifest, null, 2));
+      const zip = zipSync(files, { level: 6 });
+      return reply
+        .header('content-type', 'application/zip')
+        .header('content-disposition', `attachment; filename="problem-${problemId}.zip"`)
+        .send(Buffer.from(zip));
+    },
+  );
+
+  app.post(
+    '/api/admin/problems/import-zip',
+    { preHandler: guard, bodyLimit: 100 * 1024 * 1024 },
+    async (request, reply) => {
+      const body = request.body;
+      if (!Buffer.isBuffer(body) || body.length === 0) {
+        return reply.code(400).send({ ok: false, error: { code: 'EMPTY_BODY' } });
+      }
+      let entries: Record<string, Uint8Array>;
+      try {
+        entries = unzipSync(new Uint8Array(body));
+      } catch (err) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'BAD_ZIP', message: (err as Error).message },
+        });
+      }
+      const tmpRoot = join(options.config.dataDir, 'tmp');
+      mkdirSync(tmpRoot, { recursive: true });
+      const dir = mkdtempSync(join(tmpRoot, 'import-'));
+      try {
+        for (const [name, content] of Object.entries(entries)) {
+          if (name.endsWith('/')) continue;
+          const normalized = normalize(name).replace(/\\/g, '/');
+          if (normalized.startsWith('/') || normalized.includes('..')) continue;
+          const destination = join(dir, normalized);
+          mkdirSync(join(destination, '..'), { recursive: true });
+          writeFileSync(destination, content);
+        }
+        let root = dir;
+        if (!existsSync(join(root, 'problem.json'))) {
+          const nested = Object.keys(entries)
+            .map((name) => name.split('/')[0])
+            .find((name) => name && existsSync(join(dir, name, 'problem.json')));
+          if (nested) root = join(dir, nested);
+        }
+        if (!existsSync(join(root, 'problem.json'))) {
+          return reply.code(400).send({ ok: false, error: { code: 'NO_MANIFEST' } });
+        }
+        const id = importProblemDirectory({ db: options.db, config: options.config, sourceDir: root });
+        return reply.code(201).send({ ok: true, data: { id } });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
 
   app.get('/api/admin/problems', { preHandler: guard }, async () => ({
     ok: true,

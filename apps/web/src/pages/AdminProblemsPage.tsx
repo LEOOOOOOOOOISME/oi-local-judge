@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import {
   App,
   Button,
@@ -18,7 +18,7 @@ import type { TableColumnsType } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost } from '../api/client';
+import { apiGet, apiPost, apiUpload } from '../api/client';
 import type {
   AdminProblemSummary,
   CreateProblemRequest,
@@ -63,6 +63,8 @@ export function AdminProblemsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
   const [form] = Form.useForm<CreateProblemFormValues>();
   const ioMode = Form.useWatch('ioMode', form);
 
@@ -203,6 +205,39 @@ export function AdminProblemsPage() {
             >
               刷新
             </Button>
+            <Button
+              loading={importing}
+              onClick={() => importInputRef.current?.click()}
+            >
+              导入题包
+            </Button>
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".zip,application/zip"
+              style={{ display: 'none' }}
+              onChange={async (event) => {
+                const file = event.target.files?.[0];
+                event.target.value = '';
+                if (!file) return;
+                setImporting(true);
+                try {
+                  const result = await apiUpload<{ id: number }>(
+                    '/api/admin/problems/import-zip',
+                    file,
+                    'application/zip',
+                  );
+                  message.success(`题目 #${result.id} 已导入`);
+                  void queryClient.invalidateQueries({ queryKey: ['admin-problems'] });
+                  void queryClient.invalidateQueries({ queryKey: ['problems'] });
+                  navigate(`/admin/problems/${result.id}`);
+                } catch (error) {
+                  message.error(error instanceof Error ? error.message : '导入失败');
+                } finally {
+                  setImporting(false);
+                }
+              }}
+            />
             <Button type="primary" onClick={openCreate}>
               新建题目
             </Button>
