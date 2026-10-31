@@ -1,9 +1,11 @@
+import { Suspense } from 'react';
 import { Avatar, Button, Dropdown, type MenuProps } from 'antd';
 import { DownOutlined, LogoutOutlined, UserOutlined } from '@ant-design/icons';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
 import { useRealtime } from '../hooks/useRealtime';
 import { ROLE_LABEL } from '../utils/status';
+import { PageLoading } from './PageStates';
 
 function navClass({ isActive }: { isActive: boolean }): string {
   return `oij-nav-link${isActive ? ' active' : ''}`;
@@ -86,9 +88,11 @@ export function AppShell() {
         </div>
       </header>
       <main className="oij-main">
-        <Outlet />
+        <Suspense fallback={<PageLoading tip="正在加载页面…" />}>
+          <Outlet />
+        </Suspense>
       </main>
-      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 1B</footer>
+      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 1C</footer>
     </div>
   );
 }

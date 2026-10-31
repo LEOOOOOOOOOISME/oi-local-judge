@@ -3,7 +3,13 @@ import { Button, Card, Empty, Result, Spin, Tag } from 'antd';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
-import type { Contest, ProblemSummary, RankingRow, Submission } from '../api/types';
+import type {
+  Contest,
+  ContestDetail,
+  ProblemSummary,
+  RankingRow,
+  Submission,
+} from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ContestCountdown } from '../components/Countdown';
 import { MetaList } from '../components/MetaList';
@@ -36,9 +42,21 @@ export function ContestOverviewPage() {
   const navigate = useNavigate();
   const now = useNow(1000);
 
+  // 首选比赛详情接口（比赛元信息 + 题目/分值 + 参赛人数）。
+  const detailQuery = useQuery({
+    queryKey: ['contest-detail', contestId],
+    queryFn: () => apiGet<ContestDetail>(`/api/contests/${contestId}`),
+    enabled: validId,
+    staleTime: 30_000,
+  });
+  const detail = detailQuery.data ?? null;
+  // 详情接口失败时回退到旧逻辑：比赛列表 + 公开题库 + 榜单推导题目。
+  const useFallback = detailQuery.isError;
+
   const contestsQuery = useQuery({
     queryKey: ['contests'],
     queryFn: () => apiGet<Contest[]>('/api/contests'),
+    enabled: validId && useFallback,
     staleTime: 15_000,
   });
   const rankingQuery = useQuery({
@@ -50,6 +68,7 @@ export function ContestOverviewPage() {
   const problemsQuery = useQuery({
     queryKey: ['problems'],
     queryFn: () => apiGet<ProblemSummary[]>('/api/problems'),
+    enabled: validId && useFallback,
     staleTime: 60_000,
   });
   const submissionsQuery = useQuery({
@@ -58,30 +77,62 @@ export function ContestOverviewPage() {
     enabled: validId && Boolean(user),
   });
 
-  const contest = contestsQuery.data?.find((item) => item.id === contestId) ?? null;
+  const contest =
+    detail?.contest ?? contestsQuery.data?.find((item) => item.id === contestId) ?? null;
   const ranking = rankingQuery.data ?? [];
   const myRow = user ? ranking.find((row) => row.userId === user.id) : undefined;
+
   const problemMap = useMemo(
     () => new Map((problemsQuery.data ?? []).map((problem) => [problem.id, problem])),
     [problemsQuery.data],
   );
 
   const contestProblems = useMemo<ProblemSummary[]>(() => {
+    if (detail) {
+      return detail.problems.map((problem) => ({
+        id: problem.problemId,
+        title: problem.title,
+        type: problem.type,
+        difficulty: problem.difficulty,
+        tags: [],
+        timeMs: problem.timeMs,
+        memoryMb: problem.memoryMb,
+      }));
+    }
     const first = ranking[0];
     if (!first) return [];
     return first.problems
       .map((cell) => problemMap.get(cell.problemId))
       .filter((problem): problem is ProblemSummary => problem !== undefined);
-  }, [ranking, problemMap]);
+  }, [detail, ranking, problemMap]);
 
   const letters = useMemo(() => {
     const map = new Map<number, string>();
+    if (detail) {
+      for (const problem of detail.problems) {
+        map.set(problem.problemId, problemLetter(problem.ordinal - 1));
+      }
+      return map;
+    }
     const first = ranking[0];
     if (first) {
       first.problems.forEach((cell, index) => map.set(cell.problemId, problemLetter(index)));
     }
     return map;
-  }, [ranking]);
+  }, [detail, ranking]);
+
+  const points = useMemo(() => {
+    const map = new Map<number, number>();
+    for (const problem of detail?.problems ?? []) {
+      map.set(problem.problemId, problem.points);
+    }
+    return map;
+  }, [detail]);
+
+  const totalPoints = useMemo(() => {
+    if (!detail) return null;
+    return detail.problems.reduce((sum, problem) => sum + problem.points, 0);
+  }, [detail]);
 
   const scores = useMemo(() => {
     const map = new Map<number, ProblemScore>();
@@ -91,14 +142,45 @@ export function ContestOverviewPage() {
     return map;
   }, [myRow]);
 
-  const problemTitles = useMemo(
-    () => new Map((problemsQuery.data ?? []).map((problem) => [problem.id, problem.title])),
-    [problemsQuery.data],
-  );
+  const problemTitles = useMemo(() => {
+    if (detail) {
+      return new Map(detail.problems.map((problem) => [problem.problemId, problem.title]));
+    }
+    return new Map((problemsQuery.data ?? []).map((problem) => [problem.id, problem.title]));
+  }, [detail, problemsQuery.data]);
 
-  if (contestsQuery.isPending) return <PageLoading tip="正在加载比赛…" />;
-  if (contestsQuery.isError) {
-    return <ErrorResult error={contestsQuery.error} onRetry={() => void contestsQuery.refetch()} />;
+  if (!validId) {
+    return (
+      <Result
+        status="404"
+        title="比赛不存在"
+        subTitle={`没有找到 #${contestIdParam} 对应的比赛。`}
+        extra={
+          <Link to="/contests">
+            <Button type="primary">返回比赛列表</Button>
+          </Link>
+        }
+      />
+    );
+  }
+  if (detailQuery.isPending) {
+    return <PageLoading tip="正在加载比赛…" />;
+  }
+  if (detailQuery.isError) {
+    if (contestsQuery.isPending) {
+      return <PageLoading tip="正在加载比赛…" />;
+    }
+    if (contestsQuery.isError) {
+      return (
+        <ErrorResult
+          error={contestsQuery.error}
+          onRetry={() => {
+            void detailQuery.refetch();
+            void contestsQuery.refetch();
+          }}
+        />
+      );
+    }
   }
   if (!contest) {
     return (
@@ -118,6 +200,9 @@ export function ContestOverviewPage() {
   const phase = contestPhase(contest, now);
   const contestPath = `/contest/${contest.id}`;
   const loginHref = `/login?next=${encodeURIComponent(contestPath)}`;
+  const listPending = !detail && rankingQuery.isPending;
+  const listError = !detail ? rankingQuery.error : null;
+  const participantCount = detail?.participantCount ?? ranking.length;
 
   return (
     <div>
@@ -144,26 +229,33 @@ export function ContestOverviewPage() {
           <Card
             className="oij-card"
             title="题目列表"
-            extra={<span className="muted">共 {contestProblems.length} 题</span>}
+            extra={
+              <span className="muted">
+                共 {contestProblems.length} 题
+                {totalPoints !== null ? ` · 满分 ${totalPoints}` : ''}
+              </span>
+            }
           >
-            {rankingQuery.isPending ? (
+            {listPending ? (
               <div className="inline-loading">
                 <Spin />
               </div>
-            ) : rankingQuery.isError ? (
+            ) : listError ? (
               <ErrorResult
-                error={rankingQuery.error}
+                error={listError}
                 onRetry={() => void rankingQuery.refetch()}
               />
             ) : contestProblems.length === 0 ? (
-              <Empty description="题目列表暂不可用" />
+              <Empty description={detail ? '本场比赛暂无题目' : '题目列表暂不可用'} />
             ) : (
               <ProblemListTable
                 problems={contestProblems}
                 problemPath={(problemId) => `${contestPath}/problem/${problemId}`}
                 letters={letters}
                 scores={scores}
+                points={detail ? points : undefined}
                 showScore={Boolean(user)}
+                showTags={!detail}
               />
             )}
           </Card>
@@ -171,13 +263,7 @@ export function ContestOverviewPage() {
           <Card
             className="oij-card"
             title="我的提交"
-            extra={
-              user ? (
-                <Link to="/records">全部记录</Link>
-              ) : (
-                <Link to={loginHref}>登录</Link>
-              )
-            }
+            extra={user ? <Link to="/records">全部记录</Link> : <Link to={loginHref}>登录</Link>}
           >
             {!user ? (
               <Empty description="登录后查看本场比赛的提交" />
@@ -213,7 +299,8 @@ export function ContestOverviewPage() {
                   label: '封榜',
                   value: contest.freeze_at === null ? '未设置' : formatDateTime(contest.freeze_at),
                 },
-                { label: '参赛人数', value: ranking.length },
+                { label: '题目数', value: contestProblems.length },
+                { label: '参赛人数', value: participantCount },
               ]}
             />
           </Card>
@@ -224,7 +311,14 @@ export function ContestOverviewPage() {
             size="small"
             extra={<Link to={`${contestPath}/ranking`}>完整榜单</Link>}
           >
-            {ranking.length === 0 ? (
+            {rankingQuery.isError ? (
+              <div className="side-error">
+                <span className="muted">榜单加载失败</span>
+                <Button size="small" onClick={() => void rankingQuery.refetch()}>
+                  重试
+                </Button>
+              </div>
+            ) : ranking.length === 0 ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无参赛者" />
             ) : (
               <div className="top3-list">
