@@ -28,6 +28,7 @@ export interface ContestDetail {
     title: string;
     type: string;
     difficulty: number | null;
+    tags: string[];
     timeMs: number;
     memoryMb: number;
   }>;
@@ -48,6 +49,7 @@ export function getContestDetail(db: DatabaseSync, contestId: number): ContestDe
         title: problem.title,
         type: problem.type,
         difficulty: problem.difficulty,
+        tags: JSON.parse(problem.tags_json) as string[],
         timeMs: problem.time_ms,
         memoryMb: problem.memory_mb,
       };

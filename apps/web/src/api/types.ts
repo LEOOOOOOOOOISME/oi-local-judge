@@ -107,6 +107,24 @@ export interface Contest {
   rules_json: string;
 }
 
+/** GET /api/contests/:id 返回的比赛题目（含每题分值）。 */
+export interface ContestDetailProblem {
+  problemId: number;
+  ordinal: number;
+  points: number;
+  title: string;
+  type: ProblemType;
+  difficulty: number | null;
+  timeMs: number;
+  memoryMb: number;
+}
+
+export interface ContestDetail {
+  contest: Contest;
+  problems: ContestDetailProblem[];
+  participantCount: number;
+}
+
 export interface RankingCell {
   problemId: number;
   score: number;

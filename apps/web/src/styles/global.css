@@ -331,11 +331,17 @@ a.oij-logo:hover {
 }
 
 .score-cell-value,
-.score-value {
+.score-value,
+.points-value {
   font-family: var(--mono);
 }
 
 .score-value {
+  font-weight: 600;
+}
+
+.points-value {
+  color: var(--text);
   font-weight: 600;
 }
 
@@ -519,6 +525,14 @@ a.oij-logo:hover {
 
 .side-action {
   margin-top: 12px;
+}
+
+.side-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 0 10px;
 }
 
 .side-contest-name {

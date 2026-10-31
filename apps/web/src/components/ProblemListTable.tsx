@@ -16,14 +16,19 @@ export function ProblemListTable({
   problemPath,
   letters,
   scores,
+  points,
   showScore = false,
+  showTags = true,
   emptyText = '暂无题目',
 }: {
   problems: ProblemSummary[];
   problemPath: (problemId: number) => string;
   letters?: Map<number, string>;
   scores?: Map<number, ProblemScore>;
+  /** 比赛详情接口提供的每题分值（如 100）。 */
+  points?: Map<number, number>;
   showScore?: boolean;
+  showTags?: boolean;
   emptyText?: string;
 }) {
   const columns: TableColumnsType<ProblemSummary> = [
@@ -44,15 +49,35 @@ export function ProblemListTable({
         </Link>
       ),
     },
-    {
-      title: '难度',
-      dataIndex: 'difficulty',
-      width: 118,
-      render: (value: number | null) => (
-        <span className={`difficulty difficulty-${value ?? 0}`}>{difficultyLabel(value)}</span>
-      ),
-    },
-    {
+  ];
+
+  if (points) {
+    columns.push({
+      title: '分值',
+      width: 68,
+      align: 'center',
+      render: (_value, record) => {
+        const value = points.get(record.id);
+        return value === undefined ? (
+          <span className="muted">—</span>
+        ) : (
+          <span className="points-value">{value}</span>
+        );
+      },
+    });
+  }
+
+  columns.push({
+    title: '难度',
+    dataIndex: 'difficulty',
+    width: 118,
+    render: (value: number | null) => (
+      <span className={`difficulty difficulty-${value ?? 0}`}>{difficultyLabel(value)}</span>
+    ),
+  });
+
+  if (showTags) {
+    columns.push({
       title: '标签',
       dataIndex: 'tags',
       width: 176,
@@ -68,7 +93,10 @@ export function ProblemListTable({
             ))}
           </span>
         ),
-    },
+    });
+  }
+
+  columns.push(
     {
       title: '时间限制',
       dataIndex: 'timeMs',
@@ -81,7 +109,7 @@ export function ProblemListTable({
       width: 96,
       render: (value: number) => formatMemoryLimit(value),
     },
-  ];
+  );
 
   if (showScore) {
     columns.push({

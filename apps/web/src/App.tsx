@@ -1,15 +1,39 @@
+import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { AppShell } from './components/AppShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { ContestOverviewPage } from './pages/ContestOverviewPage';
-import { ContestRankingPage } from './pages/ContestRankingPage';
-import { ContestsPage } from './pages/ContestsPage';
 import { LoginPage } from './pages/LoginPage';
 import { NotFoundPage } from './pages/NotFoundPage';
-import { ProblemPage } from './pages/ProblemPage';
-import { ProblemsPage } from './pages/ProblemsPage';
-import { RecordsPage } from './pages/RecordsPage';
-import { SubmissionDetailPage } from './pages/SubmissionDetailPage';
+
+// 路由级懒加载：AppShell/登录页保持首屏，其余页面按需加载。
+// AppShell 内部用 Suspense 包裹 Outlet，懒加载时保留顶栏与整体布局。
+const ContestsPage = lazy(() =>
+  import('./pages/ContestsPage').then((module) => ({ default: module.ContestsPage })),
+);
+const ProblemsPage = lazy(() =>
+  import('./pages/ProblemsPage').then((module) => ({ default: module.ProblemsPage })),
+);
+const ProblemPage = lazy(() =>
+  import('./pages/ProblemPage').then((module) => ({ default: module.ProblemPage })),
+);
+const ContestOverviewPage = lazy(() =>
+  import('./pages/ContestOverviewPage').then((module) => ({
+    default: module.ContestOverviewPage,
+  })),
+);
+const ContestRankingPage = lazy(() =>
+  import('./pages/ContestRankingPage').then((module) => ({
+    default: module.ContestRankingPage,
+  })),
+);
+const SubmissionDetailPage = lazy(() =>
+  import('./pages/SubmissionDetailPage').then((module) => ({
+    default: module.SubmissionDetailPage,
+  })),
+);
+const RecordsPage = lazy(() =>
+  import('./pages/RecordsPage').then((module) => ({ default: module.RecordsPage })),
+);
 
 export function AppRoutes() {
   return (
