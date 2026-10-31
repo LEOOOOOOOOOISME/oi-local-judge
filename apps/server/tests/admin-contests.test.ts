@@ -141,6 +141,19 @@ describe('admin contest management', () => {
       payload: { username: 'carol', password: 'carol123', realName: 'Carol', className: '3班' },
     });
     expect(created.statusCode).toBe(201);
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/admin/users/import',
+      headers: { cookie },
+      payload: {
+        csv: '用户名,密码,姓名,班级,角色\ndan,dan123,Dan,1班,contestant\ncarol,carol123,Carol,3班,contestant',
+      },
+    });
+    expect(imported.statusCode).toBe(200);
+    const result = imported.json() as { data: { created: string[]; skipped: string[] } };
+    expect(result.data.created).toEqual(['dan']);
+    expect(result.data.skipped).toEqual(['carol']);
   });
 
   it('creates contest via helper for repo sanity', () => {

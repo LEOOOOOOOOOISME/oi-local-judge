@@ -34,3 +34,34 @@ export function AdminRoute({ children }: { children: ReactNode }) {
   }
   return <>{children}</>;
 }
+
+/**
+ * 比赛/用户管理路由守卫：admin / contestmanager 可进；其余角色 403。
+ */
+export function ContestAdminRoute({ children }: { children: ReactNode }) {
+  const { user, status } = useAuth();
+  const location = useLocation();
+
+  if (status === 'loading') {
+    return <PageLoading tip="正在校验管理权限…" />;
+  }
+  if (!user) {
+    const next = `${location.pathname}${location.search}`;
+    return <Navigate to={`/login?next=${encodeURIComponent(next)}`} replace />;
+  }
+  if (user.role !== 'admin' && user.role !== 'contestmanager') {
+    return (
+      <Result
+        status="403"
+        title="无权访问"
+        subTitle="比赛与用户管理仅对管理员和比赛管理员开放。"
+        extra={
+          <Link to="/contests">
+            <Button type="primary">返回比赛列表</Button>
+          </Link>
+        }
+      />
+    );
+  }
+  return <>{children}</>;
+}

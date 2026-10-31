@@ -1,6 +1,6 @@
 import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
-import { AdminRoute } from './components/AdminRoute';
+import { AdminRoute, ContestAdminRoute } from './components/AdminRoute';
 import { AppShell } from './components/AppShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
@@ -43,6 +43,19 @@ const AdminProblemPage = lazy(() =>
 );
 const AdminBatchPage = lazy(() =>
   import('./pages/AdminBatchPage').then((module) => ({ default: module.AdminBatchPage })),
+);
+const AdminContestsPage = lazy(() =>
+  import('./pages/AdminContestsPage').then((module) => ({
+    default: module.AdminContestsPage,
+  })),
+);
+const AdminContestConsolePage = lazy(() =>
+  import('./pages/AdminContestConsolePage').then((module) => ({
+    default: module.AdminContestConsolePage,
+  })),
+);
+const AdminUsersPage = lazy(() =>
+  import('./pages/AdminUsersPage').then((module) => ({ default: module.AdminUsersPage })),
 );
 
 export function AppRoutes() {
@@ -96,6 +109,30 @@ export function AppRoutes() {
             <AdminRoute>
               <AdminBatchPage />
             </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/contests"
+          element={
+            <ContestAdminRoute>
+              <AdminContestsPage />
+            </ContestAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/contests/:contestId"
+          element={
+            <ContestAdminRoute>
+              <AdminContestConsolePage />
+            </ContestAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/users"
+          element={
+            <ContestAdminRoute>
+              <AdminUsersPage />
+            </ContestAdminRoute>
           }
         />
         <Route path="*" element={<NotFoundPage />} />

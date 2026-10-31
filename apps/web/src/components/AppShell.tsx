@@ -16,6 +16,8 @@ export function AppShell() {
   const navigate = useNavigate();
   useRealtime(status === 'authenticated');
   const canManage = user?.role === 'admin' || user?.role === 'setter';
+  const canManageContests =
+    user?.role === 'admin' || user?.role === 'contestmanager';
 
   const handleLogout = async () => {
     await logout();
@@ -76,6 +78,16 @@ export function AppShell() {
                 </NavLink>
               </>
             ) : null}
+            {canManageContests ? (
+              <>
+                <NavLink to="/admin/contests" className={navClass}>
+                  比赛管理
+                </NavLink>
+                <NavLink to="/admin/users" className={navClass}>
+                  用户管理
+                </NavLink>
+              </>
+            ) : null}
           </nav>
           <div className="oij-header-right">
             {status === 'loading' ? (
@@ -103,7 +115,7 @@ export function AppShell() {
           <Outlet />
         </Suspense>
       </main>
-      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 1H</footer>
+      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 2A</footer>
     </div>
   );
 }

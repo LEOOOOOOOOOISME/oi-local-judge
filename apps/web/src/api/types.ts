@@ -181,6 +181,67 @@ export interface BatchJob {
   items: BatchResultItem[];
 }
 
+/** Phase 2A：比赛/用户/班级管理。 */
+export interface AdminUser {
+  id: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  role: Role;
+  status: string;
+  createdAt: number;
+}
+
+export interface ContestParticipant {
+  user_id: number;
+  username: string;
+  real_name: string | null;
+  class_name: string | null;
+  status: string;
+  extra_time: number;
+}
+
+export interface ClassStatRow {
+  className: string;
+  participants: number;
+  totalScore: number;
+  averageScore: number;
+  acParticipants: number;
+  bestRank: number;
+}
+
+export interface CreateContestRequest {
+  name: string;
+  mode?: string;
+  startAt?: number;
+  endAt?: number;
+  freezeAt?: number;
+  problemIds?: number[];
+  participantIds?: number[];
+}
+
+export interface UpdateContestRequest {
+  name?: string;
+  mode?: string;
+  startAt?: number | null;
+  endAt?: number | null;
+  freezeAt?: number | null;
+  unfreezeAt?: number | null;
+  problems?: Array<{ problemId: number; points: number }>;
+}
+
+export interface CreateUserRequest {
+  username: string;
+  password: string;
+  realName?: string;
+  className?: string;
+  role?: Role;
+}
+
+export interface CreateUserResult {
+  id: number;
+}
+
 export interface TestResult {
   testcaseId: number;
   verdict: Verdict;
