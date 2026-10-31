@@ -38,7 +38,7 @@
 | CMake 4.4 | 本机已有 | 构建 `ojrunner.exe` |
 | Git | 本机已有 | 版本管理 |
 | Electron + React + Fastify + AntD | npm（npmmirror） | 必须下载；锁版本；配置 Electron 镜像 |
-| SQLite | better-sqlite3 预编译包 | Phase 0 验证 ABI；失败切 `@libsql/client` 或内置 `node:sqlite` |
+| SQLite | Node 24 内置 `node:sqlite` | 无需原生编译；Electron 45 内置 Node 24；目标机启动自检 `sqlite_version()` |
 | Python 3 | 用户自装（一期可选） | 本机未安装；启用 Python 评测时检测，缺失则禁用该语言 |
 | testlib.h | vendored（MIT） | 随仓库分发，保留 LICENSE |
 | 不使用 | MSVC、Docker、WSL、Python（一期） | 本机没有；避免引入构建链 |
@@ -55,7 +55,7 @@
 │   └─ utilityProcess: ojserver                                 │
 │        ├─ Fastify 5：/api、/ws、静态资源（web/dist）           │
 │        ├─ 会话/权限/审计（HMAC 无状态会话 + 内存权限缓存）      │
-│        ├─ SQLite（better-sqlite3, WAL）+ 文件存储              │
+│        ├─ SQLite（node:sqlite, WAL）+ 文件存储                  │
 │        ├─ 榜单内存快照 + 增量广播（2Hz 合并）                  │
 │        ├─ 评测调度（默认 2 槽，最多 3）                        │
 │        │    ├─ g++ 编译（哈希缓存，BELOW_NORMAL）              │
@@ -83,7 +83,7 @@
 | 前端数据 | TanStack Query v5 + TanStack Virtual + React Router | 缓存、虚拟列表、路由 |
 | 编辑器/渲染 | Monaco（仅提交页懒加载）、highlight.js（查看代码）、markdown-it + KaTeX（服务端渲染） | 控制首包 |
 | 服务 | Fastify 5 + @fastify/websocket/static/cookie/multipart/rate-limit | TypeBox/AJV 校验 |
-| 存储 | better-sqlite3（WAL）+ 文件系统 | 迁移脚本版本化 |
+| 存储 | node:sqlite（WAL）+ 文件系统 | 迁移脚本版本化 |
 | 原生 | C++17 + Win32 + CMake + MinGW GCC 16 | `ojrunner.exe` |
 | 测试 | Vitest + Playwright + autocannon + ws | 单测/集成/E2E/压测 |
 | 打包 | electron-builder（NSIS + 绿色版） | 原生 runner 随包 |
@@ -575,7 +575,7 @@ draft → scheduled → running → frozen? → ended → archived
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
-| better-sqlite3 ABI 不通 | 无法启动 | Phase 0 先验证；失败切 `@libsql/client`/`node:sqlite` |
+| node:sqlite 在 Electron 中不可用 | 无法启动 | Phase 0 已用 CLI 验证；目标机跑 `tools/check-sqlite-electron.cjs`；必要时调整 Electron 版本或改用 `@libsql/client` |
 | testlib 部分分协议不明确 | SPJ 分数错误 | Phase 0 用官方样例验证；回退 Lemon 六参数 |
 | Job Object 在受限权限下失败 | 沙箱弱化 | 检测能力；文档声明；管理员模式提供受限令牌 |
 | Electron 下载慢/大 | 安装体验 | 配置 npmmirror Electron 镜像；安装包不打包 GCC |
