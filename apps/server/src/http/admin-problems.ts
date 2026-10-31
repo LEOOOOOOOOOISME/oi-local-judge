@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize } from 'node:path';
 import { unzipSync } from 'fflate';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
@@ -7,6 +7,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { ensureChecker } from '../judge/checker-cache.js';
 import { ensureCompiledProgram } from '../judge/compile-cache.js';
+import { judgeTestcase } from '../judge/pipeline.js';
 import { runValidator } from '../judge/validator.js';
 import {
   ASSET_KINDS,
@@ -269,6 +270,81 @@ export function registerAdminProblemRoutes(
       ok: true,
       data: listAllTestcases(options.db, Number(request.params.id)),
     }),
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/problems/:id/self-test',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      const problem = getProblem(options.db, problemId);
+      if (!problem) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      const std = getAsset(options.db, problemId, 'std');
+      if (!std || !std.language) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'NO_STD', message: 'upload a C++ std first' },
+        });
+      }
+      const compiled = await ensureCompiledProgram({
+        gxx: options.config.gxx,
+        dataDir: options.config.dataDir,
+        sourcePath: join(options.config.dataDir, std.path),
+        language: std.language,
+        includeDir: join(process.cwd(), 'vendor'),
+      });
+      if (!compiled.ok || !compiled.exe) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'STD_COMPILE_FAILED', message: compiled.message },
+        });
+      }
+      let checkerExe: string | undefined;
+      if (problem.checker_mode !== 'builtin' && problem.checker_path) {
+        const checker = await ensureChecker({
+          gxx: options.config.gxx,
+          dataDir: options.config.dataDir,
+          sourcePath: join(options.config.dataDir, problem.checker_path),
+          includeDir: join(process.cwd(), 'vendor'),
+        });
+        if (!checker.ok || !checker.exe) {
+          return reply.code(400).send({
+            ok: false,
+            error: { code: 'CHECKER_COMPILE_FAILED', message: checker.message },
+          });
+        }
+        checkerExe = checker.exe;
+      }
+      const tmpRoot = join(options.config.dataDir, 'tmp');
+      mkdirSync(tmpRoot, { recursive: true });
+      const workdir = mkdtempSync(join(tmpRoot, 'selftest-'));
+      try {
+        const results = [];
+        for (const testcase of listAllTestcases(options.db, problemId)) {
+          results.push(
+            await judgeTestcase({
+              config: options.config,
+              problem,
+              testcase,
+              workdir,
+              outExe: compiled.exe,
+              checkerExe,
+            }),
+          );
+        }
+        return {
+          ok: true,
+          data: {
+            results,
+            score: results.reduce((sum, result) => sum + result.score, 0),
+          },
+        };
+      } finally {
+        rmSync(workdir, { recursive: true, force: true });
+      }
+    },
   );
 
   app.post<{ Params: { id: string } }>(
