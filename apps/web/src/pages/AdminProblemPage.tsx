@@ -37,6 +37,7 @@ import type {
   AssetKind,
   CompileAssetResult,
   GenerateResult,
+  ObjectiveQuestion,
   ProblemAsset,
   ProblemAssetSource,
   ProblemDetail,
@@ -49,6 +50,7 @@ import type {
   ValidateTestcaseResult,
 } from '../api/types';
 import { CodeBlock } from '../components/CodeBlock';
+import { ObjectiveQuestionEditor, validateObjectiveQuestions } from '../components/ObjectiveQuestionEditor';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { VerdictBadge } from '../components/VerdictBadge';
@@ -66,6 +68,7 @@ import {
   problemTypeLabel,
 } from '../utils/status';
 import '../styles/admin.css';
+import '../styles/objective.css';
 
 const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
 const ALLOWED_SOURCE_ACCEPT = '.cpp,.cc,.cxx,.c,.py,.exe,.txt';
@@ -288,6 +291,10 @@ export function AdminProblemPage() {
   const [activeTab, setActiveTab] = useState('basic');
   const [basicForm] = Form.useForm<BasicFormValues>();
   const basicIoMode = Form.useWatch('ioMode', basicForm);
+  const basicType = Form.useWatch('type', basicForm);
+  const [objectiveDraft, setObjectiveDraft] = useState<ObjectiveQuestion[]>([]);
+  const [savingObjective, setSavingObjective] = useState(false);
+  const objectiveInitializedRef = useRef(false);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidateResult | null>(null);
   const [validationError, setValidationError] = useState<string | null>(null);
@@ -347,11 +354,37 @@ export function AdminProblemPage() {
   });
 
   const problem = problemQuery.data ?? null;
+  const isObjective = (basicType ?? problem?.type) === 'objective';
 
   useEffect(() => {
     if (!problem) return;
     basicForm.setFieldsValue(toBasicFormValues(problem));
   }, [basicForm, problem]);
+
+  useEffect(() => {
+    if (!problem) return;
+    setObjectiveDraft(
+      (problem.objective?.questions ?? []).map((question) => ({
+        ...question,
+        options: question.options?.map((option) => ({ ...option })),
+        answers: [...(question.answers ?? [])],
+      })),
+    );
+  }, [problem]);
+
+  useEffect(() => {
+    if (problem?.type !== 'objective' || objectiveInitializedRef.current) return;
+    objectiveInitializedRef.current = true;
+    setActiveTab('objective');
+  }, [problem?.type]);
+
+  useEffect(() => {
+    if (isObjective && activeTab !== 'basic' && activeTab !== 'objective') {
+      setActiveTab('objective');
+    } else if (!isObjective && activeTab === 'objective') {
+      setActiveTab('basic');
+    }
+  }, [activeTab, isObjective]);
 
   useEffect(() => {
     const mode = problemQuery.data?.checkerMode;
@@ -545,6 +578,9 @@ export function AdminProblemPage() {
         visibility: values.visibility,
         checkerMode: values.checkerMode,
         compareMode: values.compareMode,
+        ...(values.type === 'objective'
+          ? { objective: { questions: objectiveDraft } }
+          : {}),
       };
       return apiPut<{ id: number }>(`/api/admin/problems/${problemId}`, payload);
     },
@@ -562,6 +598,53 @@ export function AdminProblemPage() {
   const resetBasicForm = () => {
     if (!problem) return;
     basicForm.setFieldsValue(toBasicFormValues(problem));
+  };
+
+  const saveObjective = async () => {
+    const error = validateObjectiveQuestions(objectiveDraft);
+    if (error) {
+      message.error(error);
+      return;
+    }
+    const questions = objectiveDraft.map((question) => ({
+      id: question.id,
+      kind: question.kind,
+      stem: question.stem.trim(),
+      points: Number(question.points),
+      answers:
+        question.kind === 'fill'
+          ? (question.answers ?? []).map((answer) => answer.trim()).filter((answer) => answer.length > 0)
+          : [...(question.answers ?? [])],
+      ...(question.kind === 'single' || question.kind === 'multiple'
+        ? {
+            options: (question.options ?? []).map((option) => ({
+              key: option.key.trim(),
+              text: option.text.trim(),
+            })),
+          }
+        : {}),
+      ...(question.kind === 'multiple' ? { partial: question.partial === true } : {}),
+      ...(question.kind === 'fill'
+        ? {
+            ignoreCase: question.ignoreCase !== false,
+            ignoreWhitespace: question.ignoreWhitespace !== false,
+          }
+        : {}),
+    }));
+    setSavingObjective(true);
+    try {
+      await apiPut<{ id: number }>(`/api/admin/problems/${problemId}`, {
+        objective: { questions },
+      });
+      message.success('客观题配置已保存');
+      void queryClient.invalidateQueries({ queryKey: ['admin-problem', problemId] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-problems'] });
+      void queryClient.invalidateQueries({ queryKey: ['problems'] });
+    } catch (saveError) {
+      message.error(saveError instanceof Error ? saveError.message : '保存客观题失败');
+    } finally {
+      setSavingObjective(false);
+    }
   };
 
   const runValidation = async () => {
@@ -697,6 +780,15 @@ export function AdminProblemPage() {
         </Space>
       }
     >
+      {isObjective ? (
+        <Alert
+          className="objective-info-alert"
+          type="info"
+          showIcon
+          message="客观题不使用程序资产与测试数据"
+          description="请在“客观题”Tab 中维护题目、选项、正确答案和分值；比赛中的题目分值需与客观题总分一致。"
+        />
+      ) : null}
       <Form<BasicFormValues>
         form={basicForm}
         layout="vertical"
@@ -842,10 +934,50 @@ export function AdminProblemPage() {
         </Form.Item>
 
         <div className="basic-form-footer muted">
-          测试点：{testcases.length > 0 ? `${testcases.length} 个` : '尚未导入'} ·
-          保存后详情与公开题目列表会刷新
+          {isObjective
+            ? `客观题共 ${objectiveDraft.length} 题 · 总分 ${objectiveDraft.reduce(
+                (sum, question) => sum + Number(question.points || 0),
+                0,
+              )} 分 · 不需要测试数据`
+            : `测试点：${testcases.length > 0 ? `${testcases.length} 个` : '尚未导入'} ·
+          保存后详情与公开题目列表会刷新`}
         </div>
       </Form>
+    </Card>
+  );
+
+  const objectivePanel = (
+    <Card
+      className="oij-card"
+      title="客观题"
+      extra={
+        <Space>
+          <span className="muted">
+            {objectiveDraft.length} 题 · 总分{' '}
+            {objectiveDraft.reduce((sum, question) => sum + Number(question.points || 0), 0)}
+          </span>
+          <Button
+            type="primary"
+            loading={savingObjective}
+            onClick={() => void saveObjective()}
+          >
+            保存客观题
+          </Button>
+        </Space>
+      }
+    >
+      <Alert
+        className="objective-info-alert"
+        type="info"
+        showIcon
+        message="客观题不需要程序资产或测试数据"
+        description="每题对应一个 test_results 记录；多选可设置部分给分，填空可忽略大小写/空白。保存后选手端即时生效。"
+      />
+      <ObjectiveQuestionEditor
+        questions={objectiveDraft}
+        onChange={setObjectiveDraft}
+        disabled={savingObjective}
+      />
     </Card>
   );
 
@@ -1748,13 +1880,24 @@ export function AdminProblemPage() {
         className="problem-tabs admin-tabs"
         activeKey={activeTab}
         onChange={setActiveTab}
-        items={[
-          { key: 'basic', label: '基本信息', children: basicPanel },
-          { key: 'assets', label: '程序资产', children: assetsPanel },
-          { key: 'data', label: '测试数据', children: dataPanel },
-          { key: 'tools', label: '生成与对拍', children: toolsPanel },
-          { key: 'validation', label: '校验与自测', children: validationPanel },
-        ]}
+        items={
+          isObjective
+            ? [
+                { key: 'basic', label: '基本信息', children: basicPanel },
+                {
+                  key: 'objective',
+                  label: `客观题 (${objectiveDraft.length})`,
+                  children: objectivePanel,
+                },
+              ]
+            : [
+                { key: 'basic', label: '基本信息', children: basicPanel },
+                { key: 'assets', label: '程序资产', children: assetsPanel },
+                { key: 'data', label: '测试数据', children: dataPanel },
+                { key: 'tools', label: '生成与对拍', children: toolsPanel },
+                { key: 'validation', label: '校验与自测', children: validationPanel },
+              ]
+        }
       />
 
       <Modal

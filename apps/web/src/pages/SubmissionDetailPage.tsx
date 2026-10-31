@@ -20,6 +20,14 @@ import {
   languageLabel,
 } from '../utils/status';
 
+function prettyJson(code: string): string {
+  try {
+    return JSON.stringify(JSON.parse(code) as unknown, null, 2);
+  } catch {
+    return code;
+  }
+}
+
 export function SubmissionDetailPage() {
   const { submissionId: submissionIdParam } = useParams();
   const submissionId = Number(submissionIdParam);
@@ -74,60 +82,123 @@ export function SubmissionDetailPage() {
       ? `/contest/${submission.contestId}/problem/${submission.problemId}`
       : `/problem/${submission.problemId}`;
   const results = submission.results ?? [];
+  const isObjective = submission.language === 'objective';
+  const objectiveQuestions = problemQuery.data?.objective?.questions ?? [];
+  const objectiveIndexByQuestionId = new Map(
+    objectiveQuestions.map((question, index) => [question.id, index + 1]),
+  );
+  const objectiveStemByQuestionId = new Map(
+    objectiveQuestions.map((question) => [question.id, question.stem]),
+  );
 
-  const resultColumns: TableColumnsType<TestResult> = [
-    {
-      title: '#',
-      width: 52,
-      align: 'center',
-      render: (_value, _record, index) => <span className="muted">{index + 1}</span>,
-    },
-    {
-      title: '测试点',
-      dataIndex: 'testcaseId',
-      width: 92,
-      render: (testcaseId: number) => <span className="mono">#{testcaseId}</span>,
-    },
-    {
-      title: '状态',
-      dataIndex: 'verdict',
-      width: 86,
-      render: (verdict: TestResult['verdict']) => <VerdictBadge verdict={verdict} />,
-    },
-    {
-      title: '用时',
-      dataIndex: 'timeMs',
-      width: 94,
-      align: 'right',
-      render: (value: number) => formatRunTime(value),
-    },
-    {
-      title: '内存',
-      dataIndex: 'memoryKb',
-      width: 100,
-      align: 'right',
-      render: (value: number) => formatMemoryKb(value),
-    },
-    {
-      title: '得分',
-      dataIndex: 'score',
-      width: 72,
-      align: 'right',
-      render: (value: number) => <span className="score-value">{value}</span>,
-    },
-    {
-      title: '信息',
-      dataIndex: 'message',
-      render: (value: string) =>
-        value ? (
-          <span className="test-message" title={value}>
-            {value}
-          </span>
-        ) : (
-          <span className="muted">—</span>
-        ),
-    },
-  ];
+  const resultColumns: TableColumnsType<TestResult> = isObjective
+    ? [
+        {
+          title: '题号',
+          dataIndex: 'testcaseId',
+          width: 92,
+          render: (questionId: number) => {
+            const index = objectiveIndexByQuestionId.get(questionId);
+            return index ? (
+              <span className="mono">第 {index} 题</span>
+            ) : (
+              <span className="mono">#{questionId}</span>
+            );
+          },
+        },
+        {
+          title: '题目',
+          dataIndex: 'testcaseId',
+          render: (questionId: number) => {
+            const stem = objectiveStemByQuestionId.get(questionId);
+            return stem ? (
+              <span className="test-message" title={stem}>
+                {stem}
+              </span>
+            ) : (
+              <span className="muted">—</span>
+            );
+          },
+        },
+        {
+          title: '状态',
+          dataIndex: 'verdict',
+          width: 86,
+          render: (verdict: TestResult['verdict']) => <VerdictBadge verdict={verdict} />,
+        },
+        {
+          title: '得分',
+          dataIndex: 'score',
+          width: 72,
+          align: 'right',
+          render: (value: number) => <span className="score-value">{value}</span>,
+        },
+        {
+          title: '信息',
+          dataIndex: 'message',
+          render: (value: string) =>
+            value ? (
+              <span className="test-message" title={value}>
+                {value}
+              </span>
+            ) : (
+              <span className="muted">—</span>
+            ),
+        },
+      ]
+    : [
+        {
+          title: '#',
+          width: 52,
+          align: 'center',
+          render: (_value, _record, index) => <span className="muted">{index + 1}</span>,
+        },
+        {
+          title: '测试点',
+          dataIndex: 'testcaseId',
+          width: 92,
+          render: (testcaseId: number) => <span className="mono">#{testcaseId}</span>,
+        },
+        {
+          title: '状态',
+          dataIndex: 'verdict',
+          width: 86,
+          render: (verdict: TestResult['verdict']) => <VerdictBadge verdict={verdict} />,
+        },
+        {
+          title: '用时',
+          dataIndex: 'timeMs',
+          width: 94,
+          align: 'right',
+          render: (value: number) => formatRunTime(value),
+        },
+        {
+          title: '内存',
+          dataIndex: 'memoryKb',
+          width: 100,
+          align: 'right',
+          render: (value: number) => formatMemoryKb(value),
+        },
+        {
+          title: '得分',
+          dataIndex: 'score',
+          width: 72,
+          align: 'right',
+          render: (value: number) => <span className="score-value">{value}</span>,
+        },
+        {
+          title: '信息',
+          dataIndex: 'message',
+          render: (value: string) =>
+            value ? (
+              <span className="test-message" title={value}>
+                {value}
+              </span>
+            ) : (
+              <span className="muted">—</span>
+            ),
+        },
+      ];
 
   return (
     <div>
@@ -202,12 +273,18 @@ export function SubmissionDetailPage() {
 
           <Card
             className="oij-card"
-            title={`测试点${results.length > 0 ? ` (${results.length})` : ''}`}
+            title={`${isObjective ? '题目结果' : '测试点'}${
+              results.length > 0 ? ` (${results.length})` : ''
+            }`}
           >
             {results.length === 0 ? (
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
-                description={pending ? '评测完成后显示测试点结果' : '没有测试点结果（可能是编译错误或系统错误）'}
+                description={
+                  pending
+                    ? '评测完成后显示结果'
+                    : '没有结果（可能是编译错误或系统错误）'
+                }
               />
             ) : (
               <Table<TestResult>
@@ -221,9 +298,19 @@ export function SubmissionDetailPage() {
             )}
           </Card>
 
-          <Card className="oij-card" title="源代码">
-            <CodeBlock code={submission.code ?? ''} maxHeight={560} />
-          </Card>
+          {isObjective ? (
+            <Card className="oij-card" title="提交的答案（只读 JSON）">
+              <CodeBlock
+                code={prettyJson(submission.code ?? '')}
+                maxHeight={560}
+                title="答案 JSON"
+              />
+            </Card>
+          ) : (
+            <Card className="oij-card" title="源代码">
+              <CodeBlock code={submission.code ?? ''} maxHeight={560} />
+            </Card>
+          )}
         </div>
 
         <div className="stack">

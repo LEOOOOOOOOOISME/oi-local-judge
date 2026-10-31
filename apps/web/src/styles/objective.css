@@ -1,0 +1,142 @@
+/* Phase 2B 客观题：管理端编辑器 + 选手作答 UI */
+
+.objective-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.objective-editor-question {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fcfcfd;
+}
+
+.objective-editor-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.objective-editor-index {
+  font-weight: 600;
+}
+
+.objective-points-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.objective-stem-input {
+  margin-bottom: 10px;
+}
+
+.objective-editor-label {
+  margin-bottom: 5px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.objective-editor-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.objective-option-row {
+  display: grid;
+  grid-template-columns: 76px minmax(0, 1fr) 32px;
+  gap: 6px;
+  align-items: center;
+}
+
+.objective-option-key input {
+  text-align: center;
+  font-family: var(--mono);
+}
+
+.objective-editor-answer {
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.objective-answer-control {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.objective-answer-control.ant-checkbox-group {
+  display: flex;
+}
+
+.objective-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.objective-answer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.objective-question {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fcfcfd;
+}
+
+.objective-question-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.objective-question-index {
+  font-weight: 600;
+}
+
+.objective-question-points {
+  margin-left: auto;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.objective-question-stem {
+  margin-bottom: 10px;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.objective-fill-input {
+  max-width: 520px;
+}
+
+.objective-answer-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.objective-answer-summary {
+  color: var(--text-2);
+  font-size: 12px;
+}

@@ -29,7 +29,7 @@ export function submitSource(
   input: SubmitInput,
 ): { id: number } {
   const problem = getProblem(deps.db, input.problemId);
-  if (!problem || problem.visibility === 'hidden') {
+  if (!problem || (problem.visibility === 'hidden' && !input.contestId)) {
     throw new Error('problem not found');
   }
   if (!ALLOWED_LANGUAGES.has(input.language)) {

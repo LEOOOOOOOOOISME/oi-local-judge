@@ -16,15 +16,23 @@ import {
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '../api/client';
-import type { Contest, ProblemDetail, RankingRow, Submission } from '../api/types';
+import type {
+  Contest,
+  ObjectiveAnswerValue,
+  ProblemDetail,
+  RankingRow,
+  Submission,
+} from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { MetaList } from '../components/MetaList';
+import { ObjectiveAnswerForm } from '../components/ObjectiveAnswerForm';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { StatementHtml } from '../components/StatementHtml';
 import { SubmissionTable } from '../components/SubmissionTable';
 import { formatMemoryLimit, formatTimeLimit } from '../utils/format';
 import { difficultyLabel, problemLetter, problemTypeLabel } from '../utils/status';
+import '../styles/objective.css';
 
 const DEFAULT_CODE = `#include <bits/stdc++.h>
 using namespace std;
@@ -68,6 +76,9 @@ export function ProblemPage() {
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState('statement');
+  const [objectiveAnswers, setObjectiveAnswers] = useState<
+    Record<number, ObjectiveAnswerValue>
+  >({});
   const [code, setCode] = useState<string>(
     () => (validProblem ? readDraft(problemId) : null) ?? DEFAULT_CODE,
   );
@@ -77,6 +88,7 @@ export function ProblemPage() {
     if (lastProblemRef.current === problemId) return;
     lastProblemRef.current = problemId;
     setCode(readDraft(problemId) ?? DEFAULT_CODE);
+    setObjectiveAnswers({});
   }, [problemId]);
 
   useEffect(() => {
@@ -111,16 +123,22 @@ export function ProblemPage() {
     enabled: validProblem && Boolean(user),
   });
 
+  useEffect(() => {
+    if (problemQuery.data?.type === 'objective' && activeTab === 'submit') {
+      setActiveTab('statement');
+    }
+  }, [problemQuery.data?.type, activeTab]);
+
   const submitMutation = useMutation({
-    mutationFn: () =>
+    mutationFn: (payload: { language: string; code: string }) =>
       apiPost<{ id: number; status: string }>('/api/submissions', {
         problemId,
-        language: 'cpp17',
-        code,
+        language: payload.language,
+        code: payload.code,
         contestId,
       }),
     onSuccess: (data) => {
-      message.success(`提交 #${data.id} 已加入评测队列`);
+      message.success(`提交 #${data.id} 已提交`);
       void queryClient.invalidateQueries({ queryKey: ['submissions'] });
       navigate(`/submissions/${data.id}`);
     },
@@ -171,6 +189,38 @@ export function ProblemPage() {
     return <PageLoading tip="正在加载题面…" />;
   }
 
+  const isObjective = problem.type === 'objective';
+  const objectiveQuestions = problem.objective?.questions ?? [];
+  const objectiveTotal = objectiveQuestions.reduce(
+    (sum, question) => sum + Number(question.points || 0),
+    0,
+  );
+  const answeredObjectiveCount = objectiveQuestions.filter((question) => {
+    const value = objectiveAnswers[question.id];
+    return Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.trim().length > 0;
+  }).length;
+
+  const submitObjective = () => {
+    const answers = objectiveQuestions.flatMap((question) => {
+      const value = objectiveAnswers[question.id];
+      if (value === undefined) return [];
+      if (typeof value === 'string') {
+        if (value.trim().length === 0) return [];
+      } else if (value.length === 0) {
+        return [];
+      }
+      return [{ questionId: question.id, value }];
+    });
+    if (answers.length === 0) {
+      message.warning('请至少作答一题');
+      return;
+    }
+    submitMutation.mutate({
+      language: 'objective',
+      code: JSON.stringify({ answers }),
+    });
+  };
+
   const statementPanel = (
     <div className="stack">
       <Card className="oij-card statement-card">
@@ -208,6 +258,50 @@ export function ProblemPage() {
             ))}
           </div>
         </Card>
+      ) : null}
+      {isObjective ? (
+        !user ? (
+          <Card className="oij-card">
+            <Empty description="登录后即可作答">
+              <Link to={loginHref}>
+                <Button type="primary">去登录</Button>
+              </Link>
+            </Empty>
+          </Card>
+        ) : (
+          <Card
+            className="oij-card objective-answer-card"
+            title="作答"
+            extra={
+              <span className="muted">
+                已作答 {answeredObjectiveCount} / {objectiveQuestions.length} 题 · 总分{' '}
+                {objectiveTotal} 分
+              </span>
+            }
+          >
+            <ObjectiveAnswerForm
+              questions={objectiveQuestions}
+              answers={objectiveAnswers}
+              onChange={(questionId, value) =>
+                setObjectiveAnswers((previous) => ({ ...previous, [questionId]: value }))
+              }
+              disabled={submitMutation.isPending}
+            />
+            <div className="objective-answer-footer">
+              <span className="objective-answer-summary">
+                单选/判断点击选项，多选可勾选多个；填空提交后由后端统一评分。
+              </span>
+              <Button
+                type="primary"
+                onClick={submitObjective}
+                loading={submitMutation.isPending}
+                disabled={answeredObjectiveCount === 0}
+              >
+                提交答案
+              </Button>
+            </div>
+          </Card>
+        )
       ) : null}
     </div>
   );
@@ -263,7 +357,9 @@ export function ProblemPage() {
         </Popconfirm>
         <Button
           type="primary"
-          onClick={() => submitMutation.mutate()}
+          onClick={() =>
+            submitMutation.mutate({ language: 'cpp17', code })
+          }
           loading={submitMutation.isPending}
           disabled={code.trim().length === 0}
         >
@@ -332,10 +428,18 @@ export function ProblemPage() {
           </>
         }
         subtitle={
-          <span>
-            时间限制 {formatTimeLimit(problem.timeMs)} · 内存限制 {formatMemoryLimit(problem.memoryMb)}
-            {problem.tags.length > 0 ? ` · ${problem.tags.join(' / ')}` : ''}
-          </span>
+          isObjective ? (
+            <span>
+              共 {objectiveQuestions.length} 题 · 总分 {objectiveTotal} 分
+              {problem.tags.length > 0 ? ` · ${problem.tags.join(' / ')}` : ''}
+            </span>
+          ) : (
+            <span>
+              时间限制 {formatTimeLimit(problem.timeMs)} · 内存限制{' '}
+              {formatMemoryLimit(problem.memoryMb)}
+              {problem.tags.length > 0 ? ` · ${problem.tags.join(' / ')}` : ''}
+            </span>
+          )
         }
       />
 
@@ -344,58 +448,95 @@ export function ProblemPage() {
           className="problem-tabs"
           activeKey={activeTab}
           onChange={setActiveTab}
-          items={[
-            { key: 'statement', label: '题目描述', children: statementPanel },
-            { key: 'submit', label: '提交代码', children: submitPanel },
-            {
-              key: 'submissions',
-              label: `我的提交${
-                user && submissionsQuery.data ? ` (${submissionsQuery.data.length})` : ''
-              }`,
-              children: submissionsPanel,
-            },
-          ]}
+          items={
+            isObjective
+              ? [
+                  { key: 'statement', label: '题目描述', children: statementPanel },
+                  {
+                    key: 'submissions',
+                    label: `我的提交${
+                      user && submissionsQuery.data ? ` (${submissionsQuery.data.length})` : ''
+                    }`,
+                    children: submissionsPanel,
+                  },
+                ]
+              : [
+                  { key: 'statement', label: '题目描述', children: statementPanel },
+                  { key: 'submit', label: '提交代码', children: submitPanel },
+                  {
+                    key: 'submissions',
+                    label: `我的提交${
+                      user && submissionsQuery.data ? ` (${submissionsQuery.data.length})` : ''
+                    }`,
+                    children: submissionsPanel,
+                  },
+                ]
+          }
         />
 
         <div className="stack">
           <Card className="oij-card" size="small" title="题目信息">
             <MetaList
-              items={[
-                { label: '时间限制', value: formatTimeLimit(problem.timeMs) },
-                { label: '内存限制', value: formatMemoryLimit(problem.memoryMb) },
-                { label: '题目类型', value: problemTypeLabel(problem.type) },
-                {
-                  label: 'IO 模式',
-                  value:
-                    problem.ioMode === 'file'
-                      ? `${problem.inputFile ?? '—'} / ${problem.outputFile ?? '—'}`
-                      : '标准输入输出',
-                },
-                { label: '难度', value: difficultyLabel(problem.difficulty) },
-                {
-                  label: '标签',
-                  value:
-                    problem.tags.length === 0 ? (
-                      <span className="muted">—</span>
-                    ) : (
-                      <span className="tag-list">
-                        {problem.tags.map((tag) => (
-                          <Tag key={tag} bordered={false}>
-                            {tag}
-                          </Tag>
-                        ))}
-                      </span>
-                    ),
-                },
-              ]}
+              items={
+                isObjective
+                  ? [
+                      { label: '题目数量', value: `${objectiveQuestions.length} 题` },
+                      { label: '总分', value: `${objectiveTotal} 分` },
+                      { label: '题目类型', value: problemTypeLabel(problem.type) },
+                      { label: '难度', value: difficultyLabel(problem.difficulty) },
+                      {
+                        label: '标签',
+                        value:
+                          problem.tags.length === 0 ? (
+                            <span className="muted">—</span>
+                          ) : (
+                            <span className="tag-list">
+                              {problem.tags.map((tag) => (
+                                <Tag key={tag} bordered={false}>
+                                  {tag}
+                                </Tag>
+                              ))}
+                            </span>
+                          ),
+                      },
+                    ]
+                  : [
+                      { label: '时间限制', value: formatTimeLimit(problem.timeMs) },
+                      { label: '内存限制', value: formatMemoryLimit(problem.memoryMb) },
+                      { label: '题目类型', value: problemTypeLabel(problem.type) },
+                      {
+                        label: 'IO 模式',
+                        value:
+                          problem.ioMode === 'file'
+                            ? `${problem.inputFile ?? '—'} / ${problem.outputFile ?? '—'}`
+                            : '标准输入输出',
+                      },
+                      { label: '难度', value: difficultyLabel(problem.difficulty) },
+                      {
+                        label: '标签',
+                        value:
+                          problem.tags.length === 0 ? (
+                            <span className="muted">—</span>
+                          ) : (
+                            <span className="tag-list">
+                              {problem.tags.map((tag) => (
+                                <Tag key={tag} bordered={false}>
+                                  {tag}
+                                </Tag>
+                              ))}
+                            </span>
+                          ),
+                      },
+                    ]
+              }
             />
             <Button
               type="primary"
               block
               className="side-action"
-              onClick={() => setActiveTab('submit')}
+              onClick={() => setActiveTab(isObjective ? 'statement' : 'submit')}
             >
-              提交代码
+              {isObjective ? '去作答' : '提交代码'}
             </Button>
           </Card>
 

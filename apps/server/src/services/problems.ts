@@ -65,7 +65,10 @@ export function getProblemDetail(db: DatabaseSync, id: number): ProblemDetailDto
     visibility: row.visibility,
     statementHtml: row.statement_html,
     samples: JSON.parse(row.samples_json) as ProblemDetailDto['samples'],
-    objective: JSON.parse(row.objective_json) as ProblemDetailDto['objective'],
+    objective: (() => {
+      const parsed = JSON.parse(row.objective_json) as ProblemDetailDto['objective'];
+      return parsed && Array.isArray(parsed.questions) ? parsed : undefined;
+    })(),
   };
 }
 
@@ -73,7 +76,9 @@ export function getProblemDetail(db: DatabaseSync, id: number): ProblemDetailDto
 export function stripObjectiveAnswers(
   problem: ProblemDetailDto,
 ): ProblemDetailDto {
-  if (!problem.objective) return problem;
+  if (!problem.objective || !Array.isArray(problem.objective.questions)) {
+    return problem;
+  }
   return {
     ...problem,
     objective: {

@@ -115,7 +115,7 @@ export function AppShell() {
           <Outlet />
         </Suspense>
       </main>
-      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 2A</footer>
+      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 2B</footer>
     </div>
   );
 }
