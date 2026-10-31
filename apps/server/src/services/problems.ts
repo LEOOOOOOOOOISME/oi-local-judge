@@ -61,6 +61,7 @@ export function getProblemDetail(db: DatabaseSync, id: number): ProblemDetailDto
     outputFile: row.output_file,
     checkerMode: row.checker_mode as 'builtin' | 'testlib' | 'lemon',
     compareMode: row.compare_mode,
+    visibility: row.visibility,
     statementHtml: row.statement_html,
     samples: JSON.parse(row.samples_json) as ProblemDetailDto['samples'],
   };

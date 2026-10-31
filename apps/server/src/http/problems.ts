@@ -22,7 +22,7 @@ export function registerProblemRoutes(app: FastifyInstance, options: ProblemRout
   app.get<{ Params: { id: string } }>('/api/problems/:id', async (request, reply) => {
     const id = Number(request.params.id);
     const problem = Number.isInteger(id) ? getProblemDetail(options.db, id) : null;
-    if (!problem) {
+    if (!problem || problem.visibility === 'hidden') {
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND', message: 'problem not found' } });
     }
     return { ok: true, data: problem };

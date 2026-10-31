@@ -28,6 +28,7 @@ export interface ProblemDetailDto extends ProblemSummaryDto {
   outputFile: string | null;
   checkerMode: 'builtin' | 'testlib' | 'lemon';
   compareMode: string;
+  visibility: string;
   statementHtml: string;
   samples: Array<{ input: string; output: string; explanation?: string }>;
 }
