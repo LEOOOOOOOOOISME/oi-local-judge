@@ -356,6 +356,7 @@ export function AdminProblemPage() {
 
   const problem = problemQuery.data ?? null;
   const isObjective = (basicType ?? problem?.type) === 'objective';
+  const isOutputOnly = (basicType ?? problem?.type) === 'output-only';
 
   useEffect(() => {
     if (!problem) return;
@@ -819,6 +820,15 @@ export function AdminProblemPage() {
           description="请在“客观题”Tab 中维护题目、选项、正确答案和分值；比赛中的题目分值需与客观题总分一致。"
         />
       ) : null}
+      {isOutputOnly ? (
+        <Alert
+          className="objective-info-alert"
+          type="info"
+          showIcon
+          message="提交答案题无需 std / checker"
+          description="选手下载每个测试点的输入并提交输出；测试数据仍需在“测试数据”Tab 导入 .in/.out，导入后的测试点分值之和即题目总分。"
+        />
+      ) : null}
       <Form<BasicFormValues>
         form={basicForm}
         layout="vertical"
@@ -1022,6 +1032,15 @@ export function AdminProblemPage() {
         </span>
       }
     >
+      {isOutputOnly ? (
+        <Alert
+          className="objective-info-alert"
+          type="info"
+          showIcon
+          message="提交答案题不需要 std / checker 资产"
+          description="本题由选手直接提交每个测试点的输出；仍可在“测试数据”Tab 导入/调整 .in/.out。"
+        />
+      ) : null}
       {assetsQuery.isPending ? (
         <div className="inline-loading">
           <Spin />

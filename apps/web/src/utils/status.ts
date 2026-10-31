@@ -83,6 +83,7 @@ export function languageLabel(language: string): string {
   if (language === 'cpp17') return 'C++17';
   if (language === 'c11') return 'C11';
   if (language === 'objective') return '客观题';
+  if (language === 'answer') return '提交答案';
   return language.toUpperCase();
 }
 

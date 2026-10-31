@@ -17,6 +17,7 @@ import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '../api/client';
 import type {
+  AnswerFile,
   Contest,
   ObjectiveAnswerValue,
   ProblemDetail,
@@ -33,6 +34,7 @@ import { SubmissionTable } from '../components/SubmissionTable';
 import { formatMemoryLimit, formatTimeLimit } from '../utils/format';
 import { difficultyLabel, problemLetter, problemTypeLabel } from '../utils/status';
 import '../styles/objective.css';
+import '../styles/output.css';
 
 const DEFAULT_CODE = `#include <bits/stdc++.h>
 using namespace std;
@@ -79,6 +81,7 @@ export function ProblemPage() {
   const [objectiveAnswers, setObjectiveAnswers] = useState<
     Record<number, ObjectiveAnswerValue>
   >({});
+  const [outputAnswers, setOutputAnswers] = useState<Record<number, string>>({});
   const [code, setCode] = useState<string>(
     () => (validProblem ? readDraft(problemId) : null) ?? DEFAULT_CODE,
   );
@@ -89,6 +92,7 @@ export function ProblemPage() {
     lastProblemRef.current = problemId;
     setCode(readDraft(problemId) ?? DEFAULT_CODE);
     setObjectiveAnswers({});
+    setOutputAnswers({});
   }, [problemId]);
 
   useEffect(() => {
@@ -122,9 +126,18 @@ export function ProblemPage() {
       ),
     enabled: validProblem && Boolean(user),
   });
+  const answerFilesQuery = useQuery({
+    queryKey: ['answer-files', problemId],
+    queryFn: () => apiGet<AnswerFile[]>(`/api/problems/${problemId}/answer-files`),
+    enabled: validProblem && problemQuery.data?.type === 'output-only',
+  });
 
   useEffect(() => {
-    if (problemQuery.data?.type === 'objective' && activeTab === 'submit') {
+    if (
+      (problemQuery.data?.type === 'objective' ||
+        problemQuery.data?.type === 'output-only') &&
+      activeTab === 'submit'
+    ) {
       setActiveTab('statement');
     }
   }, [problemQuery.data?.type, activeTab]);
@@ -221,6 +234,35 @@ export function ProblemPage() {
     });
   };
 
+  const isOutputOnly = problem.type === 'output-only';
+  const answerFiles = answerFilesQuery.data ?? [];
+  const answerFilesTotal = answerFiles.reduce((sum, file) => sum + file.points, 0);
+  const answeredOutputCount = answerFiles.filter(
+    (file) => (outputAnswers[file.id] ?? '').trim().length > 0,
+  ).length;
+
+  const submitOutputOnly = () => {
+    if (answerFiles.length === 0) {
+      message.warning('本题还没有可作答的测试点');
+      return;
+    }
+    const missing = answerFiles.filter(
+      (file) => (outputAnswers[file.id] ?? '').trim().length === 0,
+    );
+    if (missing.length > 0) {
+      message.warning(`请先填写所有测试点的答案（还差 ${missing.length} 个）`);
+      return;
+    }
+    const answers = answerFiles.map((file) => ({
+      testcaseId: file.id,
+      value: outputAnswers[file.id] ?? '',
+    }));
+    submitMutation.mutate({
+      language: 'answer',
+      code: JSON.stringify({ answers }),
+    });
+  };
+
   const statementPanel = (
     <div className="stack">
       <Card className="oij-card statement-card">
@@ -300,6 +342,99 @@ export function ProblemPage() {
                 提交答案
               </Button>
             </div>
+          </Card>
+        )
+      ) : null}
+      {isOutputOnly ? (
+        !user ? (
+          <Card className="oij-card">
+            <Empty description="登录后即可提交答案">
+              <Link to={loginHref}>
+                <Button type="primary">去登录</Button>
+              </Link>
+            </Empty>
+          </Card>
+        ) : (
+          <Card
+            className="oij-card"
+            title="提交答案题"
+            extra={
+              <span className="muted">
+                已填写 {answeredOutputCount} / {answerFiles.length} 个测试点 · 总分{' '}
+                {answerFilesTotal} 分
+              </span>
+            }
+          >
+            <Alert
+              className="answer-file-note"
+              type="info"
+              showIcon
+              message="本题为提交答案题"
+              description="无需编写程序。请下载每个测试点的输入文件，计算后在对应文本框填写输出；全部填写后提交。"
+            />
+            {answerFilesQuery.isPending ? (
+              <div className="inline-loading">
+                <Spin />
+              </div>
+            ) : answerFilesQuery.isError ? (
+              <ErrorResult
+                error={answerFilesQuery.error}
+                onRetry={() => void answerFilesQuery.refetch()}
+              />
+            ) : answerFiles.length === 0 ? (
+              <Empty description="本题还没有可作答的测试点" />
+            ) : (
+              <>
+                <div className="answer-file-list">
+                  {answerFiles.map((file) => (
+                    <div className="answer-file-item" key={file.id}>
+                      <div className="answer-file-head">
+                        <span className="answer-file-index">
+                          测试点 {file.ordinal}
+                        </span>
+                        <a
+                          className="answer-download"
+                          href={file.inputUrl}
+                          download
+                        >
+                          下载输入
+                        </a>
+                        <span className="answer-file-points">{file.points} 分</span>
+                      </div>
+                      <Input.TextArea
+                        className="answer-file-input"
+                        value={outputAnswers[file.id] ?? ''}
+                        onChange={(event) =>
+                          setOutputAnswers((previous) => ({
+                            ...previous,
+                            [file.id]: event.target.value,
+                          }))
+                        }
+                        placeholder="填写该测试点的输出"
+                        autoSize={{ minRows: 3, maxRows: 10 }}
+                        disabled={submitMutation.isPending}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="answer-submit-footer">
+                  <span className="answer-submit-summary">
+                    输出比较遵循题目比较模式；未填写全部测试点不能提交。
+                  </span>
+                  <Button
+                    type="primary"
+                    onClick={submitOutputOnly}
+                    loading={submitMutation.isPending}
+                    disabled={
+                      answerFiles.length === 0 ||
+                      answeredOutputCount < answerFiles.length
+                    }
+                  >
+                    提交答案
+                  </Button>
+                </div>
+              </>
+            )}
           </Card>
         )
       ) : null}
@@ -433,6 +568,11 @@ export function ProblemPage() {
               共 {objectiveQuestions.length} 题 · 总分 {objectiveTotal} 分
               {problem.tags.length > 0 ? ` · ${problem.tags.join(' / ')}` : ''}
             </span>
+          ) : isOutputOnly ? (
+            <span>
+              共 {answerFiles.length} 个测试点 · 总分 {answerFilesTotal} 分
+              {problem.tags.length > 0 ? ` · ${problem.tags.join(' / ')}` : ''}
+            </span>
           ) : (
             <span>
               时间限制 {formatTimeLimit(problem.timeMs)} · 内存限制{' '}
@@ -449,7 +589,7 @@ export function ProblemPage() {
           activeKey={activeTab}
           onChange={setActiveTab}
           items={
-            isObjective
+            isObjective || isOutputOnly
               ? [
                   { key: 'statement', label: '题目描述', children: statementPanel },
                   {
@@ -500,43 +640,67 @@ export function ProblemPage() {
                           ),
                       },
                     ]
-                  : [
-                      { label: '时间限制', value: formatTimeLimit(problem.timeMs) },
-                      { label: '内存限制', value: formatMemoryLimit(problem.memoryMb) },
-                      { label: '题目类型', value: problemTypeLabel(problem.type) },
-                      {
-                        label: 'IO 模式',
-                        value:
-                          problem.ioMode === 'file'
-                            ? `${problem.inputFile ?? '—'} / ${problem.outputFile ?? '—'}`
-                            : '标准输入输出',
-                      },
-                      { label: '难度', value: difficultyLabel(problem.difficulty) },
-                      {
-                        label: '标签',
-                        value:
-                          problem.tags.length === 0 ? (
-                            <span className="muted">—</span>
-                          ) : (
-                            <span className="tag-list">
-                              {problem.tags.map((tag) => (
-                                <Tag key={tag} bordered={false}>
-                                  {tag}
-                                </Tag>
-                              ))}
-                            </span>
-                          ),
-                      },
-                    ]
+                  : isOutputOnly
+                    ? [
+                        { label: '测试点数', value: `${answerFiles.length} 个` },
+                        { label: '总分', value: `${answerFilesTotal} 分` },
+                        { label: '题目类型', value: problemTypeLabel(problem.type) },
+                        { label: '难度', value: difficultyLabel(problem.difficulty) },
+                        {
+                          label: '标签',
+                          value:
+                            problem.tags.length === 0 ? (
+                              <span className="muted">—</span>
+                            ) : (
+                              <span className="tag-list">
+                                {problem.tags.map((tag) => (
+                                  <Tag key={tag} bordered={false}>
+                                    {tag}
+                                  </Tag>
+                                ))}
+                              </span>
+                            ),
+                        },
+                      ]
+                    : [
+                        { label: '时间限制', value: formatTimeLimit(problem.timeMs) },
+                        { label: '内存限制', value: formatMemoryLimit(problem.memoryMb) },
+                        { label: '题目类型', value: problemTypeLabel(problem.type) },
+                        {
+                          label: 'IO 模式',
+                          value:
+                            problem.ioMode === 'file'
+                              ? `${problem.inputFile ?? '—'} / ${problem.outputFile ?? '—'}`
+                              : '标准输入输出',
+                        },
+                        { label: '难度', value: difficultyLabel(problem.difficulty) },
+                        {
+                          label: '标签',
+                          value:
+                            problem.tags.length === 0 ? (
+                              <span className="muted">—</span>
+                            ) : (
+                              <span className="tag-list">
+                                {problem.tags.map((tag) => (
+                                  <Tag key={tag} bordered={false}>
+                                    {tag}
+                                  </Tag>
+                                ))}
+                              </span>
+                            ),
+                        },
+                      ]
               }
             />
             <Button
               type="primary"
               block
               className="side-action"
-              onClick={() => setActiveTab(isObjective ? 'statement' : 'submit')}
+              onClick={() =>
+                setActiveTab(isObjective || isOutputOnly ? 'statement' : 'submit')
+              }
             >
-              {isObjective ? '去作答' : '提交代码'}
+              {isObjective || isOutputOnly ? '去作答' : '提交代码'}
             </Button>
           </Card>
 

@@ -3,7 +3,7 @@ import type { TableColumnsType } from 'antd';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
-import type { Contest, ProblemDetail, Submission, TestResult } from '../api/types';
+import type { AnswerFile, Contest, ProblemDetail, Submission, TestResult } from '../api/types';
 import { CodeBlock } from '../components/CodeBlock';
 import { MetaList } from '../components/MetaList';
 import { PageHead } from '../components/PageHead';
@@ -55,6 +55,11 @@ export function SubmissionDetailPage() {
     enabled: submission?.contestId !== null && submission?.contestId !== undefined,
     staleTime: 60_000,
   });
+  const answerFilesQuery = useQuery({
+    queryKey: ['answer-files', submission?.problemId],
+    queryFn: () => apiGet<AnswerFile[]>(`/api/problems/${submission?.problemId}/answer-files`),
+    enabled: submission?.language === 'answer',
+  });
 
   if (!validId) {
     return <ErrorResult error={new Error('无效的提交编号')} />;
@@ -83,12 +88,16 @@ export function SubmissionDetailPage() {
       : `/problem/${submission.problemId}`;
   const results = submission.results ?? [];
   const isObjective = submission.language === 'objective';
+  const isAnswer = submission.language === 'answer';
   const objectiveQuestions = problemQuery.data?.objective?.questions ?? [];
   const objectiveIndexByQuestionId = new Map(
     objectiveQuestions.map((question, index) => [question.id, index + 1]),
   );
   const objectiveStemByQuestionId = new Map(
     objectiveQuestions.map((question) => [question.id, question.stem]),
+  );
+  const answerOrdinalById = new Map(
+    (answerFilesQuery.data ?? []).map((file) => [file.id, file.ordinal]),
   );
 
   const resultColumns: TableColumnsType<TestResult> = isObjective
@@ -146,7 +155,48 @@ export function SubmissionDetailPage() {
             ),
         },
       ]
-    : [
+    : isAnswer
+      ? [
+          {
+            title: '题号',
+            dataIndex: 'testcaseId',
+            width: 100,
+            render: (testcaseId: number) => {
+              const ordinal = answerOrdinalById.get(testcaseId);
+              return ordinal ? (
+                <span className="mono">测试点 {ordinal}</span>
+              ) : (
+                <span className="mono">#{testcaseId}</span>
+              );
+            },
+          },
+          {
+            title: '状态',
+            dataIndex: 'verdict',
+            width: 86,
+            render: (verdict: TestResult['verdict']) => <VerdictBadge verdict={verdict} />,
+          },
+          {
+            title: '得分',
+            dataIndex: 'score',
+            width: 72,
+            align: 'right',
+            render: (value: number) => <span className="score-value">{value}</span>,
+          },
+          {
+            title: '信息',
+            dataIndex: 'message',
+            render: (value: string) =>
+              value ? (
+                <span className="test-message" title={value}>
+                  {value}
+                </span>
+              ) : (
+                <span className="muted">—</span>
+              ),
+          },
+        ]
+      : [
         {
           title: '#',
           width: 52,
@@ -273,7 +323,7 @@ export function SubmissionDetailPage() {
 
           <Card
             className="oij-card"
-            title={`${isObjective ? '题目结果' : '测试点'}${
+            title={`${isObjective ? '题目结果' : isAnswer ? '测试点结果' : '测试点'}${
               results.length > 0 ? ` (${results.length})` : ''
             }`}
           >
@@ -298,7 +348,7 @@ export function SubmissionDetailPage() {
             )}
           </Card>
 
-          {isObjective ? (
+          {isObjective || isAnswer ? (
             <Card className="oij-card" title="提交的答案（只读 JSON）">
               <CodeBlock
                 code={prettyJson(submission.code ?? '')}

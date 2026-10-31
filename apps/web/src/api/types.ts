@@ -72,6 +72,13 @@ export interface ObjectiveConfig {
   questions: ObjectiveQuestion[];
 }
 
+export interface AnswerFile {
+  id: number;
+  ordinal: number;
+  points: number;
+  inputUrl: string;
+}
+
 export type ObjectiveAnswerValue = string | string[];
 
 export interface ObjectiveAnswer {
