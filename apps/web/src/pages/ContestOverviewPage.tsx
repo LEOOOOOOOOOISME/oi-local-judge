@@ -11,6 +11,7 @@ import type {
   Submission,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { ContestAnnouncements } from '../components/ContestAnnouncements';
 import { ContestClarifications } from '../components/ContestClarifications';
 import { ContestCountdown } from '../components/Countdown';
 import { MetaList } from '../components/MetaList';
@@ -255,7 +256,9 @@ export function ContestOverviewPage() {
             key: 'overview',
             label: '比赛信息',
             children: (
-              <div className="content-grid">
+              <div className="stack">
+                <ContestAnnouncements contestId={contest.id} />
+                <div className="content-grid">
         <div className="stack">
           <Card
             className="oij-card"
@@ -372,6 +375,7 @@ export function ContestOverviewPage() {
             </Button>
           </Card>
         </div>
+              </div>
               </div>
             ),
           },

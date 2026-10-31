@@ -13,13 +13,14 @@ import {
   Row,
   Select,
   Space,
+  Spin,
   Table,
   Tag,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiDelete, apiGet, apiPost, apiPut } from '../api/client';
+import { ApiError, apiDelete, apiGet, apiPost, apiPut } from '../api/client';
 import type {
   AdminUser,
   ClassStatRow,
@@ -28,6 +29,7 @@ import type {
   ContestParticipant,
   UpdateContestRequest,
 } from '../api/types';
+import { useContestAnnouncements } from '../components/ContestAnnouncements';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { formatDateTime } from '../utils/format';
@@ -68,6 +70,7 @@ export function AdminContestConsolePage() {
   const contestId = Number(contestIdParam);
   const validId = Number.isInteger(contestId) && contestId > 0;
   const { message } = App.useApp();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [form] = Form.useForm<ContestFormValues>();
   const [savingBasic, setSavingBasic] = useState(false);
@@ -78,6 +81,12 @@ export function AdminContestConsolePage() {
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [addingParticipants, setAddingParticipants] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<number | null>(null);
+  const [extraDraft, setExtraDraft] = useState<Record<number, number>>({});
+  const [savingExtraUserId, setSavingExtraUserId] = useState<number | null>(null);
+  const [announcementTitle, setAnnouncementTitle] = useState('');
+  const [announcementBody, setAnnouncementBody] = useState('');
+  const [publishingAnnouncement, setPublishingAnnouncement] = useState(false);
+  const [deletingContest, setDeletingContest] = useState(false);
 
   const detailQuery = useQuery({
     queryKey: ['contest-detail', contestId],
@@ -100,6 +109,7 @@ export function AdminContestConsolePage() {
     queryFn: () => apiGet<AdminUser[]>('/api/admin/users?limit=500'),
     staleTime: 30_000,
   });
+  const announcementsQuery = useContestAnnouncements(contestId);
 
   const detail = detailQuery.data ?? null;
   const contest = detail?.contest ?? null;
@@ -123,6 +133,12 @@ export function AdminContestConsolePage() {
       Object.fromEntries(detail.problems.map((problem) => [problem.problemId, problem.points])),
     );
   }, [detail]);
+
+  useEffect(() => {
+    setExtraDraft(
+      Object.fromEntries(participants.map((participant) => [participant.user_id, participant.extra_time])),
+    );
+  }, [participants]);
 
   const invalidateContest = () => {
     void queryClient.invalidateQueries({ queryKey: ['contest-detail', contestId] });
@@ -241,6 +257,76 @@ export function AdminContestConsolePage() {
     }
   };
 
+  const saveExtraTime = async (participant: ContestParticipant) => {
+    const value = extraDraft[participant.user_id];
+    if (!Number.isFinite(value) || value < 0) {
+      message.error('加时秒数必须是非负数字');
+      return;
+    }
+    setSavingExtraUserId(participant.user_id);
+    try {
+      await apiPut<null>(
+        `/api/admin/contests/${contestId}/participants/${participant.user_id}`,
+        { extraTime: Number(value), status: participant.status },
+      );
+      message.success(`已保存 ${participant.username} 的加时`);
+      void queryClient.invalidateQueries({ queryKey: ['admin-participants', contestId] });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '保存加时失败');
+    } finally {
+      setSavingExtraUserId(null);
+    }
+  };
+
+  const publishAnnouncement = async () => {
+    if (!announcementTitle.trim() || !announcementBody.trim()) {
+      message.warning('请输入公告标题和正文');
+      return;
+    }
+    setPublishingAnnouncement(true);
+    try {
+      await apiPost<{ id: number; status: string }>('/api/posts', {
+        category: 'announcement',
+        title: announcementTitle.trim(),
+        body: announcementBody,
+        contestId,
+      });
+      message.success('比赛公告已发布');
+      setAnnouncementTitle('');
+      setAnnouncementBody('');
+      void queryClient.invalidateQueries({
+        queryKey: ['contest-announcements', contestId],
+      });
+      void queryClient.invalidateQueries({ queryKey: ['posts'] });
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'RATE_LIMITED') {
+        message.error('发帖过于频繁，请稍后再试');
+      } else {
+        message.error(error instanceof Error ? error.message : '发布公告失败');
+      }
+    } finally {
+      setPublishingAnnouncement(false);
+    }
+  };
+
+  const deleteContest = async () => {
+    setDeletingContest(true);
+    try {
+      await apiDelete<null>(`/api/admin/contests/${contestId}`);
+      message.success('比赛已删除');
+      void queryClient.invalidateQueries({ queryKey: ['contests'] });
+      navigate('/admin/contests');
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'HAS_SUBMISSIONS') {
+        message.error('已有提交，无法删除');
+      } else {
+        message.error(error instanceof Error ? error.message : '删除比赛失败');
+      }
+    } finally {
+      setDeletingContest(false);
+    }
+  };
+
   const problemColumns: TableColumnsType<ContestDetailProblem> = [
     {
       title: '编号',
@@ -296,6 +382,36 @@ export function AdminContestConsolePage() {
       dataIndex: 'status',
       width: 100,
       render: (value: string) => <Tag>{value}</Tag>,
+    },
+    {
+      title: '加时(秒)',
+      width: 190,
+      render: (_value, row) => (
+        <Space size={6}>
+          <InputNumber
+            className="extra-time-input"
+            size="small"
+            min={0}
+            max={86400}
+            precision={0}
+            value={extraDraft[row.user_id] ?? row.extra_time}
+            onChange={(value) =>
+              setExtraDraft((previous) => ({
+                ...previous,
+                [row.user_id]: typeof value === 'number' ? value : 0,
+              }))
+            }
+            style={{ width: 92 }}
+          />
+          <Button
+            size="small"
+            loading={savingExtraUserId === row.user_id}
+            onClick={() => void saveExtraTime(row)}
+          >
+            保存加时
+          </Button>
+        </Space>
+      ),
     },
     {
       title: '',
@@ -379,6 +495,17 @@ export function AdminContestConsolePage() {
             <Link to="/admin/contests">
               <Button>返回列表</Button>
             </Link>
+            <Popconfirm
+              title="删除这场比赛？"
+              description="此操作不可恢复；已有提交的比赛无法删除。"
+              okText="删除"
+              cancelText="取消"
+              onConfirm={() => void deleteContest()}
+            >
+              <Button danger loading={deletingContest}>
+                删除比赛
+              </Button>
+            </Popconfirm>
           </Space>
         }
       />
@@ -520,6 +647,71 @@ export function AdminContestConsolePage() {
               </Button>
             </Space>
           </div>
+        </Card>
+
+        <Card
+          className="oij-card"
+          title="比赛公告"
+          extra={<span className="muted">{announcementsQuery.data?.length ?? 0} 条</span>}
+        >
+          <div className="announcement-admin-form">
+            <Input
+              value={announcementTitle}
+              onChange={(event) => setAnnouncementTitle(event.target.value)}
+              placeholder="公告标题"
+              maxLength={200}
+            />
+            <Input.TextArea
+              value={announcementBody}
+              onChange={(event) => setAnnouncementBody(event.target.value)}
+              placeholder="Markdown 正文（支持 Markdown）"
+              autoSize={{ minRows: 3, maxRows: 7 }}
+              maxLength={20000}
+            />
+            <div className="announcement-admin-actions">
+              <span className="muted">发布后选手在比赛页“比赛信息”中可见。</span>
+              <Button
+                type="primary"
+                loading={publishingAnnouncement}
+                disabled={!announcementTitle.trim() || !announcementBody.trim()}
+                onClick={() => void publishAnnouncement()}
+              >
+                发布公告
+              </Button>
+            </div>
+          </div>
+          {announcementsQuery.isPending ? (
+            <div className="inline-loading">
+              <Spin />
+            </div>
+          ) : announcementsQuery.isError ? (
+            <ErrorResult
+              error={announcementsQuery.error}
+              onRetry={() => void announcementsQuery.refetch()}
+            />
+          ) : !announcementsQuery.data || announcementsQuery.data.length === 0 ? (
+            <Empty description="还没有比赛公告" />
+          ) : (
+            <div className="announcement-admin-list">
+              {announcementsQuery.data.map((post, index) => (
+                <article className="announcement-item" key={post.id}>
+                  <div className="announcement-head">
+                    <h3 className="announcement-title">
+                      公告 {index + 1} · <Link to={`/discuss/${post.id}`}>{post.title}</Link>
+                    </h3>
+                    <span className="muted announcement-meta">
+                      {post.author.realName ?? post.author.username} ·{' '}
+                      {formatDateTime(post.createdAt)}
+                    </span>
+                  </div>
+                  <div
+                    className="rich-text announcement-body"
+                    dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
+                  />
+                </article>
+              ))}
+            </div>
+          )}
         </Card>
 
         <Card
