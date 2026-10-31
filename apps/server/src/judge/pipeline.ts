@@ -37,6 +37,8 @@ import {
   parseObjectiveConfig,
 } from './objective.js';
 import { parseOutputAnswers, writeAnswerFiles } from './output-only.js';
+import { runInteractive } from './interactive.js';
+import { getAsset } from '../storage/repos/assets.js';
 import { runChecker, type CheckerMode } from './checker.js';
 import { runSandboxed } from './runner.js';
 import { aggregateSubtask } from './subtask.js';
@@ -458,6 +460,98 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         submissionId,
         events,
         `output-only grading failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
+    }
+    return;
+  }
+
+  if (problem.type === 'interactive') {
+    const testcases = getTestcases(db, problem.id);
+    if (testcases.length === 0) {
+      markSubmissionFailed(db, submissionId, events, 'problem has no enabled testcases');
+      return;
+    }
+    const interactorAsset = getAsset(db, problem.id, 'interactor');
+    if (!interactorAsset?.language) {
+      markSubmissionFailed(db, submissionId, events, 'interactive problem has no interactor source');
+      return;
+    }
+    const tmpRoot = join(config.dataDir, 'tmp');
+    mkdirSync(tmpRoot, { recursive: true });
+    const workdir = mkdtempSync(join(tmpRoot, `interactive-${submissionId}-`));
+    try {
+      setSubmissionStatus(db, submissionId, 'compiling');
+      const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
+      const compiled = await ensureCompiledProgram({
+        gxx: config.gxx,
+        dataDir: config.dataDir,
+        sourcePath,
+        language: submission.language,
+      });
+      if (!compiled.ok || !compiled.exe) {
+        persistJudged(db, submissionId, events, [], 'CE', 0, clipMessage(compiled.message));
+        return;
+      }
+      const interactor = await ensureCompiledProgram({
+        gxx: config.gxx,
+        dataDir: config.dataDir,
+        sourcePath: resolveDataPath(config.dataDir, interactorAsset.path),
+        language: interactorAsset.language,
+        includeDir: join(process.cwd(), 'vendor'),
+        timeoutMs: 60_000,
+      });
+      if (!interactor.ok || !interactor.exe) {
+        markSubmissionFailed(
+          db,
+          submissionId,
+          events,
+          `interactor compilation failed: ${interactor.message}`,
+        );
+        return;
+      }
+      setSubmissionStatus(db, submissionId, 'running');
+      const results = [];
+      for (const testcase of testcases) {
+        const inputPath = resolveDataPath(config.dataDir, testcase.input_path);
+        const answerPath = resolveDataPath(config.dataDir, testcase.output_path);
+        const run = await runInteractive({
+          runner: config.interactRunnerPath,
+          interactor: interactor.exe,
+          contestant: compiled.exe,
+          input: inputPath,
+          answer: answerPath,
+          workdir,
+          timeMs: problem.time_ms,
+          memoryMb: problem.memory_mb,
+          interactorErr: join(workdir, `interactor-${testcase.id}.err`),
+          contestantErr: join(workdir, `contestant-${testcase.id}.err`),
+        });
+        results.push({
+          testcaseId: testcase.id,
+          verdict: run.verdict,
+          timeMs: run.wallMs,
+          memoryKb: run.peakMemKb,
+          score: run.verdict === 'AC' ? testcase.points : 0,
+          message: clipMessage(run.message),
+        });
+      }
+      const score = results.reduce((sum, result) => sum + result.score, 0);
+      persistJudged(
+        db,
+        submissionId,
+        events,
+        results,
+        decideOverallVerdict(results, score),
+        score,
+      );
+    } catch (err) {
+      markSubmissionFailed(
+        db,
+        submissionId,
+        events,
+        `interactive judging failed: ${err instanceof Error ? err.message : String(err)}`,
       );
     } finally {
       rmSync(workdir, { recursive: true, force: true });
