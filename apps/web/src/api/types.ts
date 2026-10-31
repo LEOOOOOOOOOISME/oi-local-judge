@@ -224,6 +224,19 @@ export interface AdminUser {
   createdAt: number;
 }
 
+export interface UpdateUserRequest {
+  realName?: string | null;
+  className?: string | null;
+  role?: Role;
+  status?: 'active' | 'disabled' | string;
+}
+
+export interface ImportUsersResult {
+  created: string[];
+  skipped: string[];
+  errors: Array<{ line: number; message: string }>;
+}
+
 export interface ContestParticipant {
   user_id: number;
   username: string;

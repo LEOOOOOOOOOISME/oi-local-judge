@@ -26,3 +26,15 @@
 .contest-datetime input {
   font-family: var(--mono);
 }
+
+.user-import-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.user-import-summary .ant-tag {
+  margin-block: 2px;
+}
