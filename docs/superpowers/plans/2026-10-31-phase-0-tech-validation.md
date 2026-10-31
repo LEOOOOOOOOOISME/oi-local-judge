@@ -332,7 +332,9 @@ git commit -m "feat: add fastify server with health and websocket echo"
 
 ---
 
-### Task 3: SQLite（better-sqlite3）与 Electron ABI 验证
+### Task 3: SQLite（node:sqlite）与 Electron 可用性验证
+
+> 执行修订（2026-10-31）：better-sqlite3 的 prebuild 安装需要 spawn 子进程，被本机 DSH 沙箱以 EPERM 拦截；改用 Node 24 内置 `node:sqlite`。下列代码与测试已按此执行。
 
 **Files:**
 - Modify: `apps/server/package.json`（加 `better-sqlite3`）
