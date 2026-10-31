@@ -242,11 +242,13 @@ function interpretTestlib(result: ProcessResult, fullScore: number | undefined):
       };
     }
     const maximum = fullScore ?? 1;
-    const score = Math.max(0, Math.min(points, maximum));
+    // testlib's quitp() argument is a ratio in [0, 1], not an absolute score.
+    const ratio = Math.max(0, Math.min(points, 1));
+    const score = ratio * maximum;
     if (score <= EPSILON) {
       return { status: 'WA', score: 0, message };
     }
-    if (score >= maximum - EPSILON) {
+    if (ratio >= 1 - EPSILON) {
       return { status: 'AC', score, message };
     }
     return { status: 'PC', score, message };

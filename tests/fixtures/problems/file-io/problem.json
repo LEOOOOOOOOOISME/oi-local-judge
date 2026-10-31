@@ -1,0 +1,13 @@
+{
+  "title": "File IO A+B",
+  "type": "standard",
+  "difficulty": 1,
+  "tags": ["文件IO"],
+  "timeMs": 1000,
+  "memoryMb": 64,
+  "ioMode": "file",
+  "inputFile": "sum.in",
+  "outputFile": "sum.out",
+  "statement": "从 sum.in 读两个整数，向 sum.out 输出和。",
+  "testcases": [{ "input": "data/case.in", "output": "data/case.out", "points": 100 }]
+}

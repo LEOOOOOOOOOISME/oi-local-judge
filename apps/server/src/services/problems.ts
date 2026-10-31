@@ -27,6 +27,11 @@ interface ProblemJson {
   statement?: string;
   statementHtml?: string;
   samples?: Array<{ input: string; output: string; explanation?: string }>;
+  checker?: {
+    mode?: 'builtin' | 'testlib' | 'lemon';
+    source?: string;
+    compare?: string;
+  };
   testcases: Array<{ input: string; output: string; points: number; subtaskId?: number }>;
 }
 
@@ -81,6 +86,24 @@ export function importProblemDirectory(options: {
       throw new Error(`missing answer file: ${testcase.output}`);
     }
   }
+  const streamFile = (name: string | null | undefined): string | null => {
+    if (!name) return null;
+    if (name.includes('/') || name.includes('\\') || name === '.' || name === '..') {
+      throw new Error(`invalid file IO name: ${name}`);
+    }
+    return name;
+  };
+  const inputFile = streamFile(manifest.inputFile);
+  const outputFile = streamFile(manifest.outputFile);
+  if (manifest.ioMode === 'file' && (!inputFile || !outputFile)) {
+    throw new Error('file IO problems require inputFile and outputFile');
+  }
+  const checkerMode = manifest.checker?.mode ?? 'builtin';
+  if (checkerMode !== 'builtin') {
+    if (!manifest.checker?.source || !existsSync(join(sourceDir, manifest.checker.source))) {
+      throw new Error(`checker source not found: ${manifest.checker?.source ?? '(missing)'}`);
+    }
+  }
 
   const statementHtml =
     manifest.statementHtml ?? markdown.render(manifest.statement ?? `# ${manifest.title}\n`);
@@ -93,10 +116,12 @@ export function importProblemDirectory(options: {
     timeMs: manifest.timeMs,
     memoryMb: manifest.memoryMb,
     ioMode: manifest.ioMode ?? 'stdio',
-    inputFile: manifest.inputFile ?? null,
-    outputFile: manifest.outputFile ?? null,
+    inputFile,
+    outputFile,
     statementHtml,
     samples: manifest.samples ?? [],
+    checkerMode,
+    compareMode: manifest.checker?.compare ?? 'ignore-trailing',
     testcases: manifest.testcases.map((testcase) => ({
       inputPath: testcase.input,
       outputPath: testcase.output,
@@ -123,6 +148,16 @@ export function importProblemDirectory(options: {
       row.id,
     );
   });
+
+  if (checkerMode !== 'builtin' && manifest.checker?.source) {
+    const srcDir = join(options.config.dataDir, 'problems', String(problemId), 'src');
+    mkdirSync(srcDir, { recursive: true });
+    const fileName = basename(manifest.checker.source);
+    copyFileSync(join(sourceDir, manifest.checker.source), join(srcDir, fileName));
+    options.db
+      .prepare('UPDATE problems SET checker_path = ? WHERE id = ?')
+      .run(`problems/${problemId}/src/${fileName}`, problemId);
+  }
 
   return problemId;
 }

@@ -1,4 +1,4 @@
-﻿import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 
 export interface ContestRow {
   id: number;
@@ -60,8 +60,19 @@ export function getContestProblemIds(db: DatabaseSync, contestId: number): numbe
   return (
     db
       .prepare('SELECT problem_id FROM contest_problems WHERE contest_id = ? ORDER BY ordinal')
-      .all(contestId) as Array<{ problem_id: number }>
+      .all(contestId) as unknown as Array<{ problem_id: number }>
   ).map((row) => row.problem_id);
+}
+
+export function getContestProblemEntries(
+  db: DatabaseSync,
+  contestId: number,
+): Array<{ problem_id: number; ordinal: number; points: number }> {
+  return db
+    .prepare(
+      'SELECT problem_id, ordinal, points FROM contest_problems WHERE contest_id = ? ORDER BY ordinal',
+    )
+    .all(contestId) as unknown as Array<{ problem_id: number; ordinal: number; points: number }>;
 }
 
 export function addParticipant(db: DatabaseSync, contestId: number, userId: number): void {

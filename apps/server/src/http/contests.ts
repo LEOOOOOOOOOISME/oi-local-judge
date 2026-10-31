@@ -4,6 +4,7 @@ import { createContest } from '../storage/repos/contests.js';
 import {
   endContest,
   freezeContest,
+  getContestDetail,
   getContestRanking,
   listContestDtos,
   startContest,
@@ -19,6 +20,14 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     ok: true,
     data: listContestDtos(options.db),
   }));
+
+  app.get<{ Params: { id: string } }>('/api/contests/:id', async (request, reply) => {
+    const detail = getContestDetail(options.db, Number(request.params.id));
+    if (!detail) {
+      return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    }
+    return { ok: true, data: detail };
+  });
 
   app.get<{ Params: { id: string } }>('/api/contests/:id/ranking', async (request, reply) => {
     const ranking = getContestRanking(options.db, Number(request.params.id));

@@ -13,6 +13,9 @@ CREATE TABLE IF NOT EXISTS problems(
   memory_mb INTEGER NOT NULL, io_mode TEXT NOT NULL DEFAULT 'stdio',
   input_file TEXT, output_file TEXT, statement_html TEXT NOT NULL DEFAULT '',
   samples_json TEXT NOT NULL DEFAULT '[]',
+  checker_mode TEXT NOT NULL DEFAULT 'builtin',
+  checker_path TEXT,
+  compare_mode TEXT NOT NULL DEFAULT 'ignore-trailing',
   visibility TEXT NOT NULL DEFAULT 'public', version INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
@@ -22,6 +25,7 @@ CREATE TABLE IF NOT EXISTS problem_testcases(
   subtask_id INTEGER, depends_on TEXT, enabled INTEGER NOT NULL DEFAULT 1,
   FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_testcases_problem ON problem_testcases(problem_id, ordinal);
 CREATE TABLE IF NOT EXISTS problem_subtasks(
   id INTEGER PRIMARY KEY, problem_id INTEGER NOT NULL, name TEXT NOT NULL,
   points INTEGER NOT NULL, aggregation TEXT NOT NULL DEFAULT 'min',
@@ -37,6 +41,8 @@ CREATE TABLE IF NOT EXISTS submissions(
 );
 CREATE INDEX IF NOT EXISTS idx_submissions_user ON submissions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_contest ON submissions(contest_id, user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_submissions_problem ON submissions(problem_id, id);
+CREATE INDEX IF NOT EXISTS idx_submissions_user_id ON submissions(user_id, id DESC);
 CREATE TABLE IF NOT EXISTS test_results(
   submission_id INTEGER NOT NULL, testcase_id INTEGER NOT NULL, verdict TEXT NOT NULL,
   time_ms INTEGER NOT NULL, memory_kb INTEGER NOT NULL, score INTEGER NOT NULL,
@@ -68,8 +74,22 @@ CREATE TABLE IF NOT EXISTS contest_participants(
 export function migrate(db: DatabaseSync): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
   db.exec(SCHEMA);
+  ensureColumn(db, 'problems', 'samples_json', "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, 'problems', 'checker_mode', "TEXT NOT NULL DEFAULT 'builtin'");
+  ensureColumn(db, 'problems', 'checker_path', 'TEXT');
+  ensureColumn(db, 'problems', 'compare_mode', "TEXT NOT NULL DEFAULT 'ignore-trailing'");
+  ensureColumn(db, 'submissions', 'message', "TEXT NOT NULL DEFAULT ''");
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
     db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)').run(Date.now());
+  }
+}
+
+function ensureColumn(db: DatabaseSync, table: string, column: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{
+    name: string;
+  }>;
+  if (!columns.some((entry) => entry.name === column)) {
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
   }
 }

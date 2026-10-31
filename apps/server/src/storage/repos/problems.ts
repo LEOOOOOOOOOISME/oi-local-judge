@@ -33,6 +33,9 @@ export interface ProblemRow {
   output_file: string | null;
   statement_html: string;
   samples_json: string;
+  checker_mode: string;
+  checker_path: string | null;
+  compare_mode: string;
   visibility: string;
   version: number;
   created_at: number;
@@ -50,6 +53,9 @@ export interface CreateProblemInput {
   outputFile?: string | null;
   statementHtml?: string;
   samples?: Array<{ input: string; output: string; explanation?: string }>;
+  checkerMode?: 'builtin' | 'testlib' | 'lemon';
+  checkerPath?: string | null;
+  compareMode?: string;
   visibility?: string;
   testcases: Array<{
     inputPath: string;
@@ -66,8 +72,9 @@ export function createProblem(db: DatabaseSync, input: CreateProblemInput): numb
   const result = db
     .prepare(
       `INSERT INTO problems(title, type, difficulty, tags_json, time_ms, memory_mb,
-         io_mode, input_file, output_file, statement_html, samples_json, visibility, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         io_mode, input_file, output_file, statement_html, samples_json, checker_mode,
+         checker_path, compare_mode, visibility, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.title,
@@ -81,6 +88,9 @@ export function createProblem(db: DatabaseSync, input: CreateProblemInput): numb
       input.outputFile ?? null,
       input.statementHtml ?? '',
       JSON.stringify(input.samples ?? []),
+      input.checkerMode ?? 'builtin',
+      input.checkerPath ?? null,
+      input.compareMode ?? 'ignore-trailing',
       input.visibility ?? 'public',
       Date.now(),
     );

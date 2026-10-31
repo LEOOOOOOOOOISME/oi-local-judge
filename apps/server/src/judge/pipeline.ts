@@ -7,7 +7,7 @@
 //    are ignored. SPJ is not wired in yet (checker.ts remains Phase 0 code).
 //  - Compile error -> verdict CE. Pipeline/internal errors -> failed + SE.
 //  - Temporary files live under <dataDir>/tmp and are always removed.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 
@@ -29,6 +29,9 @@ import {
   setSubmissionStatus,
 } from '../storage/repos/submissions.js';
 import { compileSource } from './compiler.js';
+import { ensureCompiledProgram } from './compile-cache.js';
+import { ensureChecker } from './checker-cache.js';
+import { runChecker, type CheckerMode } from './checker.js';
 import { runSandboxed } from './runner.js';
 import { aggregateSubtask } from './subtask.js';
 
@@ -68,14 +71,15 @@ export interface JudgedResult {
   message: string;
 }
 
-const VERDICT_PRIORITY: readonly Verdict[] = ['SE', 'MLE', 'TLE', 'RE', 'PE', 'WA'];
+const VERDICT_PRIORITY: readonly Verdict[] = ['SE', 'MLE', 'TLE', 'RE', 'PE'];
 
-export function decideOverallVerdict(results: readonly JudgedResult[]): Verdict {
+export function decideOverallVerdict(results: readonly JudgedResult[], score = 0): Verdict {
   if (results.length === 0) return 'SE';
   if (results.every((result) => result.verdict === 'AC')) return 'AC';
   for (const candidate of VERDICT_PRIORITY) {
     if (results.some((result) => result.verdict === candidate)) return candidate;
   }
+  if (score > 0) return 'PC';
   return 'WA';
 }
 
@@ -98,10 +102,39 @@ export function normalizeOutput(text: string): string {
     .replace(/\n+$/, '');
 }
 
-export function outputMatches(expectedPath: string, actualPath: string): boolean {
-  const expected = normalizeOutput(readFileSync(expectedPath, 'utf8'));
-  const actual = normalizeOutput(readFileSync(actualPath, 'utf8'));
-  return expected === actual;
+export function outputMatches(
+  expectedPath: string,
+  actualPath: string,
+  mode = 'ignore-trailing',
+  epsilon = 1e-6,
+): boolean {
+  const expected = readFileSync(expectedPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+  const actual = readFileSync(actualPath, 'utf8').replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n');
+
+  switch (mode) {
+    case 'exact':
+      return expected === actual;
+    case 'ignore-all':
+      return expected.replace(/\s+/g, '') === actual.replace(/\s+/g, '');
+    case 'case-insensitive':
+      return normalizeOutput(expected).toLowerCase() === normalizeOutput(actual).toLowerCase();
+    case 'float': {
+      const expectedTokens = normalizeOutput(expected).split(/\s+/).filter(Boolean);
+      const actualTokens = normalizeOutput(actual).split(/\s+/).filter(Boolean);
+      if (expectedTokens.length !== actualTokens.length) return false;
+      return expectedTokens.every((token, index) => {
+        const left = Number(token);
+        const right = Number(actualTokens[index]);
+        if (Number.isFinite(left) && Number.isFinite(right)) {
+          return Math.abs(left - right) <= epsilon * Math.max(1, Math.abs(left));
+        }
+        return token === actualTokens[index];
+      });
+    }
+    case 'ignore-trailing':
+    default:
+      return normalizeOutput(expected) === normalizeOutput(actual);
+  }
 }
 
 function clipMessage(message: string): string {
@@ -212,12 +245,23 @@ async function judgeTestcase(args: {
   testcase: TestcaseRow;
   workdir: string;
   outExe: string;
+  checkerExe?: string;
 }): Promise<JudgedResult> {
-  const { config, problem, testcase, workdir, outExe } = args;
+  const { config, problem, testcase, workdir, outExe, checkerExe } = args;
   const stdoutFile = join(workdir, `case-${testcase.id}.out`);
   const stderrFile = join(workdir, `case-${testcase.id}.err`);
+  const inputPath = resolveDataPath(config.dataDir, testcase.input_path);
+  const answerPath = resolveDataPath(config.dataDir, testcase.output_path);
   const timeLimitMs = Math.max(1, problem.time_ms);
   const wallLimitMs = timeLimitMs + JUDGE_WALL_CLOCK_BUFFER_MS;
+
+  let stdinFile = inputPath;
+  let contestantOutput = stdoutFile;
+  if (problem.io_mode === 'file' && problem.input_file && problem.output_file) {
+    stdinFile = join(workdir, problem.input_file);
+    copyFileSync(inputPath, stdinFile);
+    contestantOutput = join(workdir, problem.output_file);
+  }
 
   const run = await runSandboxed({
     runner: config.runnerPath,
@@ -227,7 +271,7 @@ async function judgeTestcase(args: {
     wallMs: wallLimitMs,
     memoryMb: Math.max(1, problem.memory_mb),
     processLimit: 1,
-    stdinFile: resolveDataPath(config.dataDir, testcase.input_path),
+    stdinFile,
     stdoutFile,
     stderrFile,
   });
@@ -274,10 +318,34 @@ async function judgeTestcase(args: {
     };
   }
 
-  const accepted = outputMatches(
-    resolveDataPath(config.dataDir, testcase.output_path),
-    stdoutFile,
-  );
+  if (!existsSync(contestantOutput)) {
+    return {
+      ...base,
+      verdict: 'WA',
+      message: problem.io_mode === 'file' ? `output file ${problem.output_file} is missing` : 'no output',
+    };
+  }
+
+  if (checkerExe) {
+    const checked = await runChecker({
+      mode: problem.checker_mode as CheckerMode,
+      checker: checkerExe,
+      input: inputPath,
+      output: contestantOutput,
+      answer: answerPath,
+      workdir,
+      timeMs: 10_000,
+      fullScore: testcase.points,
+    });
+    return {
+      ...base,
+      verdict: checked.status,
+      score: checked.score,
+      message: clipMessage(checked.message),
+    };
+  }
+
+  const accepted = outputMatches(answerPath, contestantOutput, problem.compare_mode);
   if (!accepted) {
     return { ...base, verdict: 'WA', message: 'output differs from the expected answer' };
   }
@@ -323,25 +391,75 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
 
   try {
     const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
-    const outExe = join(workdir, 'prog.exe');
 
     setSubmissionStatus(db, submissionId, 'compiling');
-    const compiled = await compileSource({
+    const compiled = await ensureCompiledProgram({
       gxx: config.gxx,
+      dataDir: config.dataDir,
       sourcePath,
-      outExe,
-      workdir,
       language: submission.language,
     });
-    if (!compiled.ok) {
+    if (!compiled.ok || !compiled.exe) {
       persistJudged(db, submissionId, events, [], 'CE', 0, clipMessage(compiled.message));
       return;
+    }
+    const outExe = compiled.exe;
+
+    let checkerExe: string | undefined;
+    if (problem.checker_mode !== 'builtin') {
+      if (!problem.checker_path) {
+        markSubmissionFailed(db, submissionId, events, 'problem has no checker source');
+        return;
+      }
+      checkerExe = join(workdir, 'checker.exe');
+      const checkerCompiled = await ensureChecker({
+        gxx: config.gxx,
+        dataDir: config.dataDir,
+        sourcePath: resolveDataPath(config.dataDir, problem.checker_path),
+        includeDir: join(process.cwd(), 'vendor'),
+      });
+      if (!checkerCompiled.ok || !checkerCompiled.exe) {
+        markSubmissionFailed(
+          db,
+          submissionId,
+          events,
+          `checker compilation failed: ${clipMessage(checkerCompiled.message)}`,
+        );
+        return;
+      }
+      checkerExe = checkerCompiled.exe;
     }
 
     setSubmissionStatus(db, submissionId, 'running');
     const results: JudgedResult[] = [];
+    const passed = new Set<number>();
     for (const testcase of testcases) {
-      results.push(await judgeTestcase({ config, problem, testcase, workdir, outExe }));
+      const dependencies = (testcase.depends_on ?? '')
+        .split(/[,\s]+/)
+        .filter(Boolean)
+        .map(Number)
+        .filter((value) => Number.isInteger(value));
+      if (dependencies.some((dependency) => !passed.has(dependency))) {
+        results.push({
+          testcaseId: testcase.id,
+          verdict: 'SK',
+          timeMs: 0,
+          memoryKb: 0,
+          score: 0,
+          message: 'skipped: dependency not passed',
+        });
+        continue;
+      }
+      const result = await judgeTestcase({
+        config,
+        problem,
+        testcase,
+        workdir,
+        outExe,
+        checkerExe,
+      });
+      results.push(result);
+      if (result.verdict === 'AC') passed.add(testcase.id);
     }
 
     const dtoResults: TestResultDto[] = results.map((result) => ({
@@ -365,7 +483,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       submissionId,
       events,
       results,
-      decideOverallVerdict(results),
+      decideOverallVerdict(results, score),
       score,
     );
   } catch (err) {

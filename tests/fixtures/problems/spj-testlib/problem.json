@@ -1,0 +1,12 @@
+{
+  "title": "SPJ A+B",
+  "type": "standard",
+  "difficulty": 1,
+  "tags": ["SPJ"],
+  "timeMs": 1000,
+  "memoryMb": 64,
+  "ioMode": "stdio",
+  "checker": { "mode": "testlib", "source": "checker.cpp" },
+  "statement": "输出 a+b；特判器对错误答案给 50% 分。",
+  "testcases": [{ "input": "data/1.in", "output": "data/1.out", "points": 100 }]
+}
