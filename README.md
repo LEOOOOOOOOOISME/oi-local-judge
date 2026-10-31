@@ -1,0 +1,42 @@
+# OI Local Judge
+
+Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手端，支持比赛模式、Special Judge、交互题、子任务、客观题组卷、榜单与数据分析。
+
+> 状态：设计完成，Phase 0 技术验证进行中。代码尚未开始实现。
+
+## 文档
+
+- [需求规格 requirement.txt](requirement.txt)：功能需求（180+ 条）、性能指标、红队推演、三期路线图
+- [技术设计](docs/superpowers/specs/2026-10-31-oi-judge-design.md)：进程拓扑、模块边界、评测/沙箱、数据模型、性能与安全设计
+- [前人实现调研](docs/research/prior-art.md)：Lemon/Hydro/UOJ/testlib 的可复用性与许可证结论
+
+## 目标能力
+
+- 单机 / 机房 / 局域网托管三种形态，选手用浏览器访问
+- 传统题、文件 IO、交互题、提交答案题、客观题（单选/多选/判断/填空）
+- testlib 与 Lemon 六参数双模式 SPJ、子任务聚合
+- OI / IOI / ACM / 自定义赛制，封榜、补时、动态改题、班级统计
+- 洛谷式信息架构：题库、题目页、评测记录、个人中心、讨论/题解/答疑/私信
+- Windows Job Object 工程级沙箱；性能按 4 核 8G、300 在线、50 并发提交设计
+
+## 技术栈
+
+Electron + React + TypeScript + Vite + Ant Design；Fastify + SQLite(WAL)；C++17 原生 `ojrunner.exe`（MinGW GCC 16 构建）；testlib.h（MIT）。
+
+## 开发环境
+
+- Node.js 24+
+- MinGW-W64 GCC 16（自动探测，或设置 `OIJ_GXX`）
+- CMake 3.20+
+- Windows 10/11 x64
+
+## Roadmap
+
+- Phase 0：技术验证（Electron+SQLite、Job Object runner、testlib SPJ、Fastify+WS、微基准）
+- Phase 1：账号、题库、评测内核、比赛、榜单、班级统计、交互题、性能门禁
+- Phase 2：榜单大屏/导出/奖项、社区、批量评测、出题工具链、客观题
+- Phase 3：交互进阶、强沙箱后端、虚拟赛/团队赛、通知、PDF、深色/多语言
+
+## 许可证
+
+待定。第三方组件（testlib.h 等）的许可证与声明在引入时保留。
