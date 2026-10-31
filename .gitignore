@@ -19,6 +19,7 @@ OiJudgeData/
 
 # Logs / test artifacts
 *.log
+electron-smoke.log
 coverage/
 playwright-report/
 test-results/
