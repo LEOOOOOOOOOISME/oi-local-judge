@@ -47,7 +47,19 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
 
   const webDist = join(process.cwd(), 'apps/web/dist');
   if (existsSync(webDist)) {
-    await app.register(fastifyStatic, { root: webDist, prefix: '/' });
+    await app.register(fastifyStatic, {
+      root: webDist,
+      prefix: '/',
+    });
+    app.addHook('onSend', async (request, reply, payload) => {
+      const url = request.url.split('?')[0];
+      if (url.startsWith('/assets/')) {
+        reply.header('Cache-Control', 'public, max-age=31536000, immutable');
+      } else if (!url.startsWith('/api/') && !url.startsWith('/ws')) {
+        reply.header('Cache-Control', 'no-cache');
+      }
+      return payload;
+    });
     app.setNotFoundHandler((request, reply) => {
       if (request.url.startsWith('/api/') || request.url.startsWith('/ws')) {
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });

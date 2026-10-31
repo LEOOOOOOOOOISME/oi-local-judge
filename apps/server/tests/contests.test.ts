@@ -99,4 +99,32 @@ describe('contest ranking', () => {
     db.close();
     await app.close();
   });
+
+  it('returns contest detail with problem points', async () => {
+    const { db, app } = setup();
+    const p1 = createProblem(db, {
+      title: 'P1',
+      type: 'standard',
+      timeMs: 1000,
+      memoryMb: 64,
+      testcases: [{ inputPath: '1.in', outputPath: '1.out', points: 100 }],
+    });
+    const contestId = createContest(db, { name: 'Detail', problemIds: [p1] });
+    const res = await app.inject({ method: 'GET', url: `/api/contests/${contestId}` });
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as {
+      data: {
+        contest: { name: string };
+        problems: Array<{ problemId: number; points: number; title: string }>;
+        participantCount: number;
+      };
+    };
+    expect(body.data.contest.name).toBe('Detail');
+    expect(body.data.problems).toEqual([
+      expect.objectContaining({ problemId: p1, points: 100, title: 'P1' }),
+    ]);
+    expect(body.data.participantCount).toBe(0);
+    db.close();
+    await app.close();
+  });
 });

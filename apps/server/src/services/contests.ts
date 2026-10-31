@@ -2,12 +2,14 @@ import type { DatabaseSync } from 'node:sqlite';
 import { computeOiRanking, type RankingRow, type Verdict } from '@oij/shared';
 import {
   getContest,
+  getContestProblemEntries,
   getContestProblemIds,
   getParticipants,
   listContests,
   setContestStatus,
   type ContestRow,
 } from '../storage/repos/contests.js';
+import { getProblem } from '../storage/repos/problems.js';
 import { listContestSubmissions } from '../storage/repos/submissions.js';
 import { getUserById } from '../storage/repos/users.js';
 
@@ -15,6 +17,43 @@ export interface ContestRankingRow extends RankingRow {
   username: string;
   realName: string | null;
   className: string | null;
+}
+
+export interface ContestDetail {
+  contest: ContestRow;
+  problems: Array<{
+    problemId: number;
+    ordinal: number;
+    points: number;
+    title: string;
+    type: string;
+    difficulty: number | null;
+    timeMs: number;
+    memoryMb: number;
+  }>;
+  participantCount: number;
+}
+
+export function getContestDetail(db: DatabaseSync, contestId: number): ContestDetail | null {
+  const contest = getContest(db, contestId);
+  if (!contest) return null;
+  const problems = getContestProblemEntries(db, contestId)
+    .map((entry) => {
+      const problem = getProblem(db, entry.problem_id);
+      if (!problem) return null;
+      return {
+        problemId: problem.id,
+        ordinal: entry.ordinal,
+        points: entry.points,
+        title: problem.title,
+        type: problem.type,
+        difficulty: problem.difficulty,
+        timeMs: problem.time_ms,
+        memoryMb: problem.memory_mb,
+      };
+    })
+    .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
+  return { contest, problems, participantCount: getParticipants(db, contestId).length };
 }
 
 export function getContestRanking(
