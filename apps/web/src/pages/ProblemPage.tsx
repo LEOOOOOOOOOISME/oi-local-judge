@@ -277,6 +277,13 @@ export function ProblemPage() {
           }`}
         />
       ) : null}
+      {problem.type === 'interactive' ? (
+        <Alert
+          type="info"
+          showIcon
+          message="交互题：你的程序通过 stdin/stdout 与交互器实时交互，请按题面协议读写并刷新输出。"
+        />
+      ) : null}
       {problem.samples.length > 0 ? (
         <Card className="oij-card" title="样例">
           <div className="stack">

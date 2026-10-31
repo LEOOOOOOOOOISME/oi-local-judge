@@ -11,6 +11,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc -b",
     "build:runner": "node tools/build-runner.mjs",
+    "build:interact": "node tools/build-interact.mjs",
+    "build:native": "node tools/build-runner.mjs && node tools/build-interact.mjs",
     "bench": "node tools/bench/run-all.mjs",
     "bench:concurrency": "tsx tools/bench/concurrency.mjs",
     "seed": "tsx tools/seed/seed.ts",

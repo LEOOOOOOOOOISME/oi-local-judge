@@ -9,6 +9,7 @@ export interface Config {
   judgeConcurrency: number;
   gxx: string;
   runnerPath: string;
+  interactRunnerPath: string;
   adminUsername: string;
   adminPassword: string;
   sessionSecret: string;
@@ -48,6 +49,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     judgeConcurrency: Math.max(1, Number(env.OIJ_JUDGE_CONCURRENCY ?? 2)),
     gxx: detectGxx(env),
     runnerPath: env.OIJ_RUNNER ?? join(process.cwd(), 'native/runner/out/ojrunner.exe'),
+    interactRunnerPath:
+      env.OIJ_INTERACT_RUNNER ?? join(process.cwd(), 'native/interact/out/ojinteract.exe'),
     adminUsername: env.OIJ_ADMIN_USERNAME ?? 'admin',
     adminPassword: env.OIJ_ADMIN_PASSWORD ?? 'admin123',
     sessionSecret: env.OIJ_SESSION_SECRET ?? 'dev-only-change-me',
