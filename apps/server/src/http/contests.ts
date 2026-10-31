@@ -3,11 +3,14 @@ import type { DatabaseSync } from 'node:sqlite';
 import { createContest } from '../storage/repos/contests.js';
 import {
   addParticipant,
+  countContestSubmissions,
+  deleteContest,
   getContest,
   listContestParticipants,
   removeParticipant,
   setContestProblems,
   updateContest,
+  updateParticipant,
 } from '../storage/repos/contests.js';
 import { getUserByUsername } from '../storage/repos/users.js';
 import {
@@ -176,6 +179,36 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       return { ok: true, data: null };
     },
   );
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/admin/contests/:id',
+    { preHandler: guards },
+    async (request, reply) => {
+      const contestId = Number(request.params.id);
+      if (!getContest(options.db, contestId)) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      if (countContestSubmissions(options.db, contestId) > 0) {
+        return reply.code(409).send({
+          ok: false,
+          error: { code: 'HAS_SUBMISSIONS', message: 'contest still has submissions' },
+        });
+      }
+      deleteContest(options.db, contestId);
+      return { ok: true, data: null };
+    },
+  );
+
+  app.put<{
+    Params: { id: string; userId: string };
+    Body: { extraTime?: number; status?: string };
+  }>('/api/admin/contests/:id/participants/:userId', { preHandler: guards }, async (request) => {
+    updateParticipant(options.db, Number(request.params.id), Number(request.params.userId), {
+      extraTime: request.body?.extraTime,
+      status: request.body?.status,
+    });
+    return { ok: true, data: null };
+  });
 
   app.put<{
     Params: { id: string };

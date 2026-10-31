@@ -182,4 +182,28 @@ describe('admin contest management', () => {
     const id = createContest(db, { name: 'Helper', problemIds: [problemId] });
     expect(getContest(db, id)?.name).toBe('Helper');
   });
+
+  it('updates participant extra time and deletes empty contests', async () => {
+    const contestId = createContest(db, { name: 'Deletable', problemIds: [] });
+    await app.inject({
+      method: 'POST',
+      url: `/api/admin/contests/${contestId}/participants`,
+      headers: { cookie },
+      payload: { userIds: [classAUser] },
+    });
+    const updated = await app.inject({
+      method: 'PUT',
+      url: `/api/admin/contests/${contestId}/participants/${classAUser}`,
+      headers: { cookie },
+      payload: { extraTime: 600, status: 'accepted' },
+    });
+    expect(updated.statusCode).toBe(200);
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/admin/contests/${contestId}`,
+      headers: { cookie },
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(getContest(db, contestId)).toBeNull();
+  });
 });
