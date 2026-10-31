@@ -136,6 +136,41 @@ export function removeParticipant(db: DatabaseSync, contestId: number, userId: n
   );
 }
 
+export function updateParticipant(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+  patch: { extraTime?: number; status?: string },
+): void {
+  const sets: string[] = [];
+  const values: Array<string | number> = [];
+  if (patch.extraTime !== undefined) {
+    sets.push('extra_time = ?');
+    values.push(Math.max(0, Math.floor(patch.extraTime)));
+  }
+  if (patch.status !== undefined && ['accepted', 'pending', 'rejected'].includes(patch.status)) {
+    sets.push('status = ?');
+    values.push(patch.status);
+  }
+  if (sets.length === 0) return;
+  db.prepare(
+    `UPDATE contest_participants SET ${sets.join(', ')} WHERE contest_id = ? AND user_id = ?`,
+  ).run(...values, contestId, userId);
+}
+
+export function deleteContest(db: DatabaseSync, contestId: number): void {
+  db.prepare('DELETE FROM contest_problems WHERE contest_id = ?').run(contestId);
+  db.prepare('DELETE FROM contest_participants WHERE contest_id = ?').run(contestId);
+  db.prepare('DELETE FROM contests WHERE id = ?').run(contestId);
+}
+
+export function countContestSubmissions(db: DatabaseSync, contestId: number): number {
+  const row = db
+    .prepare('SELECT COUNT(*) AS n FROM submissions WHERE contest_id = ?')
+    .get(contestId) as { n: number } | undefined;
+  return Number(row?.n ?? 0);
+}
+
 export function getContestProblemIds(db: DatabaseSync, contestId: number): number[] {
   return (
     db
