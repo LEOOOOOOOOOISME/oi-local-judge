@@ -1,5 +1,6 @@
-import { Alert, Button, Card, Empty, Spin, Table, Tag } from 'antd';
+import { Alert, App, Button, Card, Empty, Space, Spin, Table, Tag } from 'antd';
 import type { TableColumnsType } from 'antd';
+import { DownloadOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
@@ -21,6 +22,7 @@ import {
   verdictTitle,
   type ContestPhase,
 } from '../utils/status';
+import { buildRankingCsv, downloadCsv } from '../utils/ranking';
 
 const PHASE_COLOR: Record<ContestPhase, string> = {
   upcoming: 'default',
@@ -49,6 +51,7 @@ export function ContestRankingPage() {
   const contestId = Number(contestIdParam);
   const validId = Number.isInteger(contestId) && contestId > 0;
   const now = useNow(1000);
+  const { message } = App.useApp();
 
   const contestsQuery = useQuery({
     queryKey: ['contests'],
@@ -148,6 +151,18 @@ export function ContestRankingPage() {
     },
   ];
 
+  const exportCsv = () => {
+    if (ranking.length === 0) {
+      message.warning('暂无榜单数据可导出');
+      return;
+    }
+    downloadCsv(
+      `contest-${contestId}-ranking.csv`,
+      buildRankingCsv(contest, ranking, problemIds),
+    );
+    message.success('榜单 CSV 已导出');
+  };
+
   return (
     <div>
       <PageHead
@@ -168,9 +183,14 @@ export function ContestRankingPage() {
         }
         subtitle="OI 赛制：每题取最高分，总分降序，同分按最后一次 AC 时间升序。"
         extra={
-          <Link to={`/contest/${contestId}`}>
-            <Button>返回比赛</Button>
-          </Link>
+          <Space>
+            <Button icon={<DownloadOutlined />} onClick={exportCsv}>
+              导出 CSV
+            </Button>
+            <Link to={`/contest/${contestId}`}>
+              <Button>返回比赛</Button>
+            </Link>
+          </Space>
         }
       />
 
