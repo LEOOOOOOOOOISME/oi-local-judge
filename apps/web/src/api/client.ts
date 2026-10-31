@@ -43,6 +43,8 @@ function emitUnauthorized(): void {
 export interface RequestOptions {
   method?: string;
   body?: unknown;
+  /** 原始字节（文件上传）；设置后不会 JSON 序列化 body。 */
+  rawBody?: BodyInit;
   headers?: Record<string, string>;
   signal?: AbortSignal;
   /** 用于登录态探测、登录接口：401 不触发全局跳转。 */
@@ -69,9 +71,16 @@ function defaultErrorMessage(status: number): string {
 }
 
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { method = 'GET', body, headers, signal, skipAuthRedirect = false } = options;
+  const {
+    method = 'GET',
+    body,
+    rawBody,
+    headers,
+    signal,
+    skipAuthRedirect = false,
+  } = options;
   const finalHeaders: Record<string, string> = { Accept: 'application/json', ...headers };
-  if (body !== undefined) {
+  if (body !== undefined && rawBody === undefined) {
     finalHeaders['Content-Type'] = 'application/json';
   }
 
@@ -81,7 +90,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       method,
       credentials: 'include',
       headers: finalHeaders,
-      body: body === undefined ? undefined : JSON.stringify(body),
+      body: rawBody ?? (body === undefined ? undefined : JSON.stringify(body)),
       signal,
     });
   } catch (error) {
@@ -117,7 +126,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
 
 export function apiGet<T>(
   path: string,
-  options: Omit<RequestOptions, 'method' | 'body'> = {},
+  options: Omit<RequestOptions, 'method' | 'body' | 'rawBody'> = {},
 ): Promise<T> {
   return apiRequest<T>(path, { ...options, method: 'GET' });
 }
@@ -125,7 +134,35 @@ export function apiGet<T>(
 export function apiPost<T>(
   path: string,
   body?: unknown,
-  options: Omit<RequestOptions, 'method' | 'body'> = {},
+  options: Omit<RequestOptions, 'method' | 'body' | 'rawBody'> = {},
 ): Promise<T> {
   return apiRequest<T>(path, { ...options, method: 'POST', body });
+}
+
+export function apiPut<T>(
+  path: string,
+  body?: unknown,
+  options: Omit<RequestOptions, 'method' | 'body' | 'rawBody'> = {},
+): Promise<T> {
+  return apiRequest<T>(path, { ...options, method: 'PUT', body });
+}
+
+export function apiDelete<T>(
+  path: string,
+  options: Omit<RequestOptions, 'method' | 'body' | 'rawBody'> = {},
+): Promise<T> {
+  return apiRequest<T>(path, { ...options, method: 'DELETE' });
+}
+
+/** 文件上传：body 为原始 File/Blob 字节，不做 JSON 序列化。 */
+export function apiUpload<T>(
+  path: string,
+  file: Blob,
+  contentType: string,
+): Promise<T> {
+  return apiRequest<T>(path, {
+    method: 'POST',
+    rawBody: file,
+    headers: { 'Content-Type': contentType },
+  });
 }

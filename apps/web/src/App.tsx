@@ -1,5 +1,6 @@
 import { lazy } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
+import { AdminRoute } from './components/AdminRoute';
 import { AppShell } from './components/AppShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
@@ -34,6 +35,12 @@ const SubmissionDetailPage = lazy(() =>
 const RecordsPage = lazy(() =>
   import('./pages/RecordsPage').then((module) => ({ default: module.RecordsPage })),
 );
+const AdminProblemsPage = lazy(() =>
+  import('./pages/AdminProblemsPage').then((module) => ({ default: module.AdminProblemsPage })),
+);
+const AdminProblemPage = lazy(() =>
+  import('./pages/AdminProblemPage').then((module) => ({ default: module.AdminProblemPage })),
+);
 
 export function AppRoutes() {
   return (
@@ -61,6 +68,23 @@ export function AppRoutes() {
             <ProtectedRoute>
               <RecordsPage />
             </ProtectedRoute>
+          }
+        />
+        <Route path="/admin" element={<Navigate to="/admin/problems" replace />} />
+        <Route
+          path="/admin/problems"
+          element={
+            <AdminRoute>
+              <AdminProblemsPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/problems/:problemId"
+          element={
+            <AdminRoute>
+              <AdminProblemPage />
+            </AdminRoute>
           }
         />
         <Route path="*" element={<NotFoundPage />} />

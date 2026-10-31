@@ -15,6 +15,7 @@ export function AppShell() {
   const { user, status, logout } = useAuth();
   const navigate = useNavigate();
   useRealtime(status === 'authenticated');
+  const canManage = user?.role === 'admin' || user?.role === 'setter';
 
   const handleLogout = async () => {
     await logout();
@@ -65,6 +66,11 @@ export function AppShell() {
                 我的记录
               </NavLink>
             ) : null}
+            {canManage ? (
+              <NavLink to="/admin/problems" className={navClass}>
+                管理
+              </NavLink>
+            ) : null}
           </nav>
           <div className="oij-header-right">
             {status === 'loading' ? (
@@ -92,7 +98,7 @@ export function AppShell() {
           <Outlet />
         </Suspense>
       </main>
-      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 1C</footer>
+      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 1D</footer>
     </div>
   );
 }

@@ -39,6 +39,14 @@ export function formatMemoryKb(kb: number | null | undefined): string {
   return `${Math.round(kb)} KB`;
 }
 
+/** 文件大小（字节）。 */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes === null || bytes === undefined || !Number.isFinite(bytes) || bytes < 0) return '—';
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
 /** 倒计时：dd 天 hh:mm:ss 或 hh:mm:ss。 */
 export function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
