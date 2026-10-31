@@ -109,7 +109,8 @@ export function registerAdminBatchRoutes(
     }
 
     const sources = new Map<string, { path: string; code: string }>();
-    for (const [rawName, content] of Object.entries(files)) {
+    const entries = Object.entries(files).sort(([left], [right]) => left.localeCompare(right));
+    for (const [rawName, content] of entries) {
       if (rawName.endsWith('/')) continue;
       const relative = safePath(rawName);
       if (!relative) {

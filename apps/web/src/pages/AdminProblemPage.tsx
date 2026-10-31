@@ -23,6 +23,7 @@ import {
 import type { TableColumnsType } from 'antd';
 import {
   CodeOutlined,
+  CopyOutlined,
   DeleteOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
@@ -35,12 +36,14 @@ import type {
   AdminTestcase,
   AssetKind,
   CompileAssetResult,
+  GenerateResult,
   ProblemAsset,
   ProblemAssetSource,
   ProblemDetail,
   ProblemType,
   SelfTestResult,
   SelfTestTestcaseResult,
+  StressResult,
   UpdateProblemRequest,
   ValidateResult,
   ValidateTestcaseResult,
@@ -68,13 +71,19 @@ const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
 const ALLOWED_SOURCE_ACCEPT = '.cpp,.cc,.cxx,.c,.py,.exe,.txt';
 
 const ASSET_META: Record<AssetKind, { label: string; hint: string }> = {
-  std: { label: '标准程序', hint: '标准答案 / 对拍基准，上传后编译为可执行文件。' },
+  std: { label: '标准程序', hint: '标准答案 / std 自测 / 对拍基准，上传后编译为可执行文件。' },
   checker: { label: '校验器', hint: '自定义 SPJ 源码，支持 testlib 或 Lemon 六参数模式。' },
   validator: { label: '输入校验器', hint: '校验输入数据合法性，可在“校验与自测”运行。' },
-  generator: { label: '数据生成器', hint: '批量生成测试数据（Phase 1F 接入）。' },
-  interactor: { label: '交互器', hint: '交互题评测器（Phase 1F 接入）。' },
-  judger: { label: '自定义评测器', hint: '完整评测流程程序（Phase 1F 接入）。' },
-  brute: { label: '暴力程序', hint: '对拍用暴力程序（Phase 1F 接入）。' },
+  generator: {
+    label: '数据生成器',
+    hint: '接收 argv[1]=seed，向 stdout 输出测试输入；可在“生成与对拍”造数据。',
+  },
+  interactor: { label: '交互器', hint: '交互题评测器（后续 Phase 接入）。' },
+  judger: { label: '自定义评测器', hint: '完整评测流程程序（后续 Phase 接入）。' },
+  brute: {
+    label: '暴力程序',
+    hint: '对拍用暴力程序；在“生成与对拍”中与 std 逐点比较找反例。',
+  },
 };
 
 const ASSET_ORDER: AssetKind[] = [
@@ -187,6 +196,71 @@ function describeSelfTestError(error: unknown): string {
   return error instanceof Error ? error.message : 'std 自测运行失败';
 }
 
+function describeGenerateError(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case 'GENERATOR':
+        return `generator 缺失或编译失败：${error.message}`;
+      case 'STD':
+        return `std 缺失或编译失败：${error.message}`;
+      case 'GENERATE_FAILED':
+        return `generator 运行失败：${error.message}`;
+      case 'STD_FAILED':
+        return `std 运行失败：${error.message}`;
+      case 'NOT_FOUND':
+        return '题目不存在';
+      default:
+        return error.message;
+    }
+  }
+  return error instanceof Error ? error.message : '生成测试数据失败';
+}
+
+function describeStressError(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case 'GENERATOR':
+        return `generator 缺失或编译失败：${error.message}`;
+      case 'STD':
+        return `std 缺失或编译失败：${error.message}`;
+      case 'BRUTE':
+        return `brute 缺失或编译失败：${error.message}`;
+      case 'GENERATE_FAILED':
+        return `generator 运行失败：${error.message}`;
+      case 'STRESS_FAILED':
+        return `对拍失败：${error.message}`;
+      case 'NOT_FOUND':
+        return '题目不存在';
+      default:
+        return error.message;
+    }
+  }
+  return error instanceof Error ? error.message : '对拍失败';
+}
+
+function OutputBlock({ title, content }: { title: string; content: string }) {
+  const { message } = App.useApp();
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(content);
+      message.success('已复制');
+    } catch {
+      message.error('复制失败，请手动选择文本');
+    }
+  };
+  return (
+    <div className="tool-output">
+      <div className="tool-output-head">
+        <span>{title}</span>
+        <Button size="small" type="text" icon={<CopyOutlined />} onClick={() => void handleCopy()}>
+          复制
+        </Button>
+      </div>
+      <pre className="tool-pre">{content.length > 0 ? content : '（空）'}</pre>
+    </div>
+  );
+}
+
 function toBasicFormValues(problem: ProblemDetail): BasicFormValues {
   return {
     title: problem.title,
@@ -220,6 +294,17 @@ export function AdminProblemPage() {
   const [selfTesting, setSelfTesting] = useState(false);
   const [selfTestResult, setSelfTestResult] = useState<SelfTestResult | null>(null);
   const [selfTestError, setSelfTestError] = useState<string | null>(null);
+  const [generateCount, setGenerateCount] = useState<number>(2);
+  const [generateSeedStart, setGenerateSeedStart] = useState<number>(1);
+  const [generatePoints, setGeneratePoints] = useState<number>(100);
+  const [generating, setGenerating] = useState(false);
+  const [generateResult, setGenerateResult] = useState<GenerateResult | null>(null);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [stressRounds, setStressRounds] = useState<number>(20);
+  const [stressSeedStart, setStressSeedStart] = useState<number>(1);
+  const [stressing, setStressing] = useState(false);
+  const [stressResult, setStressResult] = useState<StressResult | null>(null);
+  const [stressError, setStressError] = useState<string | null>(null);
 
   const [uploading, setUploading] = useState<KindMap<boolean>>({});
   const [compiling, setCompiling] = useState<KindMap<boolean>>({});
@@ -526,6 +611,55 @@ export function AdminProblemPage() {
       message.error(text);
     } finally {
       setSelfTesting(false);
+    }
+  };
+
+  const runGenerate = async () => {
+    setGenerating(true);
+    setGenerateError(null);
+    try {
+      const result = await apiPost<GenerateResult>(
+        `/api/admin/problems/${problemId}/generate`,
+        {
+          count: generateCount,
+          seedStart: generateSeedStart,
+          points: generatePoints,
+        },
+      );
+      setGenerateResult(result);
+      message.success(`已生成并追加 ${result.generated.length} 个测试点`);
+      void queryClient.invalidateQueries({ queryKey: ['admin-testcases', problemId] });
+    } catch (error) {
+      const text = describeGenerateError(error);
+      setGenerateError(text);
+      setGenerateResult(null);
+      message.error(text);
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  const runStress = async () => {
+    setStressing(true);
+    setStressError(null);
+    try {
+      const result = await apiPost<StressResult>(
+        `/api/admin/problems/${problemId}/stress`,
+        { rounds: stressRounds, seedStart: stressSeedStart },
+      );
+      setStressResult(result);
+      if (result.mismatch) {
+        message.warning(`发现反例：seed ${result.mismatch.seed}`);
+      } else {
+        message.success(`未发现反例，通过 ${result.passed}/${result.total}`);
+      }
+    } catch (error) {
+      const text = describeStressError(error);
+      setStressError(text);
+      setStressResult(null);
+      message.error(text);
+    } finally {
+      setStressing(false);
     }
   };
 
@@ -1077,6 +1211,216 @@ export function AdminProblemPage() {
     </div>
   );
 
+  const generatorAsset = assetsById.get('generator');
+  const bruteAsset = assetsById.get('brute');
+  const toolStdAsset = assetsById.get('std');
+  const missingGenerateAssets = [
+    generatorAsset?.language ? null : 'generator',
+    toolStdAsset?.language ? null : 'std',
+  ].filter((item): item is string => item !== null);
+  const missingStressAssets = [
+    generatorAsset?.language ? null : 'generator',
+    toolStdAsset?.language ? null : 'std',
+    bruteAsset?.language ? null : 'brute',
+  ].filter((item): item is string => item !== null);
+
+  const toolsPanel = (
+    <div className="tool-grid">
+      <Card
+        className="oij-card"
+        title="生成测试数据"
+        extra={<span className="muted">generator argv[1]=seed → stdout 输入</span>}
+      >
+        <div className="tool-hint muted">
+          generator 按 seed 生成输入、std 生成答案；成功后追加到测试点列表。
+        </div>
+        <div className="tool-form">
+          <label className="tool-field">
+            <span className="muted">数量</span>
+            <InputNumber
+              min={1}
+              max={100}
+              precision={0}
+              value={generateCount}
+              onChange={(value) => setGenerateCount(typeof value === 'number' ? value : 1)}
+              style={{ width: 100 }}
+            />
+          </label>
+          <label className="tool-field">
+            <span className="muted">起始 seed</span>
+            <InputNumber
+              precision={0}
+              value={generateSeedStart}
+              onChange={(value) => setGenerateSeedStart(typeof value === 'number' ? value : 1)}
+              style={{ width: 100 }}
+            />
+          </label>
+          <label className="tool-field">
+            <span className="muted">每题分值</span>
+            <InputNumber
+              min={1}
+              precision={0}
+              value={generatePoints}
+              onChange={(value) => setGeneratePoints(typeof value === 'number' ? value : 1)}
+              style={{ width: 100 }}
+            />
+          </label>
+          <Button
+            type="primary"
+            icon={<PlayCircleOutlined />}
+            loading={generating}
+            onClick={() => void runGenerate()}
+          >
+            生成并追加
+          </Button>
+        </div>
+        {missingGenerateAssets.length > 0 ? (
+          <Alert
+            className="tool-alert"
+            type="warning"
+            showIcon
+            message="缺少生成所需资产"
+            description={`请先在“程序资产”上传并编译 ${missingGenerateAssets.join('、')}。点击生成仍可查看后端错误。`}
+          />
+        ) : null}
+        {generateError ? (
+          <Alert
+            className="tool-alert"
+            type="error"
+            showIcon
+            message="生成测试数据失败"
+            description={generateError}
+          />
+        ) : null}
+        {generateResult ? (
+          <div className="tool-result">
+            <Alert
+              type="success"
+              showIcon
+              message={`已生成 ${generateResult.generated.length} 条，测试点总数 ${generateResult.total}`}
+              description="测试点已追加到“测试数据”Tab。"
+            />
+            <div className="tool-seed-list">
+              {generateResult.generated.map((item) => (
+                <div className="tool-seed-row" key={item.seed}>
+                  <span className="mono">seed {item.seed}</span>
+                  <span className="mono tool-seed-path">{item.input}</span>
+                  <span className="mono tool-seed-path">{item.output}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </Card>
+
+      <Card
+        className="oij-card"
+        title="std / brute 对拍"
+        extra={<span className="muted">首反例保存到 problems/:id/stress/</span>}
+      >
+        <div className="tool-hint muted">
+          逐 seed 生成输入，分别运行 std 与 brute；输出不一致即保存为首个反例。
+        </div>
+        <div className="tool-form">
+          <label className="tool-field">
+            <span className="muted">轮数</span>
+            <InputNumber
+              min={1}
+              max={1000}
+              precision={0}
+              value={stressRounds}
+              onChange={(value) => setStressRounds(typeof value === 'number' ? value : 1)}
+              style={{ width: 100 }}
+            />
+          </label>
+          <label className="tool-field">
+            <span className="muted">起始 seed</span>
+            <InputNumber
+              precision={0}
+              value={stressSeedStart}
+              onChange={(value) => setStressSeedStart(typeof value === 'number' ? value : 1)}
+              style={{ width: 100 }}
+            />
+          </label>
+          <Button
+            type="primary"
+            icon={<PlayCircleOutlined />}
+            loading={stressing}
+            onClick={() => void runStress()}
+          >
+            开始对拍
+          </Button>
+        </div>
+        {missingStressAssets.length > 0 ? (
+          <Alert
+            className="tool-alert"
+            type="warning"
+            showIcon
+            message="缺少对拍所需资产"
+            description={`请先在“程序资产”上传并编译 ${missingStressAssets.join('、')}。点击对拍仍可查看后端错误。`}
+          />
+        ) : null}
+        {stressError ? (
+          <Alert
+            className="tool-alert"
+            type="error"
+            showIcon
+            message="对拍失败"
+            description={stressError}
+          />
+        ) : null}
+        {stressResult ? (
+          <div className="tool-result">
+            <div
+              className={`tool-stats${
+                stressResult.mismatch ? ' tool-stats-warn' : ' tool-stats-ok'
+              }`}
+            >
+              <span className="tool-stats-main">
+                {stressResult.mismatch ? '发现反例' : '未发现反例'}
+              </span>
+              <span className="muted">
+                通过 {stressResult.passed} / {stressResult.total}
+              </span>
+            </div>
+            {stressResult.mismatch ? (
+              <>
+                <Alert
+                  className="tool-alert"
+                  type="warning"
+                  showIcon
+                  message={`首个反例 seed ${stressResult.mismatch.seed}`}
+                  description={
+                    <span>
+                      已保存到{' '}
+                      <span className="mono">{stressResult.mismatch.path}</span>
+                    </span>
+                  }
+                />
+                <div className="tool-output-grid">
+                  <OutputBlock title="输入" content={stressResult.mismatch.input} />
+                  <OutputBlock title="std 输出" content={stressResult.mismatch.stdOutput} />
+                  <OutputBlock
+                    title="brute 输出"
+                    content={stressResult.mismatch.bruteOutput}
+                  />
+                </div>
+              </>
+            ) : (
+              <Alert
+                className="tool-alert"
+                type="success"
+                showIcon
+                message="未发现反例"
+                description={`已对拍 ${stressResult.total} 轮，std 与 brute 输出全部一致。`}
+              />
+            )}
+          </div>
+        ) : null}
+      </Card>
+    </div>
+  );
+
   const validateColumns: TableColumnsType<ValidateTestcaseResult> = [
     {
       title: '测试点 ID',
@@ -1408,6 +1752,7 @@ export function AdminProblemPage() {
           { key: 'basic', label: '基本信息', children: basicPanel },
           { key: 'assets', label: '程序资产', children: assetsPanel },
           { key: 'data', label: '测试数据', children: dataPanel },
+          { key: 'tools', label: '生成与对拍', children: toolsPanel },
           { key: 'validation', label: '校验与自测', children: validationPanel },
         ]}
       />

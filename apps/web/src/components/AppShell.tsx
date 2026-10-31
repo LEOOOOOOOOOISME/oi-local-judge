@@ -67,9 +67,14 @@ export function AppShell() {
               </NavLink>
             ) : null}
             {canManage ? (
-              <NavLink to="/admin/problems" className={navClass}>
-                管理
-              </NavLink>
+              <>
+                <NavLink to="/admin/problems" className={navClass}>
+                  管理
+                </NavLink>
+                <NavLink to="/admin/batch" className={navClass}>
+                  批量评测
+                </NavLink>
+              </>
             ) : null}
           </nav>
           <div className="oij-header-right">
@@ -98,7 +103,7 @@ export function AppShell() {
           <Outlet />
         </Suspense>
       </main>
-      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 1F</footer>
+      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase 1H</footer>
     </div>
   );
 }

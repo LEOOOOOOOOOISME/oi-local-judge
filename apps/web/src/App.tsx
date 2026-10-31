@@ -41,6 +41,9 @@ const AdminProblemsPage = lazy(() =>
 const AdminProblemPage = lazy(() =>
   import('./pages/AdminProblemPage').then((module) => ({ default: module.AdminProblemPage })),
 );
+const AdminBatchPage = lazy(() =>
+  import('./pages/AdminBatchPage').then((module) => ({ default: module.AdminBatchPage })),
+);
 
 export function AppRoutes() {
   return (
@@ -84,6 +87,14 @@ export function AppRoutes() {
           element={
             <AdminRoute>
               <AdminProblemPage />
+            </AdminRoute>
+          }
+        />
+        <Route
+          path="/admin/batch"
+          element={
+            <AdminRoute>
+              <AdminBatchPage />
             </AdminRoute>
           }
         />

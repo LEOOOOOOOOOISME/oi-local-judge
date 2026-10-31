@@ -44,6 +44,7 @@ export async function ensureChecker(options: CheckerCacheOptions): Promise<Check
       workdir: tempDir,
       language: 'cpp17',
       staticLink: false,
+      timeoutMs: 60_000,
       extraArgs: options.includeDir ? ['-I', options.includeDir] : [],
     });
     if (!compiled.ok) {

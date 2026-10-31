@@ -36,6 +36,7 @@ async function compileAsset(
     sourcePath: join(options.config.dataDir, asset.path),
     language: asset.language,
     includeDir: join(process.cwd(), 'vendor'),
+    timeoutMs: 60_000,
   });
   if (!result.ok || !result.exe) {
     return { ok: false as const, message: result.message };
@@ -127,13 +128,15 @@ export function registerAdminToolRoutes(
           output: `problems/${problemId}/data/generated-${seed}.out`,
         });
       }
-      const existing = listAllTestcases(options.db, problemId).map((row) => ({
-        inputPath: row.input_path,
-        outputPath: row.output_path,
-        points: row.points,
-        subtaskId: row.subtask_id,
-        dependsOn: row.depends_on,
-      }));
+      const existing = listAllTestcases(options.db, problemId)
+        .filter((row) => !generated.some((item) => item.input === row.input_path))
+        .map((row) => ({
+          inputPath: row.input_path,
+          outputPath: row.output_path,
+          points: row.points,
+          subtaskId: row.subtask_id,
+          dependsOn: row.depends_on,
+        }));
       replaceTestcases(options.db, problemId, [
         ...existing,
         ...generated.map((item) => ({
@@ -177,6 +180,8 @@ export function registerAdminToolRoutes(
     const tmpRoot = join(options.config.dataDir, 'tmp');
     mkdirSync(tmpRoot, { recursive: true });
     try {
+      let matched = 0;
+      let skipped = 0;
       for (let i = 0; i < rounds; i++) {
         const seed = seedStart + i;
         const workdir = mkdtempSync(join(tmpRoot, 'stress-'));
@@ -190,6 +195,7 @@ export function registerAdminToolRoutes(
           const stdRun = await runProgram(options, problem, stdExe, inputPath, workdir);
           const bruteRun = await runProgram(options, problem, bruteExe, inputPath, workdir);
           if (stdRun.run.exitCode !== 0 || bruteRun.run.exitCode !== 0) {
+            skipped += 1;
             continue;
           }
           const stdPath = join(workdir, 'std.out');
@@ -211,7 +217,8 @@ export function registerAdminToolRoutes(
             return {
               ok: true,
               data: {
-                passed: i,
+                passed: matched,
+                skipped,
                 total: rounds,
                 mismatch: {
                   seed,
@@ -223,11 +230,12 @@ export function registerAdminToolRoutes(
               },
             };
           }
+          matched += 1;
         } finally {
           rmSync(workdir, { recursive: true, force: true });
         }
       }
-      return { ok: true, data: { passed: rounds, total: rounds, mismatch: null } };
+      return { ok: true, data: { passed: matched, skipped, total: rounds, mismatch: null } };
     } catch (err) {
       return reply.code(500).send({
         ok: false,

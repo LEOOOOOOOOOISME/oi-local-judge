@@ -279,6 +279,8 @@ export function registerAdminProblemRoutes(
         dataDir: options.config.dataDir,
         sourcePath,
         language: asset.language,
+        includeDir: join(process.cwd(), 'vendor'),
+        timeoutMs: 60_000,
       });
       return {
         ok: true,
@@ -335,6 +337,7 @@ export function registerAdminProblemRoutes(
         sourcePath: join(options.config.dataDir, std.path),
         language: std.language,
         includeDir: join(process.cwd(), 'vendor'),
+        timeoutMs: 60_000,
       });
       if (!compiled.ok || !compiled.exe) {
         return reply.code(400).send({
@@ -412,6 +415,7 @@ export function registerAdminProblemRoutes(
         sourcePath: join(options.config.dataDir, validator.path),
         language: validator.language,
         includeDir: join(process.cwd(), 'vendor'),
+        timeoutMs: 60_000,
       });
       if (!compiled.ok || !compiled.exe) {
         return reply.code(400).send({

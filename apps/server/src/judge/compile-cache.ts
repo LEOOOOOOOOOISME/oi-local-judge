@@ -10,6 +10,8 @@ export interface CompileCacheOptions {
   language: string;
   /** Optional include directory (testlib.h for validators/checkers). */
   includeDir?: string;
+  /** Compile timeout in milliseconds (default: compiler default). */
+  timeoutMs?: number;
 }
 
 export interface CompileCacheResult {
@@ -47,6 +49,7 @@ export async function ensureCompiledProgram(
       outExe: join(tempDir, 'prog.exe'),
       workdir: tempDir,
       language: options.language,
+      timeoutMs: options.timeoutMs,
       extraArgs: options.includeDir ? ['-I', options.includeDir] : [],
     });
     if (!compiled.ok) {

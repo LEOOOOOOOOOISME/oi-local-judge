@@ -2,7 +2,7 @@
 
 Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手端，支持比赛模式、Special Judge、交互题、子任务、客观题组卷、榜单与数据分析。
 
-> 状态：Phase 0/1A/1B/1C/1D–1F 已完成；Web 端可完整跑通"登录 → 比赛 → 题目 → 提交 → 评测 → 榜单"，管理端可创建题目、上传 std/checker/validator/generator 等资产、导入 zip 数据、运行 validator 与 std 自测。Electron 壳在开发沙箱中无法启动，待目标机复验。
+> 状态：Phase 0/1A/1B/1C/1D–1F/1G–1H 已完成；Web 端可完整跑通"登录 → 比赛 → 题目 → 提交 → 评测 → 榜单"；管理端可创建/编辑题目、上传 7 类资产、zip 导入数据、validator/std 自测、generator 造数据、std/brute 对拍、zip 批量评测（含目录层级映射与 CSV 导出）。Electron 壳在开发沙箱中无法启动，待目标机复验。
 
 ## 文档
 
@@ -13,6 +13,7 @@ Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手�
 - [Phase 1B 结果](docs/research/phase-1b-web-results.md)：Web 页面、构建与 Playwright 验证
 - [Phase 1C 结果](docs/research/phase-1c-results.md)：文件 IO/SPJ/子任务/缓存/比赛详情/懒加载
 - [Phase 1D–1F 结果](docs/research/phase-1d-admin-visual-results.md)：管理端、资产上传、validator/std 自测、可见性
+- [Phase 1G–1H 结果](docs/research/phase-1g-batch-results.md)：generator 造数据、对拍、批量评测向导
 - [前人实现调研](docs/research/prior-art.md)：Lemon/Hydro/UOJ/testlib 的可复用性与许可证结论
 
 ## 快速开始（Windows）
@@ -26,7 +27,7 @@ npm start             # http://127.0.0.1:8787
 ```
 
 默认管理员 `admin / admin123`（首次启动自动创建，生产环境请用 `OIJ_ADMIN_PASSWORD` 覆盖并改密）。
-当前可用：登录、题库、题目页、C++17 提交、传统/文件 IO 评测、内置比较与 testlib/Lemon 六参数 SPJ、子任务与依赖、TLE/MLE/RE/CE/WA/PC/AC、提交详情、比赛列表/主页/榜单、我的记录；管理端可新建/编辑题目、上传 7 类程序资产、zip 导入测试数据、运行 validator 与 std 自测、设置可见性。首屏 JS gzip 约 268KB。
+当前可用：登录、题库、题目页、C++17 提交、传统/文件 IO 评测、内置比较与 testlib/Lemon 六参数 SPJ、子任务与依赖、TLE/MLE/RE/CE/WA/PC/AC、提交详情、比赛列表/主页/榜单、我的记录；管理端可新建/编辑题目、上传 7 类程序资产、zip 导入测试数据、validator 与 std 自测、generator 造数据、std/brute 对拍、zip 批量评测（目录层级映射 + CSV）。首屏 JS gzip 约 268KB。
 评测依赖本机 `ojrunner.exe`（`tools/build-runner.mjs`）与 GCC 16；未配置编译器时评测会报 SE。
 
 ## 目标能力
