@@ -31,6 +31,13 @@ CREATE TABLE IF NOT EXISTS problem_subtasks(
   points INTEGER NOT NULL, aggregation TEXT NOT NULL DEFAULT 'min',
   FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS problem_assets(
+  id INTEGER PRIMARY KEY, problem_id INTEGER NOT NULL, kind TEXT NOT NULL,
+  name TEXT NOT NULL, path TEXT NOT NULL, language TEXT,
+  sha256 TEXT NOT NULL, size INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  UNIQUE(problem_id, kind),
+  FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS submissions(
   id INTEGER PRIMARY KEY, contest_id INTEGER, problem_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL, language TEXT NOT NULL, source_path TEXT NOT NULL,

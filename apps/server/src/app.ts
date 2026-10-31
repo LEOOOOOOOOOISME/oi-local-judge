@@ -8,6 +8,7 @@ import { loadConfig, type Config } from './config.js';
 import { healthRoutes } from './http/health.js';
 import { registerAuthRoutes } from './http/auth.js';
 import { registerProblemRoutes } from './http/problems.js';
+import { registerAdminProblemRoutes } from './http/admin-problems.js';
 import { registerContestRoutes } from './http/contests.js';
 import { registerSubmissionRoutes } from './http/submissions.js';
 import { createHub, type Hub } from './realtime/hub.js';
@@ -30,11 +31,21 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   const hub = opts.hub ?? createHub();
 
   const app = Fastify({ logger: opts.logger ?? false });
+  app.addContentTypeParser(
+    ['application/octet-stream', 'application/zip'],
+    { parseAs: 'buffer', bodyLimit: 80 * 1024 * 1024 },
+    (_request, body, done) => done(null, body),
+  );
   await app.register(websocket);
   await app.register(healthRoutes);
 
   await registerAuthRoutes(app, { db, config });
   registerProblemRoutes(app, {
+    db,
+    config,
+    adminGuard: requireRole(['admin', 'setter'], { db, config }),
+  });
+  registerAdminProblemRoutes(app, {
     db,
     config,
     adminGuard: requireRole(['admin', 'setter'], { db, config }),
