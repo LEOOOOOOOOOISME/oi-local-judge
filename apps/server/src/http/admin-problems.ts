@@ -20,11 +20,13 @@ import {
 import {
   createProblem,
   getProblem,
+  listAllProblems,
   listAllTestcases,
   replaceTestcases,
   updateProblem,
   updateTestcasePoints,
 } from '../storage/repos/problems.js';
+import { getProblemDetail, problemToSummary } from '../services/problems.js';
 
 const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
 const ALLOWED_SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx', '.c', '.py', '.exe', '.txt']);
@@ -51,6 +53,24 @@ export function registerAdminProblemRoutes(
   options: AdminProblemRouteOptions,
 ): void {
   const guard = options.adminGuard;
+
+  app.get('/api/admin/problems', { preHandler: guard }, async () => ({
+    ok: true,
+    data: listAllProblems(options.db).map((row) => ({
+      ...problemToSummary(row),
+      visibility: row.visibility,
+    })),
+  }));
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/problems/:id',
+    { preHandler: guard },
+    async (request, reply) => {
+      const detail = getProblemDetail(options.db, Number(request.params.id));
+      if (!detail) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      return { ok: true, data: detail };
+    },
+  );
 
   app.post<{
     Body: {
@@ -110,13 +130,28 @@ export function registerAdminProblemRoutes(
     const updated = updateProblem(options.db, problemId, {
       title: typeof body.title === 'string' ? body.title : undefined,
       type: typeof body.type === 'string' ? body.type : undefined,
-      difficulty: typeof body.difficulty === 'number' ? body.difficulty : undefined,
+      difficulty:
+        typeof body.difficulty === 'number'
+          ? body.difficulty
+          : body.difficulty === null
+            ? null
+            : undefined,
       tags: Array.isArray(body.tags) ? (body.tags as string[]) : undefined,
       timeMs: typeof body.timeMs === 'number' ? body.timeMs : undefined,
       memoryMb: typeof body.memoryMb === 'number' ? body.memoryMb : undefined,
       ioMode: body.ioMode === 'file' ? 'file' : body.ioMode === 'stdio' ? 'stdio' : undefined,
-      inputFile: typeof body.inputFile === 'string' ? body.inputFile : undefined,
-      outputFile: typeof body.outputFile === 'string' ? body.outputFile : undefined,
+      inputFile:
+        typeof body.inputFile === 'string'
+          ? body.inputFile
+          : body.inputFile === null
+            ? null
+            : undefined,
+      outputFile:
+        typeof body.outputFile === 'string'
+          ? body.outputFile
+          : body.outputFile === null
+            ? null
+            : undefined,
       statementHtml: typeof body.statementHtml === 'string' ? body.statementHtml : undefined,
       visibility: typeof body.visibility === 'string' ? body.visibility : undefined,
       checkerMode:

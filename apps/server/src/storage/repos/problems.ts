@@ -175,6 +175,10 @@ export function listProblems(db: DatabaseSync): ProblemRow[] {
   return db.prepare('SELECT * FROM problems WHERE visibility != ? ORDER BY id DESC').all('hidden') as unknown as ProblemRow[];
 }
 
+export function listAllProblems(db: DatabaseSync): ProblemRow[] {
+  return db.prepare('SELECT * FROM problems ORDER BY id DESC').all() as unknown as ProblemRow[];
+}
+
 export function getTestcases(db: DatabaseSync, problemId: number): TestcaseRow[] {
   return db
     .prepare('SELECT * FROM problem_testcases WHERE problem_id = ? AND enabled = 1 ORDER BY ordinal')
