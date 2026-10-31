@@ -36,6 +36,7 @@ import {
   parseObjectiveAnswers,
   parseObjectiveConfig,
 } from './objective.js';
+import { parseOutputAnswers, writeAnswerFiles } from './output-only.js';
 import { runChecker, type CheckerMode } from './checker.js';
 import { runSandboxed } from './runner.js';
 import { aggregateSubtask } from './subtask.js';
@@ -409,6 +410,57 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         events,
         `objective grading failed: ${err instanceof Error ? err.message : String(err)}`,
       );
+    }
+    return;
+  }
+
+  if (problem.type === 'output-only') {
+    const testcases = getTestcases(db, problem.id);
+    if (testcases.length === 0) {
+      markSubmissionFailed(db, submissionId, events, 'problem has no enabled testcases');
+      return;
+    }
+    const tmpRoot = join(config.dataDir, 'tmp');
+    mkdirSync(tmpRoot, { recursive: true });
+    const workdir = mkdtempSync(join(tmpRoot, `answer-${submissionId}-`));
+    try {
+      setSubmissionStatus(db, submissionId, 'running');
+      const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
+      const answers = parseOutputAnswers(readFileSync(sourcePath, 'utf8'), testcases);
+      const answerPaths = writeAnswerFiles(join(workdir, 'answers'), testcases, answers);
+      const results = testcases.map((testcase) => {
+        const accepted = outputMatches(
+          resolveDataPath(config.dataDir, testcase.output_path),
+          answerPaths.get(testcase.id)!,
+          problem.compare_mode,
+        );
+        return {
+          testcaseId: testcase.id,
+          verdict: (accepted ? 'AC' : 'WA') as 'AC' | 'WA',
+          timeMs: 0,
+          memoryKb: 0,
+          score: accepted ? testcase.points : 0,
+          message: accepted ? '' : 'output differs from the expected answer',
+        };
+      });
+      const score = results.reduce((sum, result) => sum + result.score, 0);
+      persistJudged(
+        db,
+        submissionId,
+        events,
+        results,
+        decideOverallVerdict(results, score),
+        score,
+      );
+    } catch (err) {
+      markSubmissionFailed(
+        db,
+        submissionId,
+        events,
+        `output-only grading failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    } finally {
+      rmSync(workdir, { recursive: true, force: true });
     }
     return;
   }

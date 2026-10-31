@@ -13,7 +13,7 @@ import {
 } from '../storage/repos/submissions.js';
 import { createJudgeTask } from '../storage/repos/judge.js';
 
-export const ALLOWED_LANGUAGES = new Set(['cpp17', 'c11', 'objective']);
+export const ALLOWED_LANGUAGES = new Set(['cpp17', 'c11', 'objective', 'answer']);
 export const MAX_SOURCE_BYTES = 256 * 1024;
 
 export interface SubmitInput {
@@ -38,8 +38,14 @@ export function submitSource(
   if (problem.type === 'objective' && input.language !== 'objective') {
     throw new Error('objective problems require language objective');
   }
+  if (problem.type === 'output-only' && input.language !== 'answer') {
+    throw new Error('output-only problems require language answer');
+  }
   if (problem.type !== 'objective' && input.language === 'objective') {
     throw new Error('objective answers are only accepted for objective problems');
+  }
+  if (problem.type !== 'output-only' && input.language === 'answer') {
+    throw new Error('output files are only accepted for output-only problems');
   }
   const bytes = Buffer.byteLength(input.code, 'utf8');
   if (bytes === 0) throw new Error('source is empty');
@@ -57,9 +63,11 @@ export function submitSource(
   const fileName =
     input.language === 'objective'
       ? 'answers.json'
-      : input.language === 'c11'
-        ? 'main.c'
-        : 'main.cpp';
+      : input.language === 'answer'
+        ? 'answers.json'
+        : input.language === 'c11'
+          ? 'main.c'
+          : 'main.cpp';
   const sourcePath = join(relativeDir, fileName);
   writeFileSync(join(deps.config.dataDir, sourcePath), input.code, 'utf8');
 
