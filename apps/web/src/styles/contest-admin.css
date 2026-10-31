@@ -38,3 +38,62 @@
 .user-import-summary .ant-tag {
   margin-block: 2px;
 }
+
+.announcement-admin-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.announcement-admin-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.announcement-admin-list,
+.announcement-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.announcement-item {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fcfcfd;
+}
+
+.announcement-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.announcement-title {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.announcement-meta {
+  font-size: 12px;
+}
+
+.announcement-body {
+  max-height: 260px;
+  overflow: auto;
+  font-size: 13px;
+}
+
+.extra-time-input {
+  width: 92px;
+}
