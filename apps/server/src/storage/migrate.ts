@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS problems(
   checker_mode TEXT NOT NULL DEFAULT 'builtin',
   checker_path TEXT,
   compare_mode TEXT NOT NULL DEFAULT 'ignore-trailing',
+  objective_json TEXT NOT NULL DEFAULT '{}',
   visibility TEXT NOT NULL DEFAULT 'public', version INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
@@ -95,6 +96,7 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'problems', 'checker_mode', "TEXT NOT NULL DEFAULT 'builtin'");
   ensureColumn(db, 'problems', 'checker_path', 'TEXT');
   ensureColumn(db, 'problems', 'compare_mode', "TEXT NOT NULL DEFAULT 'ignore-trailing'");
+  ensureColumn(db, 'problems', 'objective_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'submissions', 'message', "TEXT NOT NULL DEFAULT ''");
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {

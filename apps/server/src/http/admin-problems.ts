@@ -84,6 +84,7 @@ export function registerAdminProblemRoutes(
       inputFile?: string;
       outputFile?: string;
       statement?: string;
+      objective?: unknown;
     };
   }>('/api/admin/problems', { preHandler: guard }, async (request, reply) => {
     const body = request.body ?? {};
@@ -104,6 +105,7 @@ export function registerAdminProblemRoutes(
       inputFile: body.inputFile ?? null,
       outputFile: body.outputFile ?? null,
       statementHtml: body.statement ?? '',
+      objective: body.objective,
       testcases: [],
     });
     return reply.code(201).send({ ok: true, data: { id } });
@@ -159,6 +161,10 @@ export function registerAdminProblemRoutes(
           ? body.checkerMode
           : undefined,
       compareMode: typeof body.compareMode === 'string' ? body.compareMode : undefined,
+      objectiveJson:
+        body.objective && typeof body.objective === 'object'
+          ? JSON.stringify(body.objective)
+          : undefined,
     });
     if (!updated) {
       return reply.code(400).send({ ok: false, error: { code: 'NO_FIELDS' } });

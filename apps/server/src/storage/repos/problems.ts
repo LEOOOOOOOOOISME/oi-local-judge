@@ -36,6 +36,7 @@ export interface ProblemRow {
   checker_mode: string;
   checker_path: string | null;
   compare_mode: string;
+  objective_json: string;
   visibility: string;
   version: number;
   created_at: number;
@@ -56,6 +57,7 @@ export interface CreateProblemInput {
   checkerMode?: 'builtin' | 'testlib' | 'lemon';
   checkerPath?: string | null;
   compareMode?: string;
+  objective?: unknown;
   visibility?: string;
   testcases: Array<{
     inputPath: string;
@@ -73,8 +75,8 @@ export function createProblem(db: DatabaseSync, input: CreateProblemInput): numb
     .prepare(
       `INSERT INTO problems(title, type, difficulty, tags_json, time_ms, memory_mb,
          io_mode, input_file, output_file, statement_html, samples_json, checker_mode,
-         checker_path, compare_mode, visibility, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         checker_path, compare_mode, objective_json, visibility, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.title,
@@ -91,6 +93,7 @@ export function createProblem(db: DatabaseSync, input: CreateProblemInput): numb
       input.checkerMode ?? 'builtin',
       input.checkerPath ?? null,
       input.compareMode ?? 'ignore-trailing',
+      JSON.stringify(input.objective ?? {}),
       input.visibility ?? 'public',
       Date.now(),
     );
@@ -140,6 +143,7 @@ export interface UpdateProblemPatch {
   visibility?: string;
   checkerMode?: 'builtin' | 'testlib' | 'lemon';
   compareMode?: string;
+  objectiveJson?: string;
 }
 
 export function updateProblem(db: DatabaseSync, id: number, patch: UpdateProblemPatch): boolean {
@@ -163,6 +167,7 @@ export function updateProblem(db: DatabaseSync, id: number, patch: UpdateProblem
   add('visibility', patch.visibility);
   add('checker_mode', patch.checkerMode);
   add('compare_mode', patch.compareMode);
+  add('objective_json', patch.objectiveJson);
   if (sets.length === 0) return false;
   sets.push('version = version + 1');
   const result = db
