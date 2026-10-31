@@ -1,0 +1,258 @@
+import { Alert, Button, Card, Empty, Table, Tag } from 'antd';
+import type { TableColumnsType } from 'antd';
+import { Link, useParams } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
+import { apiGet } from '../api/client';
+import type { Contest, ProblemDetail, Submission, TestResult } from '../api/types';
+import { CodeBlock } from '../components/CodeBlock';
+import { MetaList } from '../components/MetaList';
+import { PageHead } from '../components/PageHead';
+import { ErrorResult, PageLoading } from '../components/PageStates';
+import { SubmissionStatusBadge, VerdictBadge } from '../components/VerdictBadge';
+import {
+  formatDateTime,
+  formatMemoryKb,
+  formatRunTime,
+} from '../utils/format';
+import {
+  SUBMISSION_STATUS_LABEL,
+  isPendingStatus,
+  languageLabel,
+} from '../utils/status';
+
+export function SubmissionDetailPage() {
+  const { submissionId: submissionIdParam } = useParams();
+  const submissionId = Number(submissionIdParam);
+  const validId = Number.isInteger(submissionId) && submissionId > 0;
+
+  const submissionQuery = useQuery({
+    queryKey: ['submission', submissionId],
+    queryFn: () => apiGet<Submission>(`/api/submissions/${submissionId}`),
+    enabled: validId,
+    refetchInterval: (query) => {
+      const current = query.state.data;
+      return current && isPendingStatus(current.status) ? 1_500 : false;
+    },
+  });
+
+  const submission = submissionQuery.data;
+  const problemQuery = useQuery({
+    queryKey: ['problem', submission?.problemId],
+    queryFn: () => apiGet<ProblemDetail>(`/api/problems/${submission?.problemId}`),
+    enabled: submission !== undefined,
+  });
+  const contestsQuery = useQuery({
+    queryKey: ['contests'],
+    queryFn: () => apiGet<Contest[]>('/api/contests'),
+    enabled: submission?.contestId !== null && submission?.contestId !== undefined,
+    staleTime: 60_000,
+  });
+
+  if (!validId) {
+    return <ErrorResult error={new Error('无效的提交编号')} />;
+  }
+  if (submissionQuery.isPending) {
+    return <PageLoading tip="正在加载提交…" />;
+  }
+  if (submissionQuery.isError) {
+    return (
+      <ErrorResult error={submissionQuery.error} onRetry={() => void submissionQuery.refetch()} />
+    );
+  }
+  if (!submission) {
+    return <PageLoading tip="正在加载提交…" />;
+  }
+
+  const pending = isPendingStatus(submission.status);
+  const contest =
+    submission.contestId !== null
+      ? (contestsQuery.data?.find((item) => item.id === submission.contestId) ?? null)
+      : null;
+  const problemTitle = problemQuery.data?.title ?? `#${submission.problemId}`;
+  const backPath =
+    submission.contestId !== null
+      ? `/contest/${submission.contestId}/problem/${submission.problemId}`
+      : `/problem/${submission.problemId}`;
+  const results = submission.results ?? [];
+
+  const resultColumns: TableColumnsType<TestResult> = [
+    {
+      title: '#',
+      width: 52,
+      align: 'center',
+      render: (_value, _record, index) => <span className="muted">{index + 1}</span>,
+    },
+    {
+      title: '测试点',
+      dataIndex: 'testcaseId',
+      width: 92,
+      render: (testcaseId: number) => <span className="mono">#{testcaseId}</span>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'verdict',
+      width: 86,
+      render: (verdict: TestResult['verdict']) => <VerdictBadge verdict={verdict} />,
+    },
+    {
+      title: '用时',
+      dataIndex: 'timeMs',
+      width: 94,
+      align: 'right',
+      render: (value: number) => formatRunTime(value),
+    },
+    {
+      title: '内存',
+      dataIndex: 'memoryKb',
+      width: 100,
+      align: 'right',
+      render: (value: number) => formatMemoryKb(value),
+    },
+    {
+      title: '得分',
+      dataIndex: 'score',
+      width: 72,
+      align: 'right',
+      render: (value: number) => <span className="score-value">{value}</span>,
+    },
+    {
+      title: '信息',
+      dataIndex: 'message',
+      render: (value: string) =>
+        value ? (
+          <span className="test-message" title={value}>
+            {value}
+          </span>
+        ) : (
+          <span className="muted">—</span>
+        ),
+    },
+  ];
+
+  return (
+    <div>
+      <PageHead
+        breadcrumb={[
+          { label: '比赛', to: '/contests' },
+          ...(submission.contestId !== null
+            ? [{ label: contest?.name ?? `比赛 #${submission.contestId}`, to: `/contest/${submission.contestId}` }]
+            : []),
+          { label: `提交 #${submission.id}` },
+        ]}
+        title={`提交 #${submission.id}`}
+        tags={
+          <>
+            <SubmissionStatusBadge status={submission.status} verdict={submission.verdict} />
+            <Tag>{languageLabel(submission.language)}</Tag>
+          </>
+        }
+        subtitle={
+          <span>
+            题目 <Link to={backPath}>{problemTitle}</Link> · 提交于{' '}
+            {formatDateTime(submission.createdAt)}
+          </span>
+        }
+        extra={
+          <Link to={backPath}>
+            <Button>返回题目</Button>
+          </Link>
+        }
+      />
+
+      <div className="content-grid">
+        <div className="stack">
+          <Card className="oij-card" title="评测结果">
+            {pending ? (
+              <div className="pending-banner">
+                <span className="pending-dot" />
+                <div>
+                  <div className="pending-title">
+                    {SUBMISSION_STATUS_LABEL[submission.status]}…
+                  </div>
+                  <div className="muted">评测完成后页面会通过 WebSocket 自动刷新。</div>
+                </div>
+              </div>
+            ) : (
+              <div className="verdict-hero">
+                <VerdictBadge verdict={submission.verdict} size="lg" />
+                <div className="verdict-hero-score">
+                  {submission.score}
+                  <span className="verdict-hero-unit">分</span>
+                </div>
+              </div>
+            )}
+            {submission.message ? (
+              <Alert
+                className="submission-message"
+                type={submission.status === 'failed' ? 'error' : 'warning'}
+                showIcon
+                message={submission.message}
+              />
+            ) : null}
+            <MetaList
+              items={[
+                { label: '状态', value: SUBMISSION_STATUS_LABEL[submission.status] },
+                { label: '用时', value: formatRunTime(submission.timeMs) },
+                { label: '内存', value: formatMemoryKb(submission.memoryKb) },
+                { label: '分数', value: `${submission.score}` },
+                { label: '评测时间', value: formatDateTime(submission.judgedAt) },
+              ]}
+            />
+          </Card>
+
+          <Card
+            className="oij-card"
+            title={`测试点${results.length > 0 ? ` (${results.length})` : ''}`}
+          >
+            {results.length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={pending ? '评测完成后显示测试点结果' : '没有测试点结果（可能是编译错误或系统错误）'}
+              />
+            ) : (
+              <Table<TestResult>
+                className="oij-table"
+                rowKey="testcaseId"
+                size="small"
+                columns={resultColumns}
+                dataSource={results}
+                pagination={false}
+              />
+            )}
+          </Card>
+
+          <Card className="oij-card" title="源代码">
+            <CodeBlock code={submission.code ?? ''} maxHeight={560} />
+          </Card>
+        </div>
+
+        <div className="stack">
+          <Card className="oij-card" size="small" title="提交信息">
+            <MetaList
+              items={[
+                { label: '提交号', value: `#${submission.id}` },
+                { label: '题目', value: <Link to={backPath}>{problemTitle}</Link> },
+                {
+                  label: '比赛',
+                  value:
+                    submission.contestId === null ? (
+                      <span className="muted">练习</span>
+                    ) : (
+                      <Link to={`/contest/${submission.contestId}`}>
+                        {contest?.name ?? `比赛 #${submission.contestId}`}
+                      </Link>
+                    ),
+                },
+                { label: '用户', value: `#${submission.userId}` },
+                { label: '语言', value: languageLabel(submission.language) },
+                { label: '状态', value: SUBMISSION_STATUS_LABEL[submission.status] },
+                { label: '提交时间', value: formatDateTime(submission.createdAt) },
+                { label: '评测时间', value: formatDateTime(submission.judgedAt) },
+              ]}
+            />
+          </Card>
+        </div>
+      </div>
+    </div>
+  );
+}

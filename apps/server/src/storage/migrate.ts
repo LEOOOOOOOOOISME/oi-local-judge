@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS submissions(
   user_id INTEGER NOT NULL, language TEXT NOT NULL, source_path TEXT NOT NULL,
   source_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
   verdict TEXT, score INTEGER NOT NULL DEFAULT 0, time_ms INTEGER NOT NULL DEFAULT 0,
-  memory_kb INTEGER NOT NULL DEFAULT 0, created_at INTEGER NOT NULL, judged_at INTEGER
+  memory_kb INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL, judged_at INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_submissions_user ON submissions(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_submissions_contest ON submissions(contest_id, user_id, created_at DESC);

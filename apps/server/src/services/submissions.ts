@@ -95,6 +95,7 @@ export function toSubmissionDto(db: DatabaseSync, row: SubmissionRow): Submissio
     score: row.score,
     timeMs: row.time_ms,
     memoryKb: row.memory_kb,
+    message: row.message,
     createdAt: new Date(row.created_at).toISOString(),
     judgedAt: row.judged_at ? new Date(row.judged_at).toISOString() : null,
   };

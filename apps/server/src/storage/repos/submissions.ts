@@ -13,6 +13,7 @@ export interface SubmissionRow {
   score: number;
   time_ms: number;
   memory_kb: number;
+  message: string;
   created_at: number;
   judged_at: number | null;
 }
@@ -83,6 +84,14 @@ export function replaceTestResults(
   }
 }
 
+export function setSubmissionStatus(
+  db: DatabaseSync,
+  submissionId: number,
+  status: string,
+): void {
+  db.prepare('UPDATE submissions SET status = ? WHERE id = ?').run(status, submissionId);
+}
+
 export function finishSubmission(
   db: DatabaseSync,
   submissionId: number,
@@ -92,17 +101,19 @@ export function finishSubmission(
     score: number;
     timeMs: number;
     memoryKb: number;
+    message?: string;
   },
 ): void {
   db.prepare(
     `UPDATE submissions SET status = ?, verdict = ?, score = ?, time_ms = ?, memory_kb = ?,
-     judged_at = ? WHERE id = ?`,
+     message = ?, judged_at = ? WHERE id = ?`,
   ).run(
     result.status,
     result.verdict,
     result.score,
     result.timeMs,
     result.memoryKb,
+    result.message ?? '',
     Date.now(),
     submissionId,
   );

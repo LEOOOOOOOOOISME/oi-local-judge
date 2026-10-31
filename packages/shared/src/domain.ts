@@ -50,6 +50,7 @@ export interface SubmissionDto {
   score: number;
   timeMs: number;
   memoryKb: number;
+  message?: string;
   createdAt: string;
   judgedAt: string | null;
   code?: string;
