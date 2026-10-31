@@ -31,6 +31,11 @@ import {
 import { compileSource } from './compiler.js';
 import { ensureCompiledProgram } from './compile-cache.js';
 import { ensureChecker } from './checker-cache.js';
+import {
+  gradeObjective,
+  parseObjectiveAnswers,
+  parseObjectiveConfig,
+} from './objective.js';
 import { runChecker, type CheckerMode } from './checker.js';
 import { runSandboxed } from './runner.js';
 import { aggregateSubtask } from './subtask.js';
@@ -375,6 +380,36 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       events,
       `problem ${submission.problem_id} not found`,
     );
+    return;
+  }
+
+  if (problem.type === 'objective') {
+    try {
+      setSubmissionStatus(db, submissionId, 'running');
+      const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
+      const objective = parseObjectiveConfig(problem.objective_json);
+      if (objective.questions.length === 0) {
+        markSubmissionFailed(db, submissionId, events, 'objective problem has no questions');
+        return;
+      }
+      const answers = parseObjectiveAnswers(readFileSync(sourcePath, 'utf8'));
+      const graded = gradeObjective(objective, answers);
+      persistJudged(
+        db,
+        submissionId,
+        events,
+        graded.results,
+        decideOverallVerdict(graded.results, graded.score),
+        graded.score,
+      );
+    } catch (err) {
+      markSubmissionFailed(
+        db,
+        submissionId,
+        events,
+        `objective grading failed: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
     return;
   }
 

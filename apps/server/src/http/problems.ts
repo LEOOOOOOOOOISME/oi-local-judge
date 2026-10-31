@@ -5,6 +5,7 @@ import {
   getProblemDetail,
   importProblemDirectory,
   listProblemDtos,
+  stripObjectiveAnswers,
 } from '../services/problems.js';
 
 export interface ProblemRouteOptions {
@@ -25,7 +26,7 @@ export function registerProblemRoutes(app: FastifyInstance, options: ProblemRout
     if (!problem || problem.visibility === 'hidden') {
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND', message: 'problem not found' } });
     }
-    return { ok: true, data: problem };
+    return { ok: true, data: stripObjectiveAnswers(problem) };
   });
 
   const guards = options.adminGuard ? [options.adminGuard] : [];

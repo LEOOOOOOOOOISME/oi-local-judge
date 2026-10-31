@@ -32,6 +32,7 @@ interface ProblemJson {
     source?: string;
     compare?: string;
   };
+  objective?: { questions?: unknown[] };
   testcases: Array<{ input: string; output: string; points: number; subtaskId?: number }>;
 }
 
@@ -64,6 +65,23 @@ export function getProblemDetail(db: DatabaseSync, id: number): ProblemDetailDto
     visibility: row.visibility,
     statementHtml: row.statement_html,
     samples: JSON.parse(row.samples_json) as ProblemDetailDto['samples'],
+    objective: JSON.parse(row.objective_json) as ProblemDetailDto['objective'],
+  };
+}
+
+/** Removes correct answers before exposing a problem to contestants. */
+export function stripObjectiveAnswers(
+  problem: ProblemDetailDto,
+): ProblemDetailDto {
+  if (!problem.objective) return problem;
+  return {
+    ...problem,
+    objective: {
+      questions: problem.objective.questions.map((question) => {
+        const { answers: _answers, ...rest } = question;
+        return rest;
+      }),
+    },
   };
 }
 
@@ -78,11 +96,17 @@ export function importProblemDirectory(options: {
     throw new Error(`problem.json not found in ${sourceDir}`);
   }
   const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as ProblemJson;
-  if (!manifest.title || !Array.isArray(manifest.testcases) || manifest.testcases.length === 0) {
-    throw new Error('problem.json must contain title and at least one testcase');
+  const isObjective = manifest.type === 'objective';
+  if (!manifest.title || (isObjective
+    ? !Array.isArray(manifest.objective?.questions) || (manifest.objective?.questions?.length ?? 0) === 0
+    : !Array.isArray(manifest.testcases) || manifest.testcases.length === 0)) {
+    throw new Error(
+      isObjective
+        ? 'objective problem.json must contain objective.questions'
+        : 'problem.json must contain title and at least one testcase',
+    );
   }
-  for (const testcase of manifest.testcases) {
-    if (!existsSync(join(sourceDir, testcase.input))) {
+  for (const testcase of manifest.testcases ?? []) {    if (!existsSync(join(sourceDir, testcase.input))) {
       throw new Error(`missing input file: ${testcase.input}`);
     }
     if (!existsSync(join(sourceDir, testcase.output))) {
@@ -125,7 +149,8 @@ export function importProblemDirectory(options: {
     samples: manifest.samples ?? [],
     checkerMode,
     compareMode: manifest.checker?.compare ?? 'ignore-trailing',
-    testcases: manifest.testcases.map((testcase) => ({
+    objective: manifest.objective,
+    testcases: (manifest.testcases ?? []).map((testcase) => ({
       inputPath: testcase.input,
       outputPath: testcase.output,
       points: testcase.points,

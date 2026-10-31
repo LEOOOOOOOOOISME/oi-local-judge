@@ -31,6 +31,32 @@ export interface ProblemDetailDto extends ProblemSummaryDto {
   visibility: string;
   statementHtml: string;
   samples: Array<{ input: string; output: string; explanation?: string }>;
+  objective?: ObjectiveConfig;
+}
+
+export type ObjectiveKind = 'single' | 'multiple' | 'judge' | 'fill';
+
+export interface ObjectiveOption {
+  key: string;
+  text: string;
+}
+
+export interface ObjectiveQuestion {
+  id: number;
+  kind: ObjectiveKind;
+  stem: string;
+  options?: ObjectiveOption[];
+  /** Correct answers; omitted from public problem details. */
+  answers?: string[];
+  points: number;
+  /** Multiple-choice: award proportional partial score for a correct subset. */
+  partial?: boolean;
+  ignoreCase?: boolean;
+  ignoreWhitespace?: boolean;
+}
+
+export interface ObjectiveConfig {
+  questions: ObjectiveQuestion[];
 }
 
 export interface TestResultDto {
