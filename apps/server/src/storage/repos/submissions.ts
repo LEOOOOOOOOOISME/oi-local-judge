@@ -167,3 +167,12 @@ export function listSubmissions(db: DatabaseSync, filter: ListSubmissionsFilter)
     .prepare(`SELECT * FROM submissions ${where} ORDER BY id DESC LIMIT ?`)
     .all(...params, limit) as unknown as SubmissionRow[];
 }
+
+export function listContestSubmissions(
+  db: DatabaseSync,
+  contestId: number,
+): SubmissionRow[] {
+  return db
+    .prepare('SELECT * FROM submissions WHERE contest_id = ? ORDER BY id')
+    .all(contestId) as unknown as SubmissionRow[];
+}

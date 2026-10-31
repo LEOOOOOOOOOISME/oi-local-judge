@@ -1,13 +1,28 @@
+import { ensureDataDirs, loadConfig } from './config.js';
+import { openDatabase } from './storage/db.js';
+import { migrate } from './storage/migrate.js';
+import { createHub } from './realtime/hub.js';
+import { ensureAdmin } from './services/bootstrap.js';
+import { startScheduler } from './judge/scheduler.js';
 import { buildApp } from './app.js';
+import { join } from 'node:path';
 
-const app = await buildApp({ logger: true });
-const port = Number(process.env.OIJ_PORT ?? 8787);
-const host = process.env.OIJ_HOST ?? '0.0.0.0';
+const config = loadConfig();
+ensureDataDirs(config.dataDir);
+const db = openDatabase(join(config.dataDir, 'db', 'oijudge.db'));
+migrate(db);
+ensureAdmin(db, config);
+
+const hub = createHub();
+const app = await buildApp({ db, config, hub, logger: true });
+const scheduler = startScheduler({ db, config, events: hub });
+const port = config.port;
+const host = config.host;
 await app.listen({ port, host });
 
 const address = app.server.address();
 const actualPort = typeof address === 'object' && address ? address.port : port;
-app.log.info({ port: actualPort, host }, 'ojserver listening');
+app.log.info({ port: actualPort, host, dataDir: config.dataDir }, 'ojserver listening');
 
 const parentPort = (
   process as unknown as {
@@ -15,3 +30,13 @@ const parentPort = (
   }
 ).parentPort;
 parentPort?.postMessage({ type: 'ready', port: actualPort });
+
+async function shutdown() {
+  await scheduler.stop();
+  await app.close();
+  db.close();
+  process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);

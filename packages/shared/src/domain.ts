@@ -52,6 +52,7 @@ export interface SubmissionDto {
   memoryKb: number;
   createdAt: string;
   judgedAt: string | null;
+  code?: string;
   results?: TestResultDto[];
 }
 

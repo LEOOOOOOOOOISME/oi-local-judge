@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS problems(
   difficulty INTEGER, tags_json TEXT NOT NULL DEFAULT '[]', time_ms INTEGER NOT NULL,
   memory_mb INTEGER NOT NULL, io_mode TEXT NOT NULL DEFAULT 'stdio',
   input_file TEXT, output_file TEXT, statement_html TEXT NOT NULL DEFAULT '',
+  samples_json TEXT NOT NULL DEFAULT '[]',
   visibility TEXT NOT NULL DEFAULT 'public', version INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );

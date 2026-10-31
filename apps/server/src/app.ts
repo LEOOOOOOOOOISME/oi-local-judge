@@ -1,15 +1,46 @@
 import Fastify, { type FastifyInstance } from 'fastify';
 import websocket from '@fastify/websocket';
+import type { DatabaseSync } from 'node:sqlite';
+import { loadConfig, type Config } from './config.js';
 import { healthRoutes } from './http/health.js';
+import { registerAuthRoutes } from './http/auth.js';
+import { registerProblemRoutes } from './http/problems.js';
+import { registerContestRoutes } from './http/contests.js';
+import { registerSubmissionRoutes } from './http/submissions.js';
+import { createHub, type Hub } from './realtime/hub.js';
+import { authenticateRequest, requireRole } from './security/auth.js';
+import { migrate } from './storage/migrate.js';
+import { openDatabase } from './storage/db.js';
 
 export interface AppOptions {
   logger?: boolean;
+  db?: DatabaseSync;
+  config?: Config;
+  hub?: Hub;
 }
 
 export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> {
+  const config = opts.config ?? loadConfig();
+  const ownsDb = !opts.db;
+  const db = opts.db ?? openDatabase(':memory:');
+  if (ownsDb) migrate(db);
+  const hub = opts.hub ?? createHub();
+
   const app = Fastify({ logger: opts.logger ?? false });
   await app.register(websocket);
   await app.register(healthRoutes);
+
+  await registerAuthRoutes(app, { db, config });
+  registerProblemRoutes(app, {
+    db,
+    config,
+    adminGuard: requireRole(['admin', 'setter'], { db, config }),
+  });
+  registerContestRoutes(app, {
+    db,
+    adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
+  });
+  registerSubmissionRoutes(app, { db, config });
 
   app.get('/', async (_req, reply) =>
     reply
@@ -19,7 +50,17 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
       ),
   );
 
-  app.get('/ws', { websocket: true }, (socket) => {
+  app.get('/ws', { websocket: true }, (socket, request) => {
+    const authenticated = authenticateRequest(request, { db, config });
+    if (!authenticated) {
+      socket.close(1008, 'unauthorized');
+      return;
+    }
+    const rooms = [`user:${authenticated.user.id}`];
+    if (authenticated.user.role === 'admin') rooms.push('admin');
+    hub.subscribe(socket, rooms);
+
+    socket.send(JSON.stringify({ v: 1, type: 'hello', data: { userId: authenticated.user.id } }));
     socket.on('message', (raw: Buffer) => {
       try {
         const msg = JSON.parse(String(raw)) as { type?: string };
@@ -28,6 +69,11 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
         socket.send(JSON.stringify({ type: 'error', message: 'invalid json' }));
       }
     });
+    socket.on('close', () => hub.unsubscribe(socket));
+  });
+
+  app.addHook('onClose', async () => {
+    if (ownsDb) db.close();
   });
 
   return app;

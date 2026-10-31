@@ -1,0 +1,15 @@
+{
+  "title": "A+B Problem",
+  "type": "standard",
+  "difficulty": 1,
+  "tags": ["入门", "模拟"],
+  "timeMs": 1000,
+  "memoryMb": 64,
+  "ioMode": "stdio",
+  "statement": "# A+B Problem\n\n输入两个整数 a, b，输出它们的和。\n\n## 输入格式\n\n一行两个整数。\n\n## 输出格式\n\n一个整数。",
+  "samples": [{ "input": "1 2\n", "output": "3\n", "explanation": "1 + 2 = 3" }],
+  "testcases": [
+    { "input": "data/1.in", "output": "data/1.out", "points": 50 },
+    { "input": "data/2.in", "output": "data/2.out", "points": 50 }
+  ]
+}
