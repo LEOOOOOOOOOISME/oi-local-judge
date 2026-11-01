@@ -264,6 +264,7 @@ export function SubmissionDetailPage() {
         tags={
           <>
             <SubmissionStatusBadge status={submission.status} verdict={submission.verdict} />
+            {submission.hackedAt ? <Tag color="red">HACKED</Tag> : null}
             <Tag>{languageLabel(submission.language)}</Tag>
           </>
         }
@@ -385,6 +386,26 @@ export function SubmissionDetailPage() {
                 { label: '状态', value: SUBMISSION_STATUS_LABEL[submission.status] },
                 { label: '提交时间', value: formatDateTime(submission.createdAt) },
                 { label: '评测时间', value: formatDateTime(submission.judgedAt) },
+                ...(submission.hackedAt
+                  ? [
+                      {
+                        label: 'Hack 状态',
+                        value: <Tag color="red">HACKED</Tag>,
+                      },
+                      {
+                        label: 'Hack 时间',
+                        value: formatDateTime(submission.hackedAt),
+                      },
+                      {
+                        label: 'Hacked by',
+                        value:
+                          submission.hackedBy === null ||
+                          submission.hackedBy === undefined
+                            ? '—'
+                            : `用户 #${submission.hackedBy}`,
+                      },
+                    ]
+                  : []),
               ]}
             />
           </Card>

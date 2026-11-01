@@ -61,6 +61,15 @@ export function ContestScreenPage() {
   const preset = data?.preset ?? presetFromMode(contest?.mode);
   const isAcm = preset === 'acm' || preset === 'cf-like';
   const archived = data?.archived ?? false;
+  const officialFrozenUntil = data?.officialFrozenUntil ?? null;
+  const officialFrozen = officialFrozenUntil !== null && officialFrozenUntil > now;
+  const officialFrozenText = officialFrozen
+    ? new Date(officialFrozenUntil).toLocaleTimeString('zh-CN', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      })
+    : null;
   const rows = useMemo(() => {
     if (topLimit === 'all') return ranking;
     return ranking.slice(0, Number(topLimit));
@@ -114,6 +123,9 @@ export function ContestScreenPage() {
           <div className="screen-subline">
             <span className={`screen-status screen-status-${phase}`}>{statusLabel}</span>
             <span className="screen-preset">{presetLabel(preset)}</span>
+            {officialFrozen ? (
+              <span className="screen-official-frozen">官方冻结至 {officialFrozenText}</span>
+            ) : null}
             {archived ? <span className="screen-archived">已归档 · 只读</span> : null}
             <span>{contestCountdownText(contest, now)}</span>
             <span className="screen-mail">{formatClock(now)}</span>

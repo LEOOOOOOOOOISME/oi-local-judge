@@ -1268,3 +1268,22 @@ a.oij-logo:hover {
   line-height: 18px;
 }
 
+.submission-status-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.hacked-submission-tag {
+  display: inline-block;
+  padding: 0 5px;
+  border: 1px solid #ffa39e;
+  border-radius: 3px;
+  background: #fff1f0;
+  color: #b91c1c;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0.02em;
+}
+

@@ -157,6 +157,7 @@ export function AdminContestConsolePage() {
     queryKey: ['admin-contest-locks', contestId],
     queryFn: () => apiGet<ContestLockRecord[]>(`/api/admin/contests/${contestId}/locks`),
     enabled: validId,
+    refetchInterval: 5_000,
   });
 
   const detail = detailQuery.data ?? null;
