@@ -137,6 +137,42 @@ export function countRecentHacks(
   return Number(row.n);
 }
 
+export function listHackAudit(db: DatabaseSync, contestId: number) {
+  return db
+    .prepare(
+      `SELECT h.id, h.contest_id, h.problem_id, h.hacker_id, h.target_submission_id,
+              h.status, h.verdict, h.message, h.created_at, h.judged_at,
+              hu.username AS hacker_username,
+              tu.username AS target_username, tu.real_name AS target_real_name,
+              p.title AS problem_title,
+              s.verdict AS target_verdict, s.score AS target_score
+       FROM contest_hacks h
+       JOIN users hu ON hu.id = h.hacker_id
+       JOIN submissions s ON s.id = h.target_submission_id
+       JOIN users tu ON tu.id = s.user_id
+       JOIN problems p ON p.id = h.problem_id
+       WHERE h.contest_id = ? ORDER BY h.id DESC`,
+    )
+    .all(contestId) as unknown as Array<{
+    id: number;
+    contest_id: number;
+    problem_id: number;
+    hacker_id: number;
+    target_submission_id: number;
+    status: string;
+    verdict: string | null;
+    message: string;
+    created_at: number;
+    judged_at: number | null;
+    hacker_username: string;
+    target_username: string;
+    target_real_name: string | null;
+    problem_title: string;
+    target_verdict: string | null;
+    target_score: number;
+  }>;
+}
+
 export function listHacks(  db: DatabaseSync,
   contestId: number,
   problemId?: number,
