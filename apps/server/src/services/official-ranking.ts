@@ -16,6 +16,7 @@ import {
   seedOfficialScoresFromSubmissions,
 } from '../storage/repos/official-scores.js';
 import { listContestSubmissions } from '../storage/repos/submissions.js';
+import { listHacks } from '../storage/repos/hacks.js';
 import { getProblem } from '../storage/repos/problems.js';
 import { getUserById } from '../storage/repos/users.js';
 import { loadRankingPlugin } from './ranking-plugins.js';
@@ -112,6 +113,15 @@ export async function getOfficialRanking(
   const problemPoints = Object.fromEntries(
     problems.map((problem) => [problem.id, problem.points]),
   );
+  const hacks = listHacks(db, contestId)
+    .filter((hack) => hack.status === 'success' || hack.status === 'failed')
+    .map((hack) => ({
+      hackerId: hack.hacker_id,
+      targetUserId: 0,
+      problemId: hack.problem_id,
+      status: hack.status as 'success' | 'failed',
+      createdAt: hack.created_at,
+    }));
 
   let rows: RankingRowResult[];
   let pluginError: string | undefined;
@@ -125,6 +135,7 @@ export async function getOfficialRanking(
         submissions,
         officialScores,
         problemPoints,
+        hacks,
         contestStartAt: contest.start_at,
         contestEndAt: contest.end_at,
         config: JSON.parse(contest.ranking_rule_json || '{}') as Record<string, unknown>,
@@ -139,6 +150,7 @@ export async function getOfficialRanking(
         submissions,
         officialScores,
         problemPoints,
+        hacks,
         contestStartAt: contest.start_at,
         contestEndAt: contest.end_at,
       });
@@ -151,6 +163,7 @@ export async function getOfficialRanking(
       submissions,
       officialScores,
       problemPoints,
+      hacks,
       contestStartAt: contest.start_at,
       contestEndAt: contest.end_at,
     });

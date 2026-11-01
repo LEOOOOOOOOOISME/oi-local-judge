@@ -187,6 +187,21 @@ describe('computeRanking CF-like', () => {
     expect(cell(rows[0], 1).attempts).toBe(2);
   });
 
+  it('adds CF hack points and subtracts failed hack penalties', () => {
+    const rows = computeRanking({
+      config: { preset: 'cf-like', tie: 'same-rank', cfLike: { decay: 0.5, hackPoints: 100, failedHackPenalty: 50 } },
+      problemIds: [1],
+      userIds: [1],
+      submissions: [],
+      hacks: [
+        { hackerId: 1, targetUserId: 2, problemId: 1, status: 'success', createdAt: 1 },
+        { hackerId: 1, targetUserId: 3, problemId: 1, status: 'failed', createdAt: 2 },
+      ],
+    });
+    expect(rows[0].hackScore).toBe(50);
+    expect(rows[0].totalScore).toBe(50);
+  });
+
   it('supports sequential ranks when tie is none', () => {
     const rows = computeRanking({
       config: { preset: 'oi', tie: 'none' },

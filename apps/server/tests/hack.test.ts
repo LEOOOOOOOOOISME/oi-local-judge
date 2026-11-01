@@ -97,6 +97,30 @@ afterAll(async () => {
 });
 
 describe('contest hack', () => {
+  it('rejects locks after the configured hack window', async () => {
+    const endedContest = createContest(db, {
+      name: 'Closed Hack Window',
+      mode: 'oi',
+      problemIds: [problemId],
+      startAt: Date.now() - 60_000,
+      endAt: Date.now() - 1_000,
+    });
+    db.prepare(
+      "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",
+    ).run(endedContest, hackerId);
+    db.prepare('UPDATE contests SET ranking_rule_json = ? WHERE id = ?').run(
+      JSON.stringify({ hackWindowMinutes: 0 }),
+      endedContest,
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/contests/${endedContest}/problems/${problemId}/lock`,
+      headers: { cookie: hackerCookie },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toContain('HACK_WINDOW_CLOSED');
+  });
+
   it('requires a lock, reveals source, and marks a failed target as HACKED', async () => {
     const beforeLock = await app.inject({
       method: 'GET',

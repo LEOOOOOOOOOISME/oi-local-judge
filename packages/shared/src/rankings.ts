@@ -3,7 +3,7 @@ export type RankingPreset = 'oi' | 'ioi' | 'acm' | 'cf-like';
 export interface RankingConfig {
   preset: RankingPreset;
   tie: 'same-rank' | 'none';
-  cfLike?: { decay: number };
+  cfLike?: { decay: number; hackPoints?: number; failedHackPenalty?: number };
   freezeAt?: number | null;
 }
 
@@ -27,6 +27,7 @@ export interface RankingRowResult {
   rank: number;
   userId: number;
   totalScore: number;
+  hackScore?: number;
   solved: number;
   penalty: number;
   lastAcAt: number | null;
@@ -40,12 +41,21 @@ export interface RankingOfficialScoreInput {
   verdict: string;
 }
 
+export interface RankingHackInput {
+  hackerId: number;
+  targetUserId: number;
+  problemId: number;
+  status: 'success' | 'failed';
+  createdAt: number;
+}
+
 export interface ComputeRankingInput {
   config: RankingConfig;
   problemIds: number[];
   userIds: number[];
   submissions: RankingSubmissionInput[];
   officialScores?: RankingOfficialScoreInput[];
+  hacks?: RankingHackInput[];
   /** Authoritative max points per problem, usually contest_problems.points. */
   problemPoints?: Record<number, number>;
   contestStartAt?: number | null;
@@ -137,6 +147,8 @@ export function computeRanking(input: ComputeRankingInput): RankingRowResult[] {
       ? contestEndAt - contestStartAt
       : null;
   const cfLikeDecay = input.config.cfLike?.decay ?? DEFAULT_CF_LIKE_DECAY;
+  const cfHackPoints = input.config.cfLike?.hackPoints ?? 100;
+  const cfFailedHackPenalty = input.config.cfLike?.failedHackPenalty ?? 50;
   const inferredPoints = collectProblemPoints(input.config.preset, visible);
   const explicitPoints = new Map<number, number>();
   for (const [key, value] of Object.entries(input.problemPoints ?? {})) {
@@ -190,8 +202,21 @@ export function computeRanking(input: ComputeRankingInput): RankingRowResult[] {
       return { problemId, score, verdict: 'AC', attempts, firstAcAt };
     });
 
-    return { rank: 0, userId, totalScore, solved, penalty, lastAcAt, cells };
+    return { rank: 0, userId, totalScore, hackScore: 0, solved, penalty, lastAcAt, cells };
   });
+
+  const hacksByUser = new Map<number, number>();
+  if (input.config.preset === 'cf-like') {
+    for (const hack of input.hacks ?? []) {
+      const delta = hack.status === 'success' ? cfHackPoints : -cfFailedHackPenalty;
+      hacksByUser.set(hack.hackerId, (hacksByUser.get(hack.hackerId) ?? 0) + delta);
+    }
+  }
+  for (const row of rows) {
+    const hackScore = hacksByUser.get(row.userId) ?? 0;
+    row.hackScore = hackScore;
+    row.totalScore = Math.max(0, row.totalScore + hackScore);
+  }
 
   assignRanks(rows, input.config.preset, input.config.tie);
   return rows;

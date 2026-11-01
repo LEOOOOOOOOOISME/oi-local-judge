@@ -16,6 +16,13 @@ export interface RankingPluginInput {
     createdAt: number;
   }>;
   officialScores?: Array<{ userId: number; problemId: number; score: number; verdict: string }>;
+  hacks?: Array<{
+    hackerId: number;
+    targetUserId: number;
+    problemId: number;
+    status: 'success' | 'failed';
+    createdAt: number;
+  }>;
   problemPoints?: Record<number, number>;
   contestStartAt?: number | null;
   contestEndAt?: number | null;
