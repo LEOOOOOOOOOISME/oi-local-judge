@@ -1,0 +1,232 @@
+OI Local Judge 中期阶段报告
+================================
+
+日期：2026-11-01
+仓库：D:\Documents\ai-powered-study\oi-local-judge
+分支：main
+最新提交：bfe6629
+检查点标签：checkpoint-2026-11-01（67f806e）
+工作区：干净，无未提交改动
+
+一、项目概况
+------------
+
+Windows 局域网 OI 评测系统：
+
+- 桌面壳：Electron（开发沙箱内无法启动，待目标机验证）
+- 服务端：Fastify 5 + Node 24 + node:sqlite（WAL）
+- 前端：React 18 + Vite + Ant Design 5 + TanStack Query
+- 原生执行器：ojrunner.exe（单进程 Job Object 沙箱）
+                ojinteract.exe（双进程交互管道）
+- 数据目录：默认仓库下 runtime/（gitignored）；OIJ_DATA_DIR 可覆盖
+- 目标环境：Windows 10/11 x64，4C/8G，300 在线，50 并发提交
+
+二、已完成工作
+--------------
+
+1. 基础设施与安全
+   - 登录/登出/me、HMAC 签名 HttpOnly Cookie、scrypt 密码
+   - 角色权限：admin / setter / contestmanager / contestant
+   - session_version 失效机制；改密/改角色后旧会话失效
+   - 登录失败限流：同 IP+用户名 10 分钟 5 次 -> 429
+   - 审计日志：登录成功/失败 + 所有 /api/admin/* 写操作
+   - 管理端审计页 /admin/audit
+
+2. 评测内核
+   - 原生 Job Object 沙箱：内存/进程/CPU/墙钟限制、整棵进程树终止
+   - g++ 编译、编译缓存 cache/programs、checker 缓存 cache/checkers
+   - 传统题、文件 IO、testlib/Lemon 六参数 SPJ、子任务与依赖
+   - 交互题：ojinteract.exe 双向管道，stdin/stdout 实时交互
+   - 客观题：单选/多选/判断/填空，部分给分，公开接口隐藏答案
+   - 提交答案题：测试点输入下载、逐点答案比较
+   - 评测状态、测试点结果、得分、时间/内存、SE/CE/TLE/MLE/RE/WA/PC/AC
+   - 评测队列调度器（默认 2 槽）、WebSocket 事件
+
+3. 比赛
+   - 建赛/编辑、题目与分值、开始/封榜/解封/结束、加时
+   - 参赛者添加/移除、按用户名批量添加
+   - 比赛公告、答疑、私信/通知
+   - OI 榜单、班级统计、榜单 CSV、深色大屏（5s 轮询）
+   - 比赛删除（有提交时拒绝）
+   - 客观题/提交答案题/交互题可进入比赛题目列表
+
+4. 管理端
+   - 题目创建/编辑、可见性、类型、IO、题面、checkerMode
+   - 7 类程序资产：std/checker/validator/generator/interactor/judger/brute
+   - 资产上传、源码查看、编译、删除
+   - 测试数据 zip 导入、测试点表、逐点分值
+   - validator 运行、std 自测、generator 造数据、std/brute 对拍
+   - 批量评测：zip + 学生层级；单题与多题映射
+   - 用户管理：编辑、重置密码、停用/启用、CSV 导入
+   - OI/Cena/Lemon 题包导入导出
+
+5. 社区
+   - 讨论/题解/公告、评论、置顶/锁定/隐藏
+   - 题解审核（contestant 提交为 pending）
+   - 比赛答疑、私信、通知铃铛
+   - Markdown 服务端渲染，html:false，防 XSS
+
+6. 批量评测
+   - 单题模式：学生层级 + 单题
+   - 多题模式：学生层级 + 题目层级 + problemMap
+   - 文件夹名自动匹配：题目 ID -> 标题归一化 -> 比赛顺序 A/B/C/D
+   - 每学生+题目一条提交；同一格重复源文件取字典序第一个
+   - 结果表题目列、CSV、学生数/题目数汇总
+   - 演示包：
+     runtime/test-data/batch-demo.zip
+     runtime/test-data/batch-multi.zip
+     runtime/test-data/batch-multi-wrapped.zip
+   - 实测多题包 5 学生 × 2 题 = 9 条结果全部符合预期
+
+7. 文档
+   - docs/research/phase-0 至 phase-3i 结果报告
+   - docs/superpowers/specs 技术设计
+   - requirement.txt 需求规格
+   - README 快速开始与运行说明
+
+三、质量与性能
+--------------
+
+- 全量测试：30 个测试文件、94 个用例（最近一次通过；首次并发抖动 1 例，复跑通过）
+- 构建：npm run build 通过
+- 前端：TypeScript、vite build 通过
+- 浏览器验收：Edge headless，多个阶段累计检查项全部通过
+- 性能基准（npm run bench）：
+  - SQLite 插入 20 行：0.018ms
+  - SQLite 读取 4000 行：0.031ms
+  - 500 行榜单计算：0.387ms / 35.1KB
+  - runner 端到端中位：43.18ms（runner 15ms）
+- 50 并发提交（npm run bench:concurrency，2 槽）：
+  - 50/50 AC，总耗时 3624ms，平均 72.48ms/提交，13.8 提交/s
+  - 注：复用编译缓存与同一源码，不等同于 50 个不同源码
+- 首屏 JS gzip 约 268KB；管理端/大屏/审计均懒加载
+
+四、运行数据与迁移
+------------------
+
+- 已将 C:\Users\leo\AppData\Local\OiJudge 迁移到 runtime/
+- 已删除 C:\Users\leo\AppData\Local\OiJudge 与 %TEMP%\oij-problems-*
+- 历史测试点路径 data/1.in 已自动修复为 problems/1/data/1.in
+- 启动时自动执行 repairLegacyTestcasePaths
+- 当前 8787 端口有服务运行；runtime 含演示/测试数据
+- 当前 runtime 有 3 个题目、142 条提交（含批量演示）
+
+五、已确认但尚未实现的下一阶段需求
+----------------------------------
+
+以下为最近一轮需求讨论的决策，代码尚未实现：
+
+1. 比赛批量正式导入
+   - 批量导入与赛中网页提交共同构成正式赛时榜
+   - 批量导入按三种模式作用于正式格子：
+     覆盖：只更新批次出现的 学生×题目 格子
+     合并：逐格取较高分
+     仅补缺：只填空格
+   - 先落草稿，管理员预览后发布；发布前不影响正式榜
+   - 未注册用户名跳过并报告
+   - 参赛名单任意时间追加导入；未知用户跳过并报告
+   - 参赛者移除后从正式榜和订正榜隐藏，成绩保留
+   - 正式榜和批量榜单统一数据源，批次完成后跳转/展示比赛正式榜
+
+2. 排名引擎
+   - 支持 OI/IOI/ACM/CF/自定义规则
+   - 并列、罚时、封榜、可见性可配置
+   - 内置策略 + 声明式配置 + 开发者 TS 插件接口
+   - 应用内 /help + 仓库 docs 帮助文档
+   - 当前系统实际只有 OI 总分榜；ACM 罚时、CF 规则、插件接口均未实现
+
+3. 独立订正页
+   - 比赛结束后自动永久开放订正
+   - 只有比赛结束后的提交算订正，且提交人必须是参赛者
+   - 订正页公开、独立路由
+   - 每题取 max(赛中官方分, 赛后最高分)
+   - 订正榜固定 OI 总分制；与官方榜分开存储、分开展示
+   - 比赛页赛后自动出现“订正提交”入口
+   - 当前未实现订正阶段、订正页、官方/订正分离存储
+
+4. 完整 CF hack（本期决策为完整实现，但尚未开始）
+   - 仅赛中网页提交可被 hack
+   - 判定：用题目 std 生成预期输出，再跑目标程序 + checker
+   - 成功后测试数据默认仅存在本场比赛，管理员可手动晋升为正式测试点
+   - 锁题后本人不能再提交，只能 hack；不可解锁（管理员可审计强制解锁）
+   - 完整 CF 计分公式（题分 + 剩余时间 + 成功/失败）
+   - 赛中 + 赛后开放窗口，可配置
+   - 锁定题目后可看同题其他提交源码
+   - 被 hack 后标记 HACKED，从正式分剔除并重算
+   - 当前无 hack 数据模型、源码可见性、测试提交、重测、HACKED 状态
+
+5. 客观题/提交答案题批量导入
+   - 已决定统一使用 answers.json
+   - 当前批量评测只支持 .cpp/.cc/.cxx，客观题/提交答案题批量导入未实现
+
+6. 其他未落地
+   - 参赛名单 CSV 导入接口/UI（当前只能按用户名调用 API 添加）
+   - 批量批次预览/发布/丢弃状态机
+   - 正式官方分表、订正分表、比赛阶段字段
+   - 排名策略接口、帮助中心
+   - 赛后订正提交入口与独立订正榜
+   - CF hack 全部内容
+   - 备份/恢复 UI、审计筛选/分页
+   - 交互题 testlib interactor 协议兼容（当前仅自定义 argv/stdin/stdout 协议）
+   - Electron 目标机验证
+   - 50 个不同源码的编译并发压测
+   - 社区搜索/分页/附件、题解点赞/采纳
+
+六、风险与注意事项
+------------------
+
+1. 完整 hack 是独立子系统，不是榜单附属功能；涉及源码隐私、测试数据安全、
+   历史重测、排名重算，风险最高。
+2. 排名引擎改造会影响现有 OI 榜单、封榜、班级统计、大屏和 CSV，需要迁移与回归。
+3. 正式分/订正分分开存储后，比赛页、订正页、批量页、班级统计必须统一口径。
+4. 批量 answers.json 需要为客观题、提交答案题分别定义字段与校验。
+5. 当前测试偶发并发抖动（复跑通过），正式发布前建议固定测试槽位/超时。
+6. Electron 尚未在目标 Windows 机器启动验证。
+7. runtime 当前含演示/测试数据，正式部署前应清理或新建数据目录。
+
+七、建议交付分期
+----------------
+
+Phase A：排名引擎 + 比赛批量正式导入
+- 官方分表、草稿/预览/发布、三种模式
+- 名单追加、多题全局映射、正式榜
+- OI/IOI/ACM/CF 预设 + 并列/封榜配置
+- 先代码题，不含订正/hack/答案题
+
+Phase B：订正页 + 赛后提交 + 答案题批量
+- 官方/订正分离
+- 独立订正页、赛后入口
+- answers.json 批量客观题/提交答案题
+
+Phase C：完整 CF hack + 帮助文档
+- 锁题、源码、std 判定、测试晋升、HACKED 重算
+- CF 计分、hack 窗口、防滥用
+- 应用内 /help 与 docs 完整化
+
+八、快速运行与验证
+------------------
+
+  cd /d D:\Documents\ai-powered-study\oi-local-judge
+  npm install --ignore-scripts --cache .npm-cache
+  npm run build:native
+  npm run build
+  npm run seed
+  npm start
+
+访问：http://127.0.0.1:8787
+默认管理员：admin / admin123
+
+测试：
+  npx vitest run
+  npm run bench
+  npm run bench:concurrency
+
+九、结论
+--------
+
+当前系统已经是一个可用的 OI 局域网评测闭环：题目/资产/数据、评测沙箱、
+比赛、榜单、批量评测、社区、用户与审计均可运行，测试与性能基准通过。
+
+但“比赛批量正式导入 + 双榜 + 可配置排名 + 完整 CF hack + 答案题批量”
+仍属于下一阶段，不宜与已完成功能混在一起交付。建议按 Phase A/B/C 推进，
+每期独立验收。
