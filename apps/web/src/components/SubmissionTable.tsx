@@ -1,4 +1,4 @@
-import { Table } from 'antd';
+import { Table, Tooltip } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { Link } from 'react-router-dom';
 import type { Submission } from '../api/types';
@@ -58,9 +58,16 @@ export function SubmissionTable({
     {
       title: '状态',
       dataIndex: 'status',
-      width: 92,
+      width: 140,
       render: (_value, record) => (
-        <SubmissionStatusBadge status={record.status} verdict={record.verdict} />
+        <span className="submission-status-cell">
+          <SubmissionStatusBadge status={record.status} verdict={record.verdict} />
+          {record.hackedAt ? (
+            <Tooltip title="已被 Hack">
+              <span className="hacked-submission-tag">HACKED</span>
+            </Tooltip>
+          ) : null}
+        </span>
       ),
     },
     {
