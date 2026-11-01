@@ -144,6 +144,9 @@ export function toSubmissionDto(db: DatabaseSync, row: SubmissionRow): Submissio
     message: row.message,
     createdAt: new Date(row.created_at).toISOString(),
     judgedAt: row.judged_at ? new Date(row.judged_at).toISOString() : null,
+    hackedAt: row.hacked_at ? new Date(row.hacked_at).toISOString() : null,
+    hackedBy: row.hacked_by,
+    hackId: row.hack_id,
   };
 }
 
