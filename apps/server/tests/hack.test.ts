@@ -183,4 +183,50 @@ describe('contest hack', () => {
     expect(ranking?.rows.find((row) => row.userId === targetId)?.hackedCount).toBe(1);
     expect(ranking?.rows.find((row) => row.userId === hackerId)?.successfulHacks).toBe(1);
   }, 30_000);
+
+  it('rejects invalid hack input before touching the target', async () => {
+    const validatorCode = 'int main(){return 1;}\n';
+    writeFileSync(join(root, 'assets', 'validator.cpp'), validatorCode);
+    upsertAsset(db, {
+      problemId,
+      kind: 'validator',
+      name: 'validator.cpp',
+      path: 'assets/validator.cpp',
+      language: 'cpp17',
+      sha256: 'validator',
+      size: validatorCode.length,
+    });
+    const secondTarget = createSubmission(db, {
+      contestId,
+      problemId,
+      userId: targetId,
+      language: 'cpp17',
+      sourcePath: 'subs/target.cpp',
+      sourceHash: 'target2',
+    });
+    db.prepare("UPDATE submissions SET status='finished', verdict='AC', score=100 WHERE id=?").run(
+      secondTarget,
+    );
+    const created = await app.inject({
+      method: 'POST',
+      url: `/api/contests/${contestId}/problems/${problemId}/hacks`,
+      headers: { cookie: hackerCookie },
+      payload: { targetSubmissionId: secondTarget, input: 'not a valid input\n' },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const hackId = (created.json() as { data: { id: number } }).data.id;
+    let status = '';
+    for (let i = 0; i < 100; i++) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/contests/${contestId}/hacks/${hackId}`,
+        headers: { cookie: hackerCookie },
+      });
+      status = (response.json() as { data: { status: string } }).data.status;
+      if (status !== 'queued' && status !== 'judging') break;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    expect(status).toBe('invalid');
+    expect(getSubmission(db, secondTarget)!.hacked_at).toBeNull();
+  }, 30_000);
 });
