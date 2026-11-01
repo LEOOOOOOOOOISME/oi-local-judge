@@ -22,6 +22,8 @@ export interface SubmitInput {
   language: string;
   code: string;
   contestId?: number | null;
+  phase?: string;
+  batchId?: number | null;
 }
 
 export function submitSource(
@@ -79,6 +81,8 @@ export function submitSource(
     language: input.language,
     sourcePath,
     sourceHash,
+    phase: input.phase,
+    batchId: input.batchId,
   });
   createJudgeTask(deps.db, id, input.contestId ? 100 : 50);
   return { id };

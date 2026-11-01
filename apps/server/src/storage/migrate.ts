@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS batch_jobs(
 CREATE TABLE IF NOT EXISTS batch_items(
   id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, student TEXT NOT NULL,
   source_path TEXT NOT NULL, submission_id INTEGER, problem_id INTEGER,
+  user_id INTEGER,
   FOREIGN KEY(batch_id) REFERENCES batch_jobs(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_batch_items_batch ON batch_items(batch_id);
@@ -163,10 +164,12 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'batch_items', 'verdict', 'TEXT');
   ensureColumn(db, 'batch_items', 'time_ms', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'batch_items', 'memory_kb', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'batch_items', 'user_id', 'INTEGER');
   ensureColumn(db, 'batch_jobs', 'contest_id', 'INTEGER');
   ensureColumn(db, 'batch_jobs', 'mode', 'TEXT');
   ensureColumn(db, 'batch_jobs', 'problem_level', 'INTEGER');
   ensureColumn(db, 'batch_jobs', 'problem_map_json', "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, 'batch_jobs', 'meta_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'batch_jobs', 'created_by', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'hidden_at', 'INTEGER');
   ensureColumn(db, 'submissions', 'phase', "TEXT NOT NULL DEFAULT 'contest'");

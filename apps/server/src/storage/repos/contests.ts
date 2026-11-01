@@ -142,10 +142,10 @@ export function updateParticipant(
   db: DatabaseSync,
   contestId: number,
   userId: number,
-  patch: { extraTime?: number; status?: string },
+  patch: { extraTime?: number; status?: string; hidden?: boolean },
 ): void {
   const sets: string[] = [];
-  const values: Array<string | number> = [];
+  const values: Array<string | number | null> = [];
   if (patch.extraTime !== undefined) {
     sets.push('extra_time = ?');
     values.push(Math.max(0, Math.floor(patch.extraTime)));
@@ -154,10 +154,21 @@ export function updateParticipant(
     sets.push('status = ?');
     values.push(patch.status);
   }
+  if (patch.hidden !== undefined) {
+    sets.push('hidden_at = ?');
+    values.push(patch.hidden ? Date.now() : null);
+  }
   if (sets.length === 0) return;
   db.prepare(
     `UPDATE contest_participants SET ${sets.join(', ')} WHERE contest_id = ? AND user_id = ?`,
   ).run(...values, contestId, userId);
+}
+
+export function archiveContest(db: DatabaseSync, contestId: number): void {
+  db.prepare("UPDATE contests SET status = 'archived', archived_at = ? WHERE id = ?").run(
+    Date.now(),
+    contestId,
+  );
 }
 
 export function deleteContest(db: DatabaseSync, contestId: number): void {
@@ -214,4 +225,23 @@ export function getVisibleParticipants(db: DatabaseSync, contestId: number): num
       )
       .all(contestId) as Array<{ user_id: number }>
   ).map((row) => row.user_id);
+}
+
+export function getParticipantRows(db: DatabaseSync, contestId: number) {
+  return db
+    .prepare(
+      `SELECT p.user_id, p.status, p.extra_time, p.hidden_at,
+              u.username, u.real_name, u.class_name
+       FROM contest_participants p JOIN users u ON u.id = p.user_id
+       WHERE p.contest_id = ? ORDER BY u.username`,
+    )
+    .all(contestId) as unknown as Array<{
+    user_id: number;
+    status: string;
+    extra_time: number;
+    hidden_at: number | null;
+    username: string;
+    real_name: string | null;
+    class_name: string | null;
+  }>;
 }
