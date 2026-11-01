@@ -557,8 +557,8 @@ export interface OfficialRankingRow {
 }
 
 export interface OfficialRankingConfig {
-  preset: RankingPreset;
-  tie: 'same-rank';
+  preset: string;
+  tie: 'same-rank' | 'none';
   cfLike?: { decay: number };
   freezeAt?: number | null;
 }
@@ -569,7 +569,31 @@ export interface OfficialRanking {
   rows: OfficialRankingRow[];
   config: OfficialRankingConfig;
   archived: boolean;
-  preset: RankingPreset;
+  preset: string;
+  pluginError?: string;
+}
+
+/** Phase A：排名规则配置与自定义插件。 */
+export interface ContestRankingRuleConfig {
+  preset?: string;
+  tie?: 'same-rank' | 'none';
+  cfLike?: { decay: number };
+}
+
+export interface RankingPlugin {
+  id: number;
+  name: string;
+  sha256: string;
+  enabled: boolean;
+  uploadedBy: number;
+  uploadedAt: number;
+}
+
+export interface RankingPluginUploadResult {
+  id: number;
+  name: string;
+  sha256: string;
+  restartRequired: boolean;
 }
 
 // Phase 3A：讨论区 / 答疑 / 私信 / 通知。

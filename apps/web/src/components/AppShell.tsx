@@ -68,6 +68,9 @@ export function AppShell() {
             <NavLink to="/discuss" className={navClass}>
               讨论
             </NavLink>
+            <NavLink to="/help" className={navClass}>
+              帮助
+            </NavLink>
             {user ? (
               <>
                 <NavLink to="/records" className={navClass}>
@@ -99,9 +102,14 @@ export function AppShell() {
               </>
             ) : null}
             {canAudit ? (
-              <NavLink to="/admin/audit" className={navClass}>
-                审计日志
-              </NavLink>
+              <>
+                <NavLink to="/admin/audit" className={navClass}>
+                  审计日志
+                </NavLink>
+                <NavLink to="/admin/ranking-plugins" className={navClass}>
+                  排名插件
+                </NavLink>
+              </>
             ) : null}
           </nav>
           <div className="oij-header-right">
@@ -133,7 +141,9 @@ export function AppShell() {
           <Outlet />
         </Suspense>
       </main>
-      <footer className="oij-footer">OiJudge · 本地 OI 评测系统 · Phase A</footer>
+      <footer className="oij-footer">
+        OiJudge · 本地 OI 评测系统 · Phase A · <Link to="/help">帮助</Link>
+      </footer>
     </div>
   );
 }

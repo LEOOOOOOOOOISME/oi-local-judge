@@ -82,6 +82,14 @@ const ContestScreenPage = lazy(() =>
 const AdminAuditPage = lazy(() =>
   import('./pages/AdminAuditPage').then((module) => ({ default: module.AdminAuditPage })),
 );
+const AdminRankingPluginsPage = lazy(() =>
+  import('./pages/AdminRankingPluginsPage').then((module) => ({
+    default: module.AdminRankingPluginsPage,
+  })),
+);
+const HelpPage = lazy(() =>
+  import('./pages/HelpPage').then((module) => ({ default: module.HelpPage })),
+);
 
 export function AppRoutes() {
   return (
@@ -95,6 +103,7 @@ export function AppRoutes() {
         <Route path="/problem/:problemId" element={<ProblemPage />} />
         <Route path="/contest/:contestId" element={<ContestOverviewPage />} />
         <Route path="/contest/:contestId/ranking" element={<ContestRankingPage />} />
+        <Route path="/help" element={<HelpPage />} />
         <Route path="/contest/:contestId/problem/:problemId" element={<ProblemPage />} />
         <Route
           path="/submissions/:submissionId"
@@ -174,6 +183,14 @@ export function AppRoutes() {
           element={
             <AdminOnlyRoute>
               <AdminAuditPage />
+            </AdminOnlyRoute>
+          }
+        />
+        <Route
+          path="/admin/ranking-plugins"
+          element={
+            <AdminOnlyRoute>
+              <AdminRankingPluginsPage />
             </AdminOnlyRoute>
           }
         />

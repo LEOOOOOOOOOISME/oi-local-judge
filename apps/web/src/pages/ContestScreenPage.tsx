@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+﻿import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { OfficialRanking } from '../api/types';
@@ -11,8 +11,8 @@ import {
 } from '../utils/status';
 import {
   fetchOfficialRanking,
-  PRESET_LABEL,
   presetFromMode,
+  presetLabel,
 } from '../utils/officialRanking';
 import { rankingProblemLetter } from '../utils/ranking';
 import '../styles/screen.css';
@@ -113,7 +113,7 @@ export function ContestScreenPage() {
           <h1 className="screen-title">{contest.name}</h1>
           <div className="screen-subline">
             <span className={`screen-status screen-status-${phase}`}>{statusLabel}</span>
-            <span className="screen-preset">{PRESET_LABEL[preset]}</span>
+            <span className="screen-preset">{presetLabel(preset)}</span>
             {archived ? <span className="screen-archived">已归档 · 只读</span> : null}
             <span>{contestCountdownText(contest, now)}</span>
             <span className="screen-mail">{formatClock(now)}</span>
@@ -221,7 +221,7 @@ export function ContestScreenPage() {
 
       <footer className="screen-footer">
         <span>每 5 秒自动刷新</span>
-        <span>更新于 {formatClock(Date.now())} · {PRESET_LABEL[preset]}只读数据</span>
+        <span>更新于 {formatClock(Date.now())} · {presetLabel(preset)}只读数据</span>
       </footer>
     </ScreenShell>
   );

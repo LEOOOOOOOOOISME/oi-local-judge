@@ -17,6 +17,11 @@ export const PRESET_LABEL: Record<RankingPreset, string> = {
   'cf-like': 'CF-like 正式榜',
 };
 
+export function presetLabel(preset: string): string {
+  if (preset.startsWith('plugin:')) return `插件：${preset.slice('plugin:'.length)}`;
+  return PRESET_LABEL[preset as RankingPreset] ?? preset;
+}
+
 export function presetFromMode(mode: string | undefined): RankingPreset {
   if (mode === 'acm') return 'acm';
   if (mode === 'ioi') return 'ioi';

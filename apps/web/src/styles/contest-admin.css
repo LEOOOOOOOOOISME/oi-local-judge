@@ -149,3 +149,14 @@
   font-weight: 500;
 }
 
+/* Phase A：排名规则 */
+.ranking-config-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.ranking-config-grid .batch-field {
+  margin-bottom: 0;
+}
+

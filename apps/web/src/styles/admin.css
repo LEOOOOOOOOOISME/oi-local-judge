@@ -358,3 +358,37 @@
   vertical-align: bottom;
   white-space: nowrap;
 }
+
+/* Phase A：排名插件 */
+.plugin-risk {
+  margin-bottom: 12px;
+}
+
+.plugin-upload {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+}
+
+.plugin-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.plugin-upload-result {
+  margin-top: 12px;
+}
+
+.plugin-hash {
+  display: inline-block;
+  max-width: 300px;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
