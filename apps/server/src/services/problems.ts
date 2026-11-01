@@ -58,6 +58,42 @@ export function listProblemDtos(db: DatabaseSync): ProblemSummaryDto[] {
   return listProblems(db).map(problemToSummary);
 }
 
+/**
+ * Older seed/import versions stored `data/1.in` instead of
+ * `problems/<id>/data/1.in` in problem_testcases. The files were copied to the
+ * problem folder, so rewrite the DB paths to the canonical location when the
+ * target file exists. Safe to run on every startup.
+ */
+export function repairLegacyTestcasePaths(db: DatabaseSync, dataDir: string): number {
+  const rows = db
+    .prepare('SELECT id, problem_id, input_path, output_path FROM problem_testcases')
+    .all() as unknown as Array<{
+    id: number;
+    problem_id: number;
+    input_path: string;
+    output_path: string;
+  }>;
+  const update = db.prepare(
+    'UPDATE problem_testcases SET input_path = ?, output_path = ? WHERE id = ?',
+  );
+  let repaired = 0;
+  for (const row of rows) {
+    const prefix = `problems/${row.problem_id}/`;
+    const canonical = (value: string): string => {
+      if (value.startsWith(prefix)) return value;
+      const candidate = `${prefix}data/${basename(value)}`;
+      return existsSync(join(dataDir, candidate)) ? candidate : value;
+    };
+    const inputPath = canonical(row.input_path);
+    const outputPath = canonical(row.output_path);
+    if (inputPath !== row.input_path || outputPath !== row.output_path) {
+      update.run(inputPath, outputPath, row.id);
+      repaired += 1;
+    }
+  }
+  return repaired;
+}
+
 export function getProblemDetail(db: DatabaseSync, id: number): ProblemDetailDto | null {
   const row = getProblem(db, id);
   if (!row) return null;

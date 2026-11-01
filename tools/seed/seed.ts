@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { ensureDataDirs, loadConfig } from '../../apps/server/src/config.js';
 import { ensureAdmin } from '../../apps/server/src/services/bootstrap.js';
-import { importProblemDirectory } from '../../apps/server/src/services/problems.js';
+import { importProblemDirectory, repairLegacyTestcasePaths } from '../../apps/server/src/services/problems.js';
 import { createContest } from '../../apps/server/src/storage/repos/contests.js';
 import { listProblems } from '../../apps/server/src/storage/repos/problems.js';
 import { openDatabase } from '../../apps/server/src/storage/db.js';
@@ -11,6 +11,7 @@ const config = loadConfig();
 ensureDataDirs(config.dataDir);
 const db = openDatabase(join(config.dataDir, 'db', 'oijudge.db'));
 migrate(db);
+repairLegacyTestcasePaths(db, config.dataDir);
 
 const adminId = ensureAdmin(db, config);
 let problems = listProblems(db);
