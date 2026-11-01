@@ -1,4 +1,4 @@
-import { Alert, App, Button, Card, Empty, Space, Table, Tag } from 'antd';
+import { Alert, App, Button, Card, Empty, Space, Table, Tag, Tooltip } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
@@ -106,7 +106,16 @@ export function ContestRankingPage() {
       width: 190,
       render: (_value, row) => (
         <div className="rank-user">
-          <span className="rank-user-name">{row.realName ?? row.username}</span>
+          <span className="rank-user-name">
+            {row.realName ?? row.username}
+            {row.hackedCount > 0 ? (
+              <Tooltip title={`被 Hack 提交数：${row.hackedCount}`}>
+                <Tag color="red" className="rank-hacked-tag">
+                  HACKED×{row.hackedCount}
+                </Tag>
+              </Tooltip>
+            ) : null}
+          </span>
           <span className="rank-user-meta muted">@{row.username}</span>
         </div>
       ),
@@ -143,6 +152,18 @@ export function ContestRankingPage() {
   }));
 
   const trailingColumns: TableColumnsType<OfficialRankingRow> = [
+    {
+      title: '成功 Hack',
+      dataIndex: 'successfulHacks',
+      width: 96,
+      align: 'right',
+      render: (value: number) =>
+        value > 0 ? (
+          <span className="mono hack-success-count">{value}</span>
+        ) : (
+          <span className="muted">—</span>
+        ),
+    },
     ...(preset === 'cf-like'
       ? [
           {

@@ -29,6 +29,16 @@
 - 比赛结束不等于冻结；管理员点“归档”才冻结正式榜。
 - 归档后禁止批量发布、名单变更、在线正式分更新，正式榜只读。
 
+## Hack 与 CF-like
+
+- 锁题后才能查看同题他人源码、发起 Hack；锁题后本题不能再提交。
+- Hack 输入先过 validator（如有），再用 std 生成期望输出，最后用题目 checker 判定目标代码。
+- 目标 AC → Hack 失败；WA/TLE/RE 等 → Hack 成功，目标提交标记 HACKED。
+- HACKED 提交从正式分剔除，并按剩余提交重算；没有剩余提交时回退已发布批量分。
+- CF-like 成功 Hack `+100` 分、失败 Hack `-50` 分，可用 `cfLike.hackPoints / cfLike.failedHackPenalty` 配置。
+- 锁题/Hack 窗口 = 比赛结束时间 + `hackWindowMinutes`；超时拒绝。
+- 管理员可对 failed/queued Hack 强制晋升。
+
 ## 自定义插件
 
 - 排名配置 `preset` 可写 `plugin:<name>`。

@@ -105,6 +105,8 @@ export function AdminContestConsolePage() {
   const [rankingPreset, setRankingPreset] = useState('oi');
   const [rankingTie, setRankingTie] = useState<'same-rank' | 'none'>('same-rank');
   const [rankingDecay, setRankingDecay] = useState(0.5);
+  const [hackPoints, setHackPoints] = useState(100);
+  const [failedHackPenalty, setFailedHackPenalty] = useState(50);
   const [hackWindowMinutes, setHackWindowMinutes] = useState(0);
   const [savingRanking, setSavingRanking] = useState(false);
   const [rankingError, setRankingError] = useState<string | null>(null);
@@ -198,6 +200,8 @@ export function AdminContestConsolePage() {
     setRankingPreset(config.preset ?? fallback);
     setRankingTie(config.tie ?? 'same-rank');
     setRankingDecay(config.cfLike?.decay ?? 0.5);
+    setHackPoints(config.cfLike?.hackPoints ?? 100);
+    setFailedHackPenalty(config.cfLike?.failedHackPenalty ?? 50);
     setHackWindowMinutes(config.hackWindowMinutes ?? 0);
   }, [contest, rankingConfigQuery.data]);
 
@@ -403,7 +407,11 @@ export function AdminContestConsolePage() {
           preset: rankingPreset,
           tie: rankingTie,
           hackWindowMinutes,
-          cfLike: { decay: rankingDecay },
+          cfLike: {
+            decay: rankingDecay,
+            hackPoints,
+            failedHackPenalty,
+          },
         },
       );
       message.success('排名规则已保存');
@@ -904,6 +912,36 @@ export function AdminContestConsolePage() {
                   style={{ width: 150 }}
                 />
               </div>
+              {rankingPreset === 'cf-like' ? (
+                <>
+                  <div className="batch-field">
+                    <span className="muted">成功 Hack 分</span>
+                    <InputNumber
+                      min={0}
+                      max={1000}
+                      precision={0}
+                      value={hackPoints}
+                      onChange={(value) =>
+                        setHackPoints(typeof value === 'number' ? value : 100)
+                      }
+                      style={{ width: 150 }}
+                    />
+                  </div>
+                  <div className="batch-field">
+                    <span className="muted">失败 Hack 罚分</span>
+                    <InputNumber
+                      min={0}
+                      max={1000}
+                      precision={0}
+                      value={failedHackPenalty}
+                      onChange={(value) =>
+                        setFailedHackPenalty(typeof value === 'number' ? value : 50)
+                      }
+                      style={{ width: 150 }}
+                    />
+                  </div>
+                </>
+              ) : null}
               <div className="batch-field">
                 <span className="muted">Hack 窗口（分钟）</span>
                 <InputNumber

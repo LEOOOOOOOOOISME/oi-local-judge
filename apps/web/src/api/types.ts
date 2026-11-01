@@ -555,12 +555,18 @@ export interface OfficialRankingRow {
   username: string;
   realName: string | null;
   className: string | null;
+  hackedCount: number;
+  successfulHacks: number;
 }
 
 export interface OfficialRankingConfig {
   preset: string;
   tie: 'same-rank' | 'none';
-  cfLike?: { decay: number };
+  cfLike?: {
+    decay: number;
+    hackPoints?: number;
+    failedHackPenalty?: number;
+  };
   freezeAt?: number | null;
 }
 
@@ -659,7 +665,11 @@ export interface ContestRankingRuleConfig {
   preset?: string;
   tie?: 'same-rank' | 'none';
   hackWindowMinutes?: number;
-  cfLike?: { decay: number };
+  cfLike?: {
+    decay: number;
+    hackPoints?: number;
+    failedHackPenalty?: number;
+  };
 }
 
 export interface RankingPlugin {

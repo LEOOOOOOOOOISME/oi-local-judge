@@ -1,4 +1,4 @@
-﻿import { useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import type { OfficialRanking } from '../api/types';
@@ -184,6 +184,14 @@ export function ContestScreenPage() {
                   <td className="screen-col-player">
                     <span className="screen-player-name">
                       {row.realName ?? row.username}
+                      {row.hackedCount > 0 ? (
+                        <span
+                          className="screen-hacked"
+                          title={`被 Hack 提交数：${row.hackedCount}`}
+                        >
+                          HACKED
+                        </span>
+                      ) : null}
                     </span>
                     <span className="screen-player-meta">@{row.username}</span>
                   </td>
