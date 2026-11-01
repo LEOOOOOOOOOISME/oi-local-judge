@@ -24,6 +24,7 @@ Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手�
 - [Phase 3F 结果](docs/research/phase-3f-lemon-concurrency-results.md)：Lemon 题包、50 并发基准
 - [Phase 3G 结果](docs/research/phase-3g-contest-announce-results.md)：比赛公告、加时、删除
 - [Phase 3H 结果](docs/research/phase-3h-interactive-results.md)：交互题双向管道执行器
+- [Phase 3I 结果](docs/research/phase-3i-multi-batch-results.md)：批量评测多题目录映射
 - [前人实现调研](docs/research/prior-art.md)：Lemon/Hydro/UOJ/testlib 的可复用性与许可证结论
 
 ## 快速开始（Windows）
