@@ -4,6 +4,7 @@ import { AdminOnlyRoute, AdminRoute, CommunityAdminRoute, ContestAdminRoute } fr
 import { AppShell } from './components/AppShell';
 import { ProtectedRoute } from './components/ProtectedRoute';
 import { LoginPage } from './pages/LoginPage';
+import { RegisterPage } from './pages/RegisterPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 
 // 路由级懒加载：AppShell/登录页保持首屏，其余页面按需加载。
@@ -100,6 +101,7 @@ export function AppRoutes() {
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/register" element={<RegisterPage />} />
       <Route path="/contest/:contestId/screen" element={<ContestScreenPage />} />
       <Route element={<AppShell />}>
         <Route index element={<Navigate to="/contests" replace />} />

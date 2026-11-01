@@ -19,6 +19,7 @@ interface AuthContextValue {
   user: User | null;
   status: AuthStatus;
   login: (username: string, password: string) => Promise<void>;
+  register: (username: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -81,6 +82,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setStatus('authenticated');
   }, []);
 
+  const register = useCallback(async (username: string, password: string) => {
+    const data = await apiPost<LoginResult>(
+      '/api/auth/register',
+      { username, password },
+      { skipAuthRedirect: true },
+    );
+    setUser(data.user);
+    setStatus('authenticated');
+  }, []);
+
   const logout = useCallback(async () => {
     try {
       await apiPost<{ loggedOut: boolean }>('/api/auth/logout');
@@ -93,8 +104,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, status, login, logout }),
-    [user, status, login, logout],
+    () => ({ user, status, login, register, logout }),
+    [user, status, login, register, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

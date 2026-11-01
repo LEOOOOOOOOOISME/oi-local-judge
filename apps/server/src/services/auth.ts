@@ -2,15 +2,73 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { UserDto } from '@oij/shared';
 import type { Config } from '../config.js';
-import { verifyPassword } from '../security/password.js';
+import { verifyPassword, hashPassword } from '../security/password.js';
 import { signSession } from '../security/session.js';
 import { permissionsForRole } from '../security/auth.js';
 import {
   bumpSessionVersion,
+  createUser,
   getUserById,
   getUserByUsername,
   type UserRow,
 } from '../storage/repos/users.js';
+
+export interface RegisterResult {
+  user: UserDto;
+  token: string;
+  permissions: string[];
+}
+
+export class AuthInputError extends Error {
+  readonly code: string;
+  readonly status: number;
+
+  constructor(code: string, status: number, message: string) {
+    super(message);
+    this.name = 'AuthInputError';
+    this.code = code;
+    this.status = status;
+  }
+}
+
+const USERNAME_PATTERN = /^[A-Za-z0-9_.-]{3,32}$/;
+
+export function register(
+  db: DatabaseSync,
+  config: Config,
+  input: { username: string; password: string },
+): RegisterResult {
+  const username = input.username.trim();
+  if (!USERNAME_PATTERN.test(username)) {
+    throw new AuthInputError(
+      'INVALID_USERNAME',
+      400,
+      'username must be 3-32 letters, digits, dot, underscore or hyphen',
+    );
+  }
+  if (input.password.length < 8 || input.password.length > 72) {
+    throw new AuthInputError('INVALID_PASSWORD', 400, 'password must be 8-72 characters');
+  }
+  if (getUserByUsername(db, username)) {
+    throw new AuthInputError('USERNAME_TAKEN', 409, 'username is already taken');
+  }
+  const userId = createUser(db, {
+    username,
+    passwordHash: hashPassword(input.password),
+    role: 'contestant',
+  });
+  const user = getUserById(db, userId)!;
+  const token = signSession(
+    { userId: user.id, version: user.session_version },
+    config.sessionSecret,
+    config.sessionTtlSec,
+  );
+  return {
+    user: toUserDto(user),
+    token,
+    permissions: permissionsForRole(user.role),
+  };
+}
 
 export interface LoginResult {
   user: UserDto;
