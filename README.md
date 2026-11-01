@@ -1,5 +1,7 @@
 # OiJudge
 
+> 版本：**v1.0.0-alpha.1（Alpha 1.0）**
+
 Windows 局域网 OI 评测系统：Electron 桌面程序内置 HTTP/WS 服务，选手通过浏览器参赛；覆盖题目、评测、比赛、正式榜、批量导入、赛后订正、CF 风格 Hack、社区与审计的完整闭环。
 
 ---
