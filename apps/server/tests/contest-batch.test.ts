@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { applyOfficialMode } from '../src/http/admin-contest-batch.js';
 import { buildApp } from '../src/app.js';
 import { ensureDataDirs, loadConfig } from '../src/config.js';
 import { startScheduler, type SchedulerHandle } from '../src/judge/scheduler.js';
@@ -108,6 +109,16 @@ async function waitReady(batchId: number) {
   }
   return body;
 }
+describe('official score batch modes', () => {
+  it('overwrites, merges and fills per cell', () => {
+    expect(applyOfficialMode('overwrite', { score: 100, verdict: 'AC' }, 40)).toBe(40);
+    expect(applyOfficialMode('merge', { score: 100, verdict: 'AC' }, 40)).toBe(100);
+    expect(applyOfficialMode('merge', { score: 40, verdict: 'PC' }, 100)).toBe(100);
+    expect(applyOfficialMode('fill', { score: 100, verdict: 'AC' }, 40)).toBe(100);
+    expect(applyOfficialMode('fill', null, 40)).toBe(40);
+  });
+});
+
 describe('contest batch draft/preview/publish', () => {
   it('drafts, previews and publishes multi-problem scores', async () => {
     const uploaded = await uploadBatch({
