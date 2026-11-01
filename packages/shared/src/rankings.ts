@@ -2,7 +2,7 @@ export type RankingPreset = 'oi' | 'ioi' | 'acm' | 'cf-like';
 
 export interface RankingConfig {
   preset: RankingPreset;
-  tie: 'same-rank';
+  tie: 'same-rank' | 'none';
   cfLike?: { decay: number };
   freezeAt?: number | null;
 }
@@ -193,7 +193,7 @@ export function computeRanking(input: ComputeRankingInput): RankingRowResult[] {
     return { rank: 0, userId, totalScore, solved, penalty, lastAcAt, cells };
   });
 
-  assignRanks(rows, input.config.preset);
+  assignRanks(rows, input.config.preset, input.config.tie);
   return rows;
 }
 
@@ -243,7 +243,11 @@ function compareNullableAsc(a: number | null, b: number | null): number {
   return a - b;
 }
 
-function assignRanks(rows: RankingRowResult[], preset: RankingPreset): void {
+function assignRanks(
+  rows: RankingRowResult[],
+  preset: RankingPreset,
+  tie: 'same-rank' | 'none',
+): void {
   const isOi = preset === 'oi' || preset === 'ioi';
   const isAcm = preset === 'acm';
 
@@ -261,6 +265,10 @@ function assignRanks(rows: RankingRowResult[], preset: RankingPreset): void {
   });
 
   rows.forEach((row, index) => {
+    if (tie === 'none') {
+      row.rank = index + 1;
+      return;
+    }
     if (index === 0) {
       row.rank = 1;
       return;

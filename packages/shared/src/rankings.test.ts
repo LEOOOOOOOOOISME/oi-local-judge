@@ -187,6 +187,19 @@ describe('computeRanking CF-like', () => {
     expect(cell(rows[0], 1).attempts).toBe(2);
   });
 
+  it('supports sequential ranks when tie is none', () => {
+    const rows = computeRanking({
+      config: { preset: 'oi', tie: 'none' },
+      problemIds: [1],
+      userIds: [1, 2],
+      submissions: [
+        submission(1, 1, 'AC', 100, 100),
+        submission(2, 1, 'AC', 100, 200),
+      ],
+    });
+    expect(rows.map((row) => row.rank)).toEqual([1, 2]);
+  });
+
   it('uses authoritative problemPoints when provided', () => {
     const rows = computeRanking({
       config: CF,

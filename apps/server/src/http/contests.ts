@@ -1,5 +1,6 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
+import type { Config } from '../config.js';
 import { createContest } from '../storage/repos/contests.js';
 import {
   addParticipant,
@@ -27,6 +28,7 @@ import { getOfficialRanking } from '../services/official-ranking.js';
 
 export interface ContestRouteOptions {
   db: DatabaseSync;
+  config?: Config;
   adminGuard?: preHandlerHookHandler;
 }
 
@@ -55,7 +57,11 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
   app.get<{ Params: { id: string } }>(
     '/api/contests/:id/official-ranking',
     async (request, reply) => {
-      const ranking = getOfficialRanking(options.db, Number(request.params.id));
+      const ranking = await getOfficialRanking(
+        options.db,
+        Number(request.params.id),
+        options.config?.dataDir ?? process.cwd(),
+      );
       if (!ranking) {
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       }
