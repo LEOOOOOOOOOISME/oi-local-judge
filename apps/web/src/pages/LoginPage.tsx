@@ -101,6 +101,8 @@ export function LoginPage() {
         )}
       </Card>
       <div className="login-footer">
+        <Link to="/register">注册账号</Link>
+        <span>·</span>
         <Link to="/contests">先浏览比赛</Link>
         <span>·</span>
         <span>数据保存在本机</span>

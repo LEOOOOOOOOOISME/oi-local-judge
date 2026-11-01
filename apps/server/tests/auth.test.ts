@@ -312,6 +312,81 @@ describe('POST /api/auth/logout', () => {
   });
 });
 
+describe('POST /api/auth/register', () => {
+  it('creates a contestant and logs in automatically', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { username: 'new_student', password: 'password123' },
+    });
+    expect(response.statusCode, response.body).toBe(201);
+    const body = response.json() as {
+      ok: boolean;
+      data: { user: { username: string; role: string }; permissions: string[] };
+    };
+    expect(body.data.user).toMatchObject({ username: 'new_student', role: 'contestant' });
+    expect(body.data.permissions).toContain('judge.submit');
+
+    const cookie = cookieHeader(response);
+    const meResponse = await app.inject({
+      method: 'GET',
+      url: '/api/me',
+      headers: { cookie },
+    });
+    expect(meResponse.statusCode).toBe(200);
+    const stored = getUserByUsername(db, 'new_student')!;
+    expect(verifyPassword('password123', stored.password_hash)).toBe(true);
+  });
+
+  it('rejects duplicate usernames and invalid input', async () => {
+    seedUser('taken', 'secret123');
+    const duplicate = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { username: 'taken', password: 'password123' },
+    });
+    expect(duplicate.statusCode).toBe(409);
+    expect((duplicate.json() as { error: { code: string } }).error.code).toBe('USERNAME_TAKEN');
+
+    const shortPassword = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { username: 'validname', password: '123' },
+    });
+    expect(shortPassword.statusCode).toBe(400);
+
+    const badName = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { username: 'bad name!', password: 'password123' },
+    });
+    expect(badName.statusCode).toBe(400);
+  });
+
+  it('rate limits registrations per IP', async () => {
+    const remoteAddress = '10.20.30.40';
+    for (let i = 0; i < 5; i++) {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/auth/register',
+        remoteAddress,
+        payload: { username: `rate_user_${i}`, password: 'password123' },
+      });
+      expect(response.statusCode, `attempt ${i}: ${response.body}`).toBe(201);
+    }
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      remoteAddress,
+      payload: { username: 'rate_user_5', password: 'password123' },
+    });
+    expect(blocked.statusCode).toBe(429);
+    expect((blocked.json() as { error: { code: string } }).error.code).toBe(
+      'TOO_MANY_REGISTRATIONS',
+    );
+  });
+});
+
 describe('requireRole guard', () => {
   it('allows an admin and rejects a contestant', async () => {
     seedUser('admin1', 'secret123', 'admin');
