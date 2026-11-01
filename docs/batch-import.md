@@ -15,7 +15,19 @@ Bob/3/main.cpp
 - 文件夹名必须是已注册用户名，大小写敏感。
 - 未注册用户跳过并在预览/报告列出。
 - 非 OI 比赛、已归档比赛不能导入。
-- Phase A 只支持 `.cpp/.cc/.cxx` 代码题；客观题/提交答案题的 `answers.json` 在 Phase B。
+- 代码题用 `.cpp/.cc/.cxx`；客观题/提交答案题用 `answers.json`。
+
+## answers.json
+
+```
+Alice/12/answers.json
+```
+
+- 客观题：`{"answers":[{"questionId":1,"value":["B"]}]}`
+- 提交答案题：`{"answers":[{"testcaseId":3,"value":"answer text"}]}`
+- 文件内容就是提交 JSON；后端按题目类型选择评分器。
+- 同一学生/题目只取第一个文件；混合代码题与答案题时按题目类型匹配。
+
 
 ## 流程
 
