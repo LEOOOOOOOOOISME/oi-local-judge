@@ -50,7 +50,7 @@ function normalizeTitle(value: string): string {
   return value.toLowerCase().replace(/\s+/g, '');
 }
 
-function applyMode(
+export function applyOfficialMode(
   mode: BatchMode,
   current: { score: number; verdict: string } | null,
   batchScore: number,
@@ -341,7 +341,7 @@ export function registerContestBatchRoutes(
         currentVerdict: current?.verdict ?? null,
         batchScore,
         batchVerdict: submission?.verdict ?? null,
-        afterScore: applyMode(mode, current, batchScore),
+        afterScore: applyOfficialMode(mode, current, batchScore),
       };
     });
     return {
@@ -398,7 +398,7 @@ export function registerContestBatchRoutes(
         }
         addParticipant(options.db, contestId, item.user_id);
         const current = getOfficialScore(options.db, contestId, item.user_id, item.problem_id);
-        const afterScore = applyMode(mode, current, submission.score);
+        const afterScore = applyOfficialMode(mode, current, submission.score);
         const afterVerdict = afterScore === submission.score ? (submission.verdict ?? 'WA') : current!.verdict;
         upsertOfficialScore(options.db, {
           contestId,
