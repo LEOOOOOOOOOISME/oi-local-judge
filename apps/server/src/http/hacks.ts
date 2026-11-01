@@ -12,6 +12,7 @@ import {
   getHack,
   getLock,
   listHacks,
+  listHackAudit,
   listLocks,
   lockProblem,
   unlockProblem,
@@ -178,6 +179,15 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
       }
       return { ok: true, data: hack };
     },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/contests/:id/hacks',
+    { preHandler: options.adminGuard },
+    async (request) => ({
+      ok: true,
+      data: listHackAudit(options.db, Number(request.params.id)),
+    }),
   );
 
   app.get<{ Params: { id: string } }>(
