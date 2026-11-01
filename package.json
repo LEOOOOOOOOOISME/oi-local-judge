@@ -17,6 +17,7 @@
     "bench:concurrency": "tsx tools/bench/concurrency.mjs",
     "seed": "tsx tools/seed/seed.ts",
     "seed:batch": "node tools/seed/make-batch-zip.mjs",
+    "seed:batch:multi": "node tools/seed/make-batch-multi-zip.mjs",
     "build": "tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/desktop/tsconfig.json && npm run build --workspace @oij/web",
     "start": "node apps/server/dist/cli.js",
     "electron:smoke": "electron tools/electron-smoke.cjs",

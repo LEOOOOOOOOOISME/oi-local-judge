@@ -77,14 +77,18 @@ export function registerAdminBatchRoutes(
       uploadId?: string;
       problemId?: number;
       studentLevel?: number;
+      problemLevel?: number;
+      problemMap?: Record<string, number>;
       language?: string;
     };
   }>('/api/admin/batch/run', { preHandler: guard }, async (request, reply) => {
     const { uploadId } = request.body ?? {};
     const problemId = Number(request.body?.problemId);
     const studentLevel = Math.max(1, Math.floor(Number(request.body?.studentLevel ?? 1)));
+    const problemLevel = Math.floor(Number(request.body?.problemLevel ?? 0));
+    const multiProblem = problemLevel > 0;
     const language = request.body?.language ?? 'cpp17';
-    if (!uploadId || !Number.isInteger(problemId)) {
+    if (!uploadId || (!multiProblem && !Number.isInteger(problemId))) {
       return reply.code(400).send({ ok: false, error: { code: 'BAD_REQUEST' } });
     }
     if (!/^[0-9a-f-]{36}$/i.test(uploadId)) {
@@ -94,7 +98,7 @@ export function registerAdminBatchRoutes(
     if (!existsSync(zipPath)) {
       return reply.code(404).send({ ok: false, error: { code: 'UPLOAD_NOT_FOUND' } });
     }
-    if (!getProblem(options.db, problemId)) {
+    if (!multiProblem && !getProblem(options.db, problemId)) {
       return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
     }
 
@@ -108,7 +112,23 @@ export function registerAdminBatchRoutes(
       });
     }
 
-    const sources = new Map<string, { path: string; code: string }>();
+    const problemMap = new Map<string, number>();
+    for (const [folder, value] of Object.entries(request.body?.problemMap ?? {})) {
+      const id = Number(value);
+      if (Number.isInteger(id) && getProblem(options.db, id)) problemMap.set(folder, id);
+    }
+    const resolveProblem = (folder: string): number | null => {
+      if (problemMap.has(folder)) return problemMap.get(folder)!;
+      const numeric = Number(folder);
+      if (Number.isInteger(numeric) && getProblem(options.db, numeric)) return numeric;
+      return null;
+    };
+
+    const sources = new Map<
+      string,
+      { path: string; code: string; student: string; problemId: number }
+    >();
+    const unresolved = new Set<string>();
     const entries = Object.entries(files).sort(([left], [right]) => left.localeCompare(right));
     for (const [rawName, content] of entries) {
       if (rawName.endsWith('/')) continue;
@@ -117,23 +137,54 @@ export function registerAdminBatchRoutes(
         return reply.code(400).send({ ok: false, error: { code: 'UNSAFE_PATH', message: rawName } });
       }
       const parts = relative.split('/');
-      if (parts.length <= studentLevel) continue;
+      const maxLevel = Math.max(studentLevel, multiProblem ? problemLevel : studentLevel);
+      if (parts.length <= maxLevel) continue;
       const extension = relative.slice(relative.lastIndexOf('.')).toLowerCase();
       if (!SOURCE_EXTENSIONS.has(extension)) continue;
       const student = parts[studentLevel - 1];
-      if (!student || sources.has(student)) continue;
-      sources.set(student, { path: relative, code: Buffer.from(content).toString('utf8') });
+      if (!student) continue;
+      const sourceProblemId = multiProblem
+        ? resolveProblem(parts[problemLevel - 1] ?? '')
+        : problemId;
+      if (!sourceProblemId) {
+        unresolved.add(parts[problemLevel - 1] ?? '(empty)');
+        continue;
+      }
+      const key = `${student}\u0000${sourceProblemId}`;
+      if (sources.has(key)) continue;
+      sources.set(key, {
+        path: relative,
+        code: Buffer.from(content).toString('utf8'),
+        student,
+        problemId: sourceProblemId,
+      });
     }
     if (sources.size === 0) {
+      if (unresolved.size > 0) {
+        return reply.code(400).send({
+          ok: false,
+          error: {
+            code: 'UNMAPPED_PROBLEMS',
+            message: `no problem mapping for folders: ${[...unresolved].join(', ')}`,
+          },
+        });
+      }
       return reply.code(400).send({
         ok: false,
         error: { code: 'NO_SOURCES', message: 'no .cpp sources found at the selected level' },
       });
     }
 
-    const batchId = createBatchJob(options.db, { problemId, studentLevel });
-    const created: Array<{ student: string; submissionId: number }> = [];
-    for (const [student, source] of [...sources.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const batchId = createBatchJob(options.db, {
+      problemId: multiProblem ? 0 : problemId,
+      studentLevel,
+    });
+    const created: Array<{ student: string; problemId: number; submissionId: number }> = [];
+    for (const source of [...sources.values()].sort(
+      (a, b) =>
+        a.student.localeCompare(b.student) || a.problemId - b.problemId,
+    )) {
+      const student = source.student;
       const username = `batch_${student}`.slice(0, 64);
       let user = getUserByUsername(options.db, username);
       if (!user) {
@@ -150,17 +201,27 @@ export function registerAdminBatchRoutes(
       }
       const { id } = submitSource(
         { db: options.db, config: options.config },
-        { userId: user.id, problemId, language, code: source.code, contestId: null },
+        {
+          userId: user.id,
+          problemId: source.problemId,
+          language,
+          code: source.code,
+          contestId: null,
+        },
       );
       addBatchItem(options.db, {
         batchId,
         student,
         sourcePath: source.path,
         submissionId: id,
+        problemId: source.problemId,
       });
-      created.push({ student, submissionId: id });
+      created.push({ student, problemId: source.problemId, submissionId: id });
     }
-    return reply.code(201).send({ ok: true, data: { id: batchId, count: created.length, items: created } });
+    return reply.code(201).send({
+      ok: true,
+      data: { id: batchId, count: created.length, items: created, multiProblem },
+    });
   });
 
   app.get<{ Params: { id: string } }>(
@@ -172,8 +233,11 @@ export function registerAdminBatchRoutes(
       if (!job) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       const items = listBatchItems(options.db, id).map((item) => {
         const submission = item.submission_id ? getSubmission(options.db, item.submission_id) : null;
+        const itemProblemId = item.problem_id ?? job.problem_id;
         return {
           student: item.student,
+          problemId: itemProblemId,
+          problemTitle: getProblem(options.db, itemProblemId)?.title ?? null,
           sourcePath: item.source_path,
           submissionId: item.submission_id,
           status: submission?.status ?? 'missing',
@@ -191,6 +255,7 @@ export function registerAdminBatchRoutes(
         data: {
           id,
           problemId: job.problem_id,
+          multiProblem: job.problem_id === 0,
           status,
           studentLevel: job.student_level,
           items,

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -8,6 +8,7 @@ import { startScheduler, type SchedulerHandle } from '../src/judge/scheduler.js'
 import { hashPassword } from '../src/security/password.js';
 import { signSession } from '../src/security/session.js';
 import { importProblemDirectory } from '../src/services/problems.js';
+import { createProblem } from '../src/storage/repos/problems.js';
 import { createUser } from '../src/storage/repos/users.js';
 import { migrate } from '../src/storage/migrate.js';
 import { openDatabase } from '../src/storage/db.js';
@@ -97,5 +98,83 @@ describe('local batch judging', () => {
     expect(alice?.verdict).toBe('AC');
     expect(alice?.score).toBe(100);
     expect(bob?.verdict).toBe('WA');
+  }, 40_000);
+
+  it('maps a student directory containing multiple problems', async () => {
+    mkdirSync(join(root, 'data2'), { recursive: true });
+    writeFileSync(join(root, 'data2', '1.in'), '4 5\n');
+    writeFileSync(join(root, 'data2', '1.out'), '9\n');
+    const secondProblem = createProblem(db, {
+      title: 'Second',
+      type: 'standard',
+      timeMs: 1000,
+      memoryMb: 64,
+      testcases: [{ inputPath: 'data2/1.in', outputPath: 'data2/1.out', points: 100 }],
+    });
+
+    const zip = zipSync({
+      [`Alice/${problemId}/main.cpp`]: new TextEncoder().encode(
+        '#include <iostream>\nint main(){long long a,b;std::cin>>a>>b;std::cout<<a+b<<"\\n";}',
+      ),
+      [`Alice/${secondProblem}/main.cpp`]: new TextEncoder().encode(
+        '#include <iostream>\nint main(){long long a,b;std::cin>>a>>b;std::cout<<a+b<<"\\n";}',
+      ),
+      [`Bob/${problemId}/main.cpp`]: new TextEncoder().encode(
+        '#include <iostream>\nint main(){long long a,b;std::cin>>a>>b;std::cout<<a+b+1<<"\\n";}',
+      ),
+    });
+    const uploaded = await app.inject({
+      method: 'POST',
+      url: '/api/admin/batch/upload',
+      headers: { cookie, 'content-type': 'application/zip' },
+      payload: Buffer.from(zip),
+    });
+    const uploadId = (uploaded.json() as { data: { uploadId: string } }).data.uploadId;
+
+    const started = await app.inject({
+      method: 'POST',
+      url: '/api/admin/batch/run',
+      headers: { cookie },
+      payload: {
+        uploadId,
+        studentLevel: 1,
+        problemLevel: 2,
+        problemMap: { [String(secondProblem)]: secondProblem },
+      },
+    });
+    expect(started.statusCode, started.body).toBe(201);
+    const batchId = (started.json() as { data: { id: number } }).data.id;
+
+    let body: {
+      data: {
+        status: string;
+        items: Array<{
+          student: string;
+          problemId: number;
+          problemTitle: string | null;
+          verdict: string | null;
+        }>;
+      };
+    } | null = null;
+    const deadline = Date.now() + 20_000;
+    while (Date.now() < deadline) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/admin/batch/${batchId}`,
+        headers: { cookie },
+      });
+      body = res.json() as typeof body;
+      if (body?.data.status === 'finished') break;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+    expect(body?.data.status).toBe('finished');
+    expect(body?.data.items).toHaveLength(3);
+    expect(body?.data.items.filter((item) => item.student === 'Alice')).toHaveLength(2);
+    expect(body?.data.items.find((item) => item.student === 'Bob')?.verdict).toBe('WA');
+    expect(
+      body?.data.items.find(
+        (item) => item.student === 'Alice' && item.problemId === secondProblem,
+      )?.problemTitle,
+    ).toBe('Second');
   }, 40_000);
 });
