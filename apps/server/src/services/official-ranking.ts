@@ -91,6 +91,15 @@ export async function getOfficialRanking(
   const userIds = getVisibleParticipants(db, contestId);
   const parsed = parseConfig(contest);
 
+  if (
+    contest.official_frozen_until !== null &&
+    contest.official_frozen_until <= Date.now()
+  ) {
+    seedOfficialScoresFromSubmissions(db, contestId);
+    db.prepare('UPDATE contests SET official_frozen_until = NULL WHERE id = ?').run(contestId);
+    contest.official_frozen_until = null;
+  }
+
   if (!parsed.pluginName && parsed.config.preset === 'oi' && listOfficialScores(db, contestId).length === 0) {
     seedOfficialScoresFromSubmissions(db, contestId);
   }

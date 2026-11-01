@@ -7,6 +7,7 @@ import type { Config } from '../config.js';
 import { judgeHack, promoteHack } from '../judge/hack.js';
 import { getContest, getContestProblemEntries, isContestParticipant } from '../storage/repos/contests.js';
 import {
+  countRecentHacks,
   createHack,
   getHack,
   getLock,
@@ -123,6 +124,9 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
       }
       if (!getLock(options.db, contestId, request.user!.id, problemId)) {
         return reply.code(403).send({ ok: false, error: { code: 'LOCK_REQUIRED' } });
+      }
+      if (countRecentHacks(options.db, contestId, request.user!.id, Date.now() - 60_000) >= 5) {
+        return reply.code(429).send({ ok: false, error: { code: 'HACK_RATE_LIMITED' } });
       }
       const target = getSubmission(options.db, Number(request.body?.targetSubmissionId));
       if (

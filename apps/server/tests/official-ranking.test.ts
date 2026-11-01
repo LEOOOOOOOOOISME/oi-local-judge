@@ -89,6 +89,35 @@ describe('official ranking service', () => {
     expect(data.archived).toBe(false);
   });
 
+  it('backfills online scores when the hack freeze expires', async () => {
+    const contestId = createContest(db, {
+      name: 'Freeze expiry',
+      mode: 'oi',
+      problemIds: [problemId],
+      startAt: Date.now() - 60_000,
+      endAt: Date.now() + 60_000,
+    });
+    db.prepare(
+      "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",
+    ).run(contestId, u1);
+    addSubmission({ contestId, userId: u1, score: 100, verdict: 'AC', createdAt: Date.now() });
+    upsertOfficialScore(db, {
+      contestId,
+      userId: u1,
+      problemId,
+      score: 40,
+      verdict: 'PC',
+      source: 'online',
+    });
+    db.prepare('UPDATE contests SET official_frozen_until = ? WHERE id = ?').run(
+      Date.now() - 1_000,
+      contestId,
+    );
+    const data = await getOfficialRanking(db, contestId, root);
+    expect(data?.rows[0].totalScore).toBe(100);
+    expect(data?.officialFrozenUntil).toBeNull();
+  });
+
   it('updates the OI official cell from online submissions without lowering', () => {
     const contestId = createContest(db, {
       name: 'Online sync',
