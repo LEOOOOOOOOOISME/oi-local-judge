@@ -983,9 +983,9 @@ export function AdminProblemPage() {
         </Row>
 
         <Form.Item
-          label="题面（HTML）"
+          label="题面（Markdown / HTML）"
           name="statementHtml"
-          extra="按 HTML 原样保存；请填写合法 HTML。"
+          extra="支持 Markdown、$...$ / $$...$$ LaTeX 和安全的 HTML；旧 HTML 题面仍兼容。"
         >
           <Input.TextArea rows={10} placeholder={'<h1>题目名称</h1>\n<p>题目描述……</p>'} />
         </Form.Item>

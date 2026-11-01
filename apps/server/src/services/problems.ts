@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import MarkdownIt from 'markdown-it';
+import { renderStatementHtml } from './rich-text.js';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import type { ProblemDetailDto, ProblemSummaryDto } from '@oij/shared';
@@ -17,7 +17,6 @@ import {
   type ProblemRow,
 } from '../storage/repos/problems.js';
 
-const markdown = new MarkdownIt({ html: false, linkify: true });
 
 interface ProblemJson {
   title: string;
@@ -105,7 +104,7 @@ export function getProblemDetail(db: DatabaseSync, id: number): ProblemDetailDto
     checkerMode: row.checker_mode as 'builtin' | 'testlib' | 'lemon',
     compareMode: row.compare_mode,
     visibility: row.visibility,
-    statementHtml: row.statement_html,
+    statementHtml: renderStatementHtml(row.statement_html),
     samples: JSON.parse(row.samples_json) as ProblemDetailDto['samples'],
     objective: (() => {
       const parsed = JSON.parse(row.objective_json) as ProblemDetailDto['objective'];
@@ -179,8 +178,9 @@ export function importProblemDirectory(options: {
     }
   }
 
-  const statementHtml =
-    manifest.statementHtml ?? markdown.render(manifest.statement ?? `# ${manifest.title}\n`);
+  const statementHtml = renderStatementHtml(
+    manifest.statementHtml ?? manifest.statement ?? `# ${manifest.title}\n`,
+  );
 
   const problemId = createProblem(options.db, {
     title: manifest.title,
