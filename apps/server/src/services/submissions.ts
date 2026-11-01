@@ -9,6 +9,7 @@ import {
   getContest,
   isContestParticipant,
 } from '../storage/repos/contests.js';
+import { getLock } from '../storage/repos/hacks.js';
 import {
   createSubmission,
   getSubmission,
@@ -70,6 +71,8 @@ export function submitSource(
         throw new Error('only contest participants may submit corrections');
       }
       phase = 'correction';
+    } else if (getLock(deps.db, input.contestId, input.userId, input.problemId)) {
+      throw new Error('problem is locked; no further submissions are accepted');
     }
   }
 

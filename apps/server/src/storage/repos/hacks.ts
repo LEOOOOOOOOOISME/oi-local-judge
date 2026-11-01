@@ -1,0 +1,107 @@
+import type { DatabaseSync } from 'node:sqlite';
+
+export interface ContestLockRow {
+  contest_id: number;
+  user_id: number;
+  problem_id: number;
+  locked_at: number;
+}
+
+export interface ContestHackRow {
+  id: number;
+  contest_id: number;
+  problem_id: number;
+  hacker_id: number;
+  target_submission_id: number;
+  input_path: string;
+  status: string;
+  verdict: string | null;
+  message: string;
+  created_at: number;
+  judged_at: number | null;
+}
+
+export function lockProblem(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+  problemId: number,
+): void {
+  db.prepare(
+    'INSERT OR IGNORE INTO contest_problem_locks(contest_id, user_id, problem_id, locked_at) VALUES (?, ?, ?, ?)',
+  ).run(contestId, userId, problemId, Date.now());
+}
+
+export function getLock(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+  problemId: number,
+): ContestLockRow | null {
+  return (
+    (db
+      .prepare(
+        'SELECT * FROM contest_problem_locks WHERE contest_id = ? AND user_id = ? AND problem_id = ?',
+      )
+      .get(contestId, userId, problemId) as unknown as ContestLockRow) ?? null
+  );
+}
+
+export function createHack(
+  db: DatabaseSync,
+  input: {
+    contestId: number;
+    problemId: number;
+    hackerId: number;
+    targetSubmissionId: number;
+    inputPath: string;
+  },
+): number {
+  const result = db
+    .prepare(
+      `INSERT INTO contest_hacks
+         (contest_id, problem_id, hacker_id, target_submission_id, input_path, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.contestId,
+      input.problemId,
+      input.hackerId,
+      input.targetSubmissionId,
+      input.inputPath,
+      Date.now(),
+    );
+  return Number(result.lastInsertRowid);
+}
+
+export function getHack(db: DatabaseSync, id: number): ContestHackRow | null {
+  return (
+    (db.prepare('SELECT * FROM contest_hacks WHERE id = ?').get(id) as unknown as ContestHackRow) ??
+    null
+  );
+}
+
+export function updateHack(
+  db: DatabaseSync,
+  id: number,
+  patch: { status: string; verdict?: string | null; message?: string },
+): void {
+  db.prepare(
+    'UPDATE contest_hacks SET status = ?, verdict = ?, message = ?, judged_at = ? WHERE id = ?',
+  ).run(patch.status, patch.verdict ?? null, patch.message ?? '', Date.now(), id);
+}
+
+export function listHacks(
+  db: DatabaseSync,
+  contestId: number,
+  problemId?: number,
+): ContestHackRow[] {
+  if (problemId !== undefined) {
+    return db
+      .prepare('SELECT * FROM contest_hacks WHERE contest_id = ? AND problem_id = ? ORDER BY id DESC')
+      .all(contestId, problemId) as unknown as ContestHackRow[];
+  }
+  return db
+    .prepare('SELECT * FROM contest_hacks WHERE contest_id = ? ORDER BY id DESC')
+    .all(contestId) as unknown as ContestHackRow[];
+}
