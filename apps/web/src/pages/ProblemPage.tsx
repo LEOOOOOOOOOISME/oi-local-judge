@@ -23,6 +23,7 @@ import type {
   AnswerFile,
   Contest,
   HackJob,
+  HackHistoryItem,
   HackSource,
   HackTarget,
   ObjectiveAnswerValue,
@@ -104,6 +105,7 @@ export function ProblemPage() {
   const [hackError, setHackError] = useState<string | null>(null);
   const [activeHackId, setActiveHackId] = useState<number | null>(null);
   const [hackResult, setHackResult] = useState<HackJob | null>(null);
+  const [promotingHackId, setPromotingHackId] = useState<number | null>(null);
   const [code, setCode] = useState<string>(
     () => (validProblem ? readDraft(problemId) : null) ?? DEFAULT_CODE,
   );
@@ -191,6 +193,19 @@ export function ProblemPage() {
       return status === 'queued' || status === 'judging' ? 1_000 : false;
     },
   });
+  const hackLocked = hackTargetsQuery.data?.locked ?? false;
+  const canModerate = user?.role === 'admin' || user?.role === 'contestmanager';
+  const hackHistoryQuery = useQuery({
+    queryKey: ['hack-history', contestId, problemId],
+    queryFn: () =>
+      apiGet<HackHistoryItem[]>(`/api/contests/${contestId}/problems/${problemId}/hacks`),
+    enabled:
+      contestId !== null &&
+      !contestEnded &&
+      Boolean(user) &&
+      (hackLocked || canModerate),
+    retry: false,
+  });
 
   useEffect(() => {
     const status = hackStatusQuery.data?.status;
@@ -198,10 +213,12 @@ export function ProblemPage() {
       status === 'success' ||
       status === 'failed' ||
       status === 'invalid' ||
-      status === 'unjudgeable'
+      status === 'unjudgeable' ||
+      status === 'promoted'
     ) {
       if (hackStatusQuery.data) setHackResult(hackStatusQuery.data);
       void queryClient.invalidateQueries({ queryKey: ['hack-targets', contestId, problemId] });
+      void queryClient.invalidateQueries({ queryKey: ['hack-history', contestId, problemId] });
       void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
       void queryClient.invalidateQueries({ queryKey: ['correction-ranking', contestId] });
       void queryClient.invalidateQueries({ queryKey: ['submissions'] });
@@ -532,7 +549,6 @@ export function ProblemPage() {
     </div>
   );
 
-  const hackLocked = hackTargetsQuery.data?.locked ?? false;
   const hackTargets = hackTargetsQuery.data?.targets ?? [];
 
   const lockProblem = async () => {
@@ -608,15 +624,149 @@ export function ProblemPage() {
     failed: 'Hack 失败',
     invalid: '输入无效',
     unjudgeable: '无法评测',
+    promoted: 'HACKED',
   };
   const hackStatusColor: Record<string, string> = {
     queued: 'blue',
     judging: 'blue',
     success: 'green',
-    failed: 'red',
+    failed: 'default',
     invalid: 'orange',
     unjudgeable: 'default',
+    promoted: 'red',
   };
+
+  const promoteHack = async (hackId: number) => {
+    if (contestId === null) return;
+    setPromotingHackId(hackId);
+    try {
+      await apiPost<{ id: number; status: string }>(
+        `/api/admin/contests/${contestId}/hacks/${hackId}/promote`,
+      );
+      message.success('已强制晋升为 HACKED，正式分已重算');
+      void queryClient.invalidateQueries({ queryKey: ['hack-history', contestId, problemId] });
+      void queryClient.invalidateQueries({ queryKey: ['hack-targets', contestId, problemId] });
+      void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['correction-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['submissions'] });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '强制晋升失败');
+    } finally {
+      setPromotingHackId(null);
+    }
+  };
+
+  const hackHistory = hackHistoryQuery.data ?? [];
+  const hackHistoryColumns: TableColumnsType<HackHistoryItem> = [
+    {
+      title: '时间',
+      dataIndex: 'createdAt',
+      width: 160,
+      render: (value: number) => <span className="mono">{formatDateTime(value)}</span>,
+    },
+    {
+      title: 'Hacker',
+      dataIndex: 'hackerId',
+      width: 110,
+      render: (value: number) => <span className="mono">用户 #{value}</span>,
+    },
+    {
+      title: '目标提交',
+      dataIndex: 'targetSubmissionId',
+      width: 110,
+      render: (value: number) => <span className="mono">#{value}</span>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 120,
+      render: (value: HackHistoryItem['status']) =>
+        value === 'success' || value === 'promoted' ? (
+          <Tag color="red">HACKED</Tag>
+        ) : (
+          <Tag color={hackStatusColor[value] ?? 'default'}>
+            {hackStatusLabel[value] ?? value}
+          </Tag>
+        ),
+    },
+    {
+      title: 'Verdict',
+      dataIndex: 'verdict',
+      width: 90,
+      render: (value: HackHistoryItem['verdict']) =>
+        value ? <Tag>{value}</Tag> : <span className="muted">—</span>,
+    },
+    {
+      title: '信息',
+      dataIndex: 'message',
+      render: (value: string) =>
+        value ? (
+          <span className="test-message" title={value}>
+            {value}
+          </span>
+        ) : (
+          <span className="muted">—</span>
+        ),
+    },
+    ...(canModerate
+      ? [
+          {
+            title: '',
+            width: 110,
+            render: (_value: unknown, row: HackHistoryItem) =>
+              row.status === 'failed' || row.status === 'queued' ? (
+                <Popconfirm
+                  title="强制晋升为 HACKED？"
+                  description="会标记目标提交为 HACKED 并重算正式分。"
+                  okText="晋升"
+                  cancelText="取消"
+                  onConfirm={() => void promoteHack(row.id)}
+                >
+                  <Button size="small" danger loading={promotingHackId === row.id}>
+                    强制晋升
+                  </Button>
+                </Popconfirm>
+              ) : null,
+          },
+        ]
+      : []),
+  ];
+
+  const hackHistoryTable = (
+    <div className="hack-history">
+      <div className="batch-preview-head">
+        <span>Hack 记录</span>
+        <span className="muted">{hackHistory.length} 条</span>
+      </div>
+      {hackHistoryQuery.isPending ? (
+        <div className="inline-loading">
+          <Spin />
+        </div>
+      ) : hackHistoryQuery.isError ? (
+        <Alert
+          type="error"
+          showIcon
+          message="Hack 记录加载失败"
+          description={
+            hackHistoryQuery.error instanceof Error
+              ? hackHistoryQuery.error.message
+              : undefined
+          }
+        />
+      ) : hackHistory.length === 0 ? (
+        <Empty description="还没有 Hack 记录" />
+      ) : (
+        <Table<HackHistoryItem>
+          className="oij-table hack-history-table"
+          rowKey="id"
+          size="small"
+          columns={hackHistoryColumns}
+          dataSource={hackHistory}
+          pagination={false}
+        />
+      )}
+    </div>
+  );
 
   const hackTargetColumns: TableColumnsType<HackTarget> = [
     {
@@ -710,6 +860,7 @@ export function ProblemPage() {
               </Button>
             </Popconfirm>
           </div>
+          {canModerate ? hackHistoryTable : null}
         </Card>
       ) : (
         <Card
@@ -727,7 +878,7 @@ export function ProblemPage() {
             <Empty description="暂无可 Hack 的目标提交" />
           ) : (
             <Table<HackTarget>
-              className="oij-table"
+              className="oij-table hack-targets-table"
               rowKey="id"
               size="small"
               columns={hackTargetColumns}
@@ -735,6 +886,7 @@ export function ProblemPage() {
               pagination={false}
             />
           )}
+          {hackHistoryTable}
         </Card>
       )
     ) : null;

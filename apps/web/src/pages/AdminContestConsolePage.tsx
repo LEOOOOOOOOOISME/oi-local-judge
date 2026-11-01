@@ -105,6 +105,7 @@ export function AdminContestConsolePage() {
   const [rankingPreset, setRankingPreset] = useState('oi');
   const [rankingTie, setRankingTie] = useState<'same-rank' | 'none'>('same-rank');
   const [rankingDecay, setRankingDecay] = useState(0.5);
+  const [hackWindowMinutes, setHackWindowMinutes] = useState(0);
   const [savingRanking, setSavingRanking] = useState(false);
   const [rankingError, setRankingError] = useState<string | null>(null);
 
@@ -197,6 +198,7 @@ export function AdminContestConsolePage() {
     setRankingPreset(config.preset ?? fallback);
     setRankingTie(config.tie ?? 'same-rank');
     setRankingDecay(config.cfLike?.decay ?? 0.5);
+    setHackWindowMinutes(config.hackWindowMinutes ?? 0);
   }, [contest, rankingConfigQuery.data]);
 
   useEffect(() => {
@@ -400,6 +402,7 @@ export function AdminContestConsolePage() {
         {
           preset: rankingPreset,
           tie: rankingTie,
+          hackWindowMinutes,
           cfLike: { decay: rankingDecay },
         },
       );
@@ -901,8 +904,22 @@ export function AdminContestConsolePage() {
                   style={{ width: 150 }}
                 />
               </div>
+              <div className="batch-field">
+                <span className="muted">Hack 窗口（分钟）</span>
+                <InputNumber
+                  min={0}
+                  max={10080}
+                  precision={0}
+                  value={hackWindowMinutes}
+                  onChange={(value) =>
+                    setHackWindowMinutes(typeof value === 'number' ? value : 0)
+                  }
+                  style={{ width: 150 }}
+                />
+              </div>
             </div>
             <div className="batch-level-hint muted">
+              比赛结束后 N 分钟关闭锁题/Hack；0 表示结束后立即关闭。
               当前生效：{presetLabel(officialQuery.data?.preset ?? rankingPreset)}。
               自定义插件需先在“排名插件”页上传并启用，重启服务后才会加载；插件失败会自动回退 OI。
             </div>

@@ -143,6 +143,24 @@ export function ContestRankingPage() {
   }));
 
   const trailingColumns: TableColumnsType<OfficialRankingRow> = [
+    ...(preset === 'cf-like'
+      ? [
+          {
+            title: 'Hack 分',
+            dataIndex: 'hackScore' as const,
+            width: 86,
+            align: 'right' as const,
+            render: (value: number | undefined) =>
+              value === undefined ? (
+                <span className="muted">—</span>
+              ) : (
+                <span className={value < 0 ? 'correction-total-changed mono' : 'mono'}>
+                  {value > 0 ? `+${value}` : value}
+                </span>
+              ),
+          },
+        ]
+      : []),
     {
       title: isAcm ? '罚时' : 'AC 数',
       width: 82,
