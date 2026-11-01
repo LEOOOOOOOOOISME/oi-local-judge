@@ -1,8 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiGet } from '../api/client';
-import type { ContestDetail, RankingRow } from '../api/types';
+import type { OfficialRanking } from '../api/types';
 import { useNow } from '../hooks/useNow';
 import {
   CONTEST_PHASE_LABEL,
@@ -11,10 +10,11 @@ import {
   verdictTitle,
 } from '../utils/status';
 import {
-  penaltyMinutes,
-  rankingProblemIds,
-  rankingProblemLetter,
-} from '../utils/ranking';
+  fetchOfficialRanking,
+  PRESET_LABEL,
+  presetFromMode,
+} from '../utils/officialRanking';
+import { rankingProblemLetter } from '../utils/ranking';
 import '../styles/screen.css';
 
 function ScreenShell({
@@ -46,22 +46,21 @@ export function ContestScreenPage() {
   const now = useNow(1000);
   const [topLimit, setTopLimit] = useState<'20' | '50' | 'all'>('20');
 
-  const detailQuery = useQuery({
-    queryKey: ['contest-detail', contestId],
-    queryFn: () => apiGet<ContestDetail>(`/api/contests/${contestId}`),
-    enabled: validId,
-    refetchInterval: 5_000,
-  });
   const rankingQuery = useQuery({
-    queryKey: ['ranking', contestId],
-    queryFn: () => apiGet<RankingRow[]>(`/api/contests/${contestId}/ranking`),
+    queryKey: ['official-ranking', contestId],
+    queryFn: () => fetchOfficialRanking(contestId),
     enabled: validId,
     refetchInterval: 5_000,
+    retry: false,
   });
 
-  const contest = detailQuery.data?.contest ?? null;
-  const ranking = rankingQuery.data ?? [];
-  const problemIds = useMemo(() => rankingProblemIds(ranking), [ranking]);
+  const data: OfficialRanking | undefined = rankingQuery.data;
+  const contest = data?.contest ?? null;
+  const ranking = data?.rows ?? [];
+  const problems = data?.problems ?? [];
+  const preset = data?.preset ?? presetFromMode(contest?.mode);
+  const isAcm = preset === 'acm' || preset === 'cf-like';
+  const archived = data?.archived ?? false;
   const rows = useMemo(() => {
     if (topLimit === 'all') return ranking;
     return ranking.slice(0, Number(topLimit));
@@ -77,14 +76,14 @@ export function ContestScreenPage() {
       </ScreenShell>
     );
   }
-  if (detailQuery.isPending) {
+  if (rankingQuery.isPending) {
     return (
       <ScreenShell dark>
         <div className="screen-loading">正在加载比赛大屏…</div>
       </ScreenShell>
     );
   }
-  if (detailQuery.isError || !contest) {
+  if (rankingQuery.isError || !contest) {
     return (
       <ScreenShell dark>
         <div className="screen-title">比赛不存在或加载失败</div>
@@ -96,7 +95,7 @@ export function ContestScreenPage() {
   }
 
   const phase = contestPhase(contest, now);
-  const frozen = phase === 'frozen';
+  const frozen = phase === 'frozen' || (data?.config.freezeAt ?? null) !== null;
   const statusLabel =
     phase === 'upcoming'
       ? CONTEST_PHASE_LABEL.upcoming
@@ -114,6 +113,8 @@ export function ContestScreenPage() {
           <h1 className="screen-title">{contest.name}</h1>
           <div className="screen-subline">
             <span className={`screen-status screen-status-${phase}`}>{statusLabel}</span>
+            <span className="screen-preset">{PRESET_LABEL[preset]}</span>
+            {archived ? <span className="screen-archived">已归档 · 只读</span> : null}
             <span>{contestCountdownText(contest, now)}</span>
             <span className="screen-mail">{formatClock(now)}</span>
           </div>
@@ -146,13 +147,12 @@ export function ContestScreenPage() {
           </span>
         </div>
       ) : null}
+      {archived ? (
+        <div className="screen-archive-note">该比赛已归档，以下为只读正式榜快照。</div>
+      ) : null}
 
       <div className="screen-table-wrap">
-        {rankingQuery.isError ? (
-          <div className="screen-empty">榜单加载失败，请稍后自动重试。</div>
-        ) : rankingQuery.isPending ? (
-          <div className="screen-empty">正在加载榜单…</div>
-        ) : rows.length === 0 ? (
+        {rows.length === 0 ? (
           <div className="screen-empty">暂无参赛者</div>
         ) : (
           <table className="screen-table">
@@ -162,13 +162,17 @@ export function ContestScreenPage() {
                 <th className="screen-col-player">选手</th>
                 <th className="screen-col-class">班级</th>
                 <th className="screen-col-total">总分</th>
-                {problemIds.map((problemId, index) => (
-                  <th key={problemId} className="screen-col-problem">
+                {problems.map((problem, index) => (
+                  <th
+                    key={problem.id}
+                    className="screen-col-problem"
+                    title={`${problem.title} · ${problem.points} 分`}
+                  >
                     {rankingProblemLetter(index)}
-                    <span className="screen-problem-id">#{problemId}</span>
+                    <span className="screen-problem-id">#{problem.id}</span>
                   </th>
                 ))}
-                <th className="screen-col-penalty">罚时</th>
+                <th className="screen-col-penalty">{isAcm ? '罚时' : 'AC 数'}</th>
               </tr>
             </thead>
             <tbody>
@@ -185,17 +189,19 @@ export function ContestScreenPage() {
                   </td>
                   <td className="screen-col-class">{row.className ?? '未分班'}</td>
                   <td className="screen-col-total">{row.totalScore}</td>
-                  {problemIds.map((problemId) => {
-                    const cell = row.problems.find((item) => item.problemId === problemId);
+                  {problems.map((problem) => {
+                    const cell = row.cells.find((item) => item.problemId === problem.id);
                     return (
                       <td
-                        key={problemId}
+                        key={problem.id}
                         className={`screen-col-problem${
                           cell?.verdict === 'AC' ? ' screen-cell-ac' : ''
                         }`}
                         title={
                           cell
-                            ? `${cell.verdict ? verdictTitle(cell.verdict) : '未通过'} · ${cell.score} 分`
+                            ? `${cell.verdict ? verdictTitle(cell.verdict) : '未通过'} · ${
+                                cell.score
+                              } 分${cell.attempts > 0 ? ` · ${cell.attempts} 次提交` : ''}`
                             : '未提交'
                         }
                       >
@@ -204,7 +210,7 @@ export function ContestScreenPage() {
                     );
                   })}
                   <td className="screen-col-penalty">
-                    {penaltyMinutes(row, contest) ?? '—'}
+                    {isAcm ? row.penalty : row.solved}
                   </td>
                 </tr>
               ))}
@@ -215,9 +221,7 @@ export function ContestScreenPage() {
 
       <footer className="screen-footer">
         <span>每 5 秒自动刷新</span>
-        <span>
-          更新于 {formatClock(Date.now())} · 罚时为最后 AC 相对开赛分钟数
-        </span>
+        <span>更新于 {formatClock(Date.now())} · {PRESET_LABEL[preset]}只读数据</span>
       </footer>
     </ScreenShell>
   );

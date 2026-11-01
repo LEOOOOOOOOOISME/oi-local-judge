@@ -1,15 +1,9 @@
-import { Alert, App, Button, Card, Empty, Space, Spin, Table, Tag } from 'antd';
+import { Alert, App, Button, Card, Empty, Space, Table, Tag } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiGet } from '../api/client';
-import type {
-  Contest,
-  ProblemSummary,
-  RankingCell,
-  RankingRow,
-} from '../api/types';
+import type { OfficialRanking, OfficialRankingCell, OfficialRankingRow } from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { useNow } from '../hooks/useNow';
@@ -22,7 +16,12 @@ import {
   verdictTitle,
   type ContestPhase,
 } from '../utils/status';
-import { buildRankingCsv, downloadCsv } from '../utils/ranking';
+import {
+  buildOfficialRankingCsv,
+  fetchOfficialRanking,
+  PRESET_LABEL,
+} from '../utils/officialRanking';
+import { downloadCsv } from '../utils/ranking';
 
 const PHASE_COLOR: Record<ContestPhase, string> = {
   upcoming: 'default',
@@ -31,17 +30,20 @@ const PHASE_COLOR: Record<ContestPhase, string> = {
   ended: 'default',
 };
 
-function RankCell({ cell }: { cell: RankingCell | undefined }) {
+function OfficialCell({ cell }: { cell: OfficialRankingCell | undefined }) {
   if (!cell || (cell.score === 0 && cell.verdict === null)) {
-    return <span className="rank-cell rank-cell-empty">—</span>;
+    return <span className="official-cell official-cell-empty">—</span>;
   }
   const kind = cell.verdict === 'AC' ? 'ac' : cell.verdict ? 'partial' : 'empty';
   return (
     <span
-      className={`rank-cell rank-cell-${kind}`}
-      title={`${cell.verdict ? verdictTitle(cell.verdict) : '未通过'} · ${cell.score} 分`}
+      className={`official-cell official-cell-${kind}`}
+      title={`${cell.verdict ? verdictTitle(cell.verdict) : '未通过'} · ${cell.score} 分${
+        cell.attempts > 0 ? ` · ${cell.attempts} 次提交` : ''
+      }`}
     >
-      {cell.score}
+      <span className="official-cell-score">{cell.score}</span>
+      <span className="official-cell-verdict">{cell.verdict ?? '—'}</span>
     </span>
   );
 }
@@ -53,42 +55,44 @@ export function ContestRankingPage() {
   const now = useNow(1000);
   const { message } = App.useApp();
 
-  const contestsQuery = useQuery({
-    queryKey: ['contests'],
-    queryFn: () => apiGet<Contest[]>('/api/contests'),
-    staleTime: 15_000,
-  });
   const rankingQuery = useQuery({
-    queryKey: ['ranking', contestId],
-    queryFn: () => apiGet<RankingRow[]>(`/api/contests/${contestId}/ranking`),
+    queryKey: ['official-ranking', contestId],
+    queryFn: () => fetchOfficialRanking(contestId),
     enabled: validId,
     staleTime: 5_000,
-  });
-  const problemsQuery = useQuery({
-    queryKey: ['problems'],
-    queryFn: () => apiGet<ProblemSummary[]>('/api/problems'),
-    staleTime: 60_000,
+    retry: false,
   });
 
-  const contest = contestsQuery.data?.find((item) => item.id === contestId) ?? null;
-  const ranking = rankingQuery.data ?? [];
-  const firstRow = ranking[0];
-  const problemIds = firstRow ? firstRow.problems.map((cell) => cell.problemId) : [];
-  const problemMap = new Map((problemsQuery.data ?? []).map((problem) => [problem.id, problem]));
+  const data: OfficialRanking | undefined = rankingQuery.data;
+  const contest = data?.contest ?? null;
+  const rows = data?.rows ?? [];
+  const problems = data?.problems ?? [];
+  const archived = data?.archived ?? false;
+  const preset = data?.preset ?? 'oi';
+  const phase = contest ? contestPhase(contest, now) : 'ended';
+  const isAcm = preset === 'acm' || preset === 'cf-like';
+  const freezeAt = data?.config.freezeAt ?? null;
+  const frozen = phase === 'frozen' || freezeAt !== null;
 
   if (!validId) {
     return <ErrorResult error={new Error('无效的比赛编号')} />;
   }
-  if (contestsQuery.isPending) {
-    return <PageLoading tip="正在加载榜单…" />;
+  if (rankingQuery.isPending) {
+    return <PageLoading tip="正在加载正式榜…" />;
   }
-  if (contestsQuery.isError) {
-    return <ErrorResult error={contestsQuery.error} onRetry={() => void contestsQuery.refetch()} />;
+  if (rankingQuery.isError) {
+    return (
+      <ErrorResult
+        error={rankingQuery.error}
+        onRetry={() => void rankingQuery.refetch()}
+      />
+    );
+  }
+  if (!data || !contest) {
+    return <ErrorResult error={new Error('比赛不存在')} />;
   }
 
-  const phase = contest ? contestPhase(contest, now) : 'ended';
-
-  const baseColumns: TableColumnsType<RankingRow> = [
+  const baseColumns: TableColumnsType<OfficialRankingRow> = [
     {
       title: '排名',
       dataIndex: 'rank',
@@ -103,12 +107,16 @@ export function ContestRankingPage() {
       render: (_value, row) => (
         <div className="rank-user">
           <span className="rank-user-name">{row.realName ?? row.username}</span>
-          <span className="rank-user-meta muted">
-            @{row.username}
-            {row.className ? ` · ${row.className}` : ''}
-          </span>
+          <span className="rank-user-meta muted">@{row.username}</span>
         </div>
       ),
+    },
+    {
+      title: '班级',
+      dataIndex: 'className',
+      width: 120,
+      render: (value: string | null) =>
+        value ? <span>{value}</span> : <span className="muted">未分班</span>,
     },
     {
       title: '总分',
@@ -117,50 +125,55 @@ export function ContestRankingPage() {
       align: 'right',
       render: (value: number) => <strong className="rank-total">{value}</strong>,
     },
-    {
-      title: '通过',
-      dataIndex: 'solved',
-      width: 70,
-      align: 'right',
-    },
   ];
 
-  const problemColumns: TableColumnsType<RankingRow> = problemIds.map((problemId, index) => ({
+  const problemColumns: TableColumnsType<OfficialRankingRow> = problems.map((problem, index) => ({
     title: (
       <div className="rank-problem-head">
         <span>{problemLetter(index)}</span>
-        <span className="muted rank-problem-title">
-          {problemMap.get(problemId)?.title ?? `#${problemId}`}
-        </span>
+        <span className="muted rank-problem-title">{problem.title}</span>
+        <span className="rank-problem-points">{problem.points} 分</span>
       </div>
     ),
-    width: 118,
+    width: 108,
     align: 'center',
     render: (_value, row) => (
-      <RankCell cell={row.problems.find((cell) => cell.problemId === problemId)} />
+      <OfficialCell cell={row.cells.find((cell) => cell.problemId === problem.id)} />
     ),
   }));
 
-  const trailingColumns: TableColumnsType<RankingRow> = [
+  const trailingColumns: TableColumnsType<OfficialRankingRow> = [
     {
-      title: '最后通过',
+      title: isAcm ? '罚时' : 'AC 数',
+      width: 82,
+      align: 'right',
+      render: (_value, row) => (
+        <span className="mono">{isAcm ? row.penalty : row.solved}</span>
+      ),
+    },
+    {
+      title: '最后 AC',
       dataIndex: 'lastAcAt',
       width: 156,
       render: (value: number | null) =>
-        value === null ? <span className="muted">—</span> : <span className="mono">{formatDateTime(value)}</span>,
+        value === null ? (
+          <span className="muted">—</span>
+        ) : (
+          <span className="mono">{formatDateTime(value)}</span>
+        ),
     },
   ];
 
   const exportCsv = () => {
-    if (ranking.length === 0) {
+    if (!data || rows.length === 0) {
       message.warning('暂无榜单数据可导出');
       return;
     }
     downloadCsv(
-      `contest-${contestId}-ranking.csv`,
-      buildRankingCsv(contest, ranking, problemIds),
+      `contest-${contestId}-official-ranking.csv`,
+      buildOfficialRankingCsv(data),
     );
-    message.success('榜单 CSV 已导出');
+    message.success('正式榜 CSV 已导出');
   };
 
   return (
@@ -168,25 +181,32 @@ export function ContestRankingPage() {
       <PageHead
         breadcrumb={[
           { label: '比赛', to: '/contests' },
-          { label: contest?.name ?? `比赛 #${contestId}`, to: `/contest/${contestId}` },
-          { label: '榜单' },
+          { label: contest.name, to: `/contest/${contestId}` },
+          { label: '正式榜' },
         ]}
-        title={`${contest?.name ?? `比赛 #${contestId}`} · 榜单`}
+        title={`${contest.name} · 正式榜`}
         tags={
           <>
-            <Tag color="blue">{contestModeLabel(contest?.mode ?? 'oi')}</Tag>
+            <Tag color="geekblue">{PRESET_LABEL[preset]}</Tag>
+            <Tag>{contestModeLabel(contest.mode)}</Tag>
             <Tag color={PHASE_COLOR[phase]}>{CONTEST_PHASE_LABEL[phase]}</Tag>
-            {contest?.freeze_at !== null && contest?.freeze_at !== undefined ? (
-              <Tag>封榜 {formatDateTime(contest.freeze_at)}</Tag>
-            ) : null}
+            {archived ? <Tag color="red">已归档 · 只读</Tag> : null}
+            {frozen ? <Tag color="gold">封榜中</Tag> : null}
           </>
         }
-        subtitle="OI 赛制：每题取最高分，总分降序，同分按最后一次 AC 时间升序。"
+        subtitle={
+          isAcm
+            ? `${PRESET_LABEL[preset]}：按通过题数与罚时排序，正式榜数据只读。`
+            : `${PRESET_LABEL[preset]}：每题取正式得分，总分降序；正式榜数据只读。`
+        }
         extra={
           <Space>
             <Button icon={<DownloadOutlined />} onClick={exportCsv}>
               导出 CSV
             </Button>
+            <Link to={`/contest/${contestId}/screen`}>
+              <Button>大屏</Button>
+            </Link>
             <Link to={`/contest/${contestId}`}>
               <Button>返回比赛</Button>
             </Link>
@@ -194,31 +214,40 @@ export function ContestRankingPage() {
         }
       />
 
-      {contest?.freeze_at !== null && contest?.freeze_at !== undefined ? (
+      {archived ? (
+        <Alert
+          className="ranking-freeze"
+          type="warning"
+          showIcon
+          message="比赛已归档，当前为只读正式榜快照。"
+          description="归档后不接受榜单订正；如需修改请联系管理员解除归档。"
+        />
+      ) : null}
+      {frozen ? (
         <Alert
           className="ranking-freeze"
           type="info"
           showIcon
-          message={`榜单已按封榜时间 ${formatDateTime(contest.freeze_at)} 过滤，之后的提交暂不计入。`}
+          message={`榜单已按封榜时间 ${
+            freezeAt !== null
+              ? formatDateTime(freezeAt)
+              : contest.freeze_at !== null
+                ? formatDateTime(contest.freeze_at)
+                : '—'
+          } 过滤，封榜后的提交暂不计入。`}
         />
       ) : null}
 
       <Card className="oij-card">
-        {rankingQuery.isPending ? (
-          <div className="inline-loading">
-            <Spin />
-          </div>
-        ) : rankingQuery.isError ? (
-          <ErrorResult error={rankingQuery.error} onRetry={() => void rankingQuery.refetch()} />
-        ) : ranking.length === 0 ? (
+        {rows.length === 0 ? (
           <Empty description="暂无参赛者" />
         ) : (
-          <Table<RankingRow>
+          <Table<OfficialRankingRow>
             className="oij-table rank-table"
             rowKey="userId"
             size="small"
             columns={[...baseColumns, ...problemColumns, ...trailingColumns]}
-            dataSource={ranking}
+            dataSource={rows}
             pagination={false}
             scroll={{ x: 'max-content' }}
           />
