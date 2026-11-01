@@ -8,6 +8,7 @@ import { hashPassword } from '../src/security/password.js';
 import { signSession } from '../src/security/session.js';
 import { upsertAsset } from '../src/storage/repos/assets.js';
 import { createContest } from '../src/storage/repos/contests.js';
+import { getOfficialRanking } from '../src/services/official-ranking.js';
 import { upsertOfficialScore, getOfficialScore } from '../src/storage/repos/official-scores.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import { createSubmission, getSubmission } from '../src/storage/repos/submissions.js';
@@ -178,5 +179,8 @@ describe('contest hack', () => {
     expect(hacked.hacked_at).not.toBeNull();
     expect(hacked.hacked_by).toBe(hackerId);
     expect(getOfficialScore(db, contestId, targetId, problemId)?.score).toBe(0);
+    const ranking = await getOfficialRanking(db, contestId, root);
+    expect(ranking?.rows.find((row) => row.userId === targetId)?.hackedCount).toBe(1);
+    expect(ranking?.rows.find((row) => row.userId === hackerId)?.successfulHacks).toBe(1);
   }, 30_000);
 });

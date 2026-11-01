@@ -25,6 +25,8 @@ export interface OfficialRankingRow extends RankingRowResult {
   username: string;
   realName: string | null;
   className: string | null;
+  hackedCount: number;
+  successfulHacks: number;
 }
 
 export interface OfficialRankingResult {
@@ -170,11 +172,28 @@ export async function getOfficialRanking(
   }
 
   const output = rows as OfficialRankingRow[];
+  const hackedByUser = new Map<number, number>();
+  for (const submission of listContestSubmissions(db, contestId)) {
+    if (submission.hacked_at !== null) {
+      hackedByUser.set(submission.user_id, (hackedByUser.get(submission.user_id) ?? 0) + 1);
+    }
+  }
+  const successfulHacksByUser = new Map<number, number>();
+  for (const hack of listHacks(db, contestId)) {
+    if (hack.status === 'success' || hack.status === 'promoted') {
+      successfulHacksByUser.set(
+        hack.hacker_id,
+        (successfulHacksByUser.get(hack.hacker_id) ?? 0) + 1,
+      );
+    }
+  }
   for (const row of output) {
     const user = getUserById(db, row.userId);
     row.username = user?.username ?? `user-${row.userId}`;
     row.realName = user?.real_name ?? null;
     row.className = user?.class_name ?? null;
+    row.hackedCount = hackedByUser.get(row.userId) ?? 0;
+    row.successfulHacks = successfulHacksByUser.get(row.userId) ?? 0;
   }
 
   return {

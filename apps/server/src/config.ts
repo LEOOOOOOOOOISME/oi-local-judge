@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { cpus, homedir } from 'node:os';
 import { join } from 'node:path';
 
 export interface Config {
@@ -62,7 +62,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     host: env.OIJ_HOST ?? '0.0.0.0',
     port: Number(env.OIJ_PORT ?? 8787),
     dataDir,
-    judgeConcurrency: Math.max(1, Number(env.OIJ_JUDGE_CONCURRENCY ?? 2)),
+    judgeConcurrency: Math.max(
+      1,
+      Number(env.OIJ_JUDGE_CONCURRENCY ?? Math.min(4, cpus().length)),
+    ),
     gxx: detectGxx(env),
     runnerPath: env.OIJ_RUNNER ?? join(process.cwd(), 'native/runner/out/ojrunner.exe'),
     interactRunnerPath:

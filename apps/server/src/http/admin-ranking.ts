@@ -28,6 +28,19 @@ function parseConfig(body: Record<string, unknown>): Record<string, unknown> {
     body.cfLike && typeof body.cfLike === 'object'
       ? {
           decay: Math.min(2, Math.max(0, Number((body.cfLike as { decay?: number }).decay ?? 0.5))),
+          hackPoints: Math.min(
+            1000,
+            Math.max(0, Math.floor(Number((body.cfLike as { hackPoints?: number }).hackPoints ?? 100))),
+          ),
+          failedHackPenalty: Math.min(
+            1000,
+            Math.max(
+              0,
+              Math.floor(
+                Number((body.cfLike as { failedHackPenalty?: number }).failedHackPenalty ?? 50),
+              ),
+            ),
+          ),
         }
       : undefined;
   const hackWindowMinutes = Math.min(
