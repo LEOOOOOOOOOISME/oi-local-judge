@@ -38,6 +38,7 @@ export function syncOnlineOfficialScore(db: DatabaseSync, submissionId: number):
     score: nextScore,
     verdict: nextVerdict,
     source: 'online',
+    submissionId: submission.id,
     batchId: null,
   });
 }

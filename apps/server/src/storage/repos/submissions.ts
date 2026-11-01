@@ -18,6 +18,9 @@ export interface SubmissionRow {
   judged_at: number | null;
   phase: string;
   batch_id: number | null;
+  hacked_at: number | null;
+  hacked_by: number | null;
+  hack_id: number | null;
 }
 
 export interface CreateSubmissionInput {
@@ -183,6 +186,51 @@ export function listSubmissions(db: DatabaseSync, filter: ListSubmissionsFilter)
   return db
     .prepare(`SELECT * FROM submissions ${where} ORDER BY id DESC LIMIT ?`)
     .all(...params, limit) as unknown as SubmissionRow[];
+}
+
+export function markSubmissionHacked(
+  db: DatabaseSync,
+  submissionId: number,
+  hackerId: number,
+  hackId: number,
+): void {
+  db.prepare('UPDATE submissions SET hacked_at = ?, hacked_by = ?, hack_id = ? WHERE id = ?').run(
+    Date.now(),
+    hackerId,
+    hackId,
+    submissionId,
+  );
+}
+
+export function listUnhackedContestSubmissions(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+  problemId: number,
+): SubmissionRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM submissions
+       WHERE contest_id = ? AND user_id = ? AND problem_id = ?
+         AND phase = 'contest' AND status = 'finished' AND hacked_at IS NULL
+       ORDER BY score DESC, id ASC`,
+    )
+    .all(contestId, userId, problemId) as unknown as SubmissionRow[];
+}
+export function listHackTargets(
+  db: DatabaseSync,
+  contestId: number,
+  problemId: number,
+  hackerId: number,
+): SubmissionRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM submissions
+       WHERE contest_id = ? AND problem_id = ? AND user_id <> ?
+         AND phase = 'contest' AND status = 'finished' AND hacked_at IS NULL
+       ORDER BY id DESC`,
+    )
+    .all(contestId, problemId, hackerId) as unknown as SubmissionRow[];
 }
 
 export function listContestSubmissions(

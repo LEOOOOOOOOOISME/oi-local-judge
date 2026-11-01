@@ -428,7 +428,10 @@ export function registerContestBatchRoutes(
           score: afterScore,
           verdict: afterVerdict,
           source: 'batch',
-          batchId,
+          batchId: batchId,
+          submissionId: null,
+          batchScore: submission.score,
+          batchVerdict: submission.verdict ?? 'WA',
         });
         options.db
           .prepare("UPDATE submissions SET phase = 'contest' WHERE id = ?")

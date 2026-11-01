@@ -8,6 +8,9 @@ export interface OfficialScoreRow {
   verdict: string;
   source: 'online' | 'batch';
   batch_id: number | null;
+  submission_id: number | null;
+  batch_score: number | null;
+  batch_verdict: string | null;
   updated_at: number;
 }
 
@@ -20,7 +23,8 @@ export function getOfficialScore(
   return (
     (db
       .prepare(
-        `SELECT contest_id, user_id, problem_id, score, verdict, source, batch_id, updated_at
+        `SELECT contest_id, user_id, problem_id, score, verdict, source, batch_id,
+                submission_id, batch_score, batch_verdict, updated_at
          FROM contest_official_scores
          WHERE contest_id = ? AND user_id = ? AND problem_id = ?`,
       )
@@ -31,7 +35,8 @@ export function getOfficialScore(
 export function listOfficialScores(db: DatabaseSync, contestId: number): OfficialScoreRow[] {
   return db
     .prepare(
-      `SELECT contest_id, user_id, problem_id, score, verdict, source, batch_id, updated_at
+      `SELECT contest_id, user_id, problem_id, score, verdict, source, batch_id,
+              submission_id, batch_score, batch_verdict, updated_at
        FROM contest_official_scores WHERE contest_id = ?`,
     )
     .all(contestId) as unknown as OfficialScoreRow[];
@@ -47,17 +52,24 @@ export function upsertOfficialScore(
     verdict: string;
     source: 'online' | 'batch';
     batchId?: number | null;
+    submissionId?: number | null;
+    batchScore?: number | null;
+    batchVerdict?: string | null;
   },
 ): void {
   db.prepare(
     `INSERT INTO contest_official_scores
-       (contest_id, user_id, problem_id, score, verdict, source, batch_id, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+       (contest_id, user_id, problem_id, score, verdict, source, batch_id,
+        submission_id, batch_score, batch_verdict, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(contest_id, user_id, problem_id) DO UPDATE SET
        score = excluded.score,
        verdict = excluded.verdict,
        source = excluded.source,
        batch_id = excluded.batch_id,
+       submission_id = excluded.submission_id,
+       batch_score = COALESCE(excluded.batch_score, contest_official_scores.batch_score),
+       batch_verdict = COALESCE(excluded.batch_verdict, contest_official_scores.batch_verdict),
        updated_at = excluded.updated_at`,
   ).run(
     input.contestId,
@@ -67,6 +79,9 @@ export function upsertOfficialScore(
     input.verdict,
     input.source,
     input.batchId ?? null,
+    input.submissionId ?? null,
+    input.batchScore ?? null,
+    input.batchVerdict ?? null,
     Date.now(),
   );
 }
@@ -81,6 +96,7 @@ export function seedOfficialScoresFromSubmissions(db: DatabaseSync, contestId: n
       `SELECT user_id, problem_id, score, verdict
        FROM submissions
        WHERE contest_id = ? AND phase = 'contest' AND status = 'finished'
+         AND hacked_at IS NULL
        ORDER BY score DESC, created_at ASC`,
     )
     .all(contestId) as unknown as Array<{

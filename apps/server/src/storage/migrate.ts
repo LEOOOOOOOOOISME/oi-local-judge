@@ -102,6 +102,27 @@ CREATE TABLE IF NOT EXISTS ranking_plugins(
   uploaded_by INTEGER NOT NULL,
   uploaded_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS contest_problem_locks(
+  contest_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  locked_at INTEGER NOT NULL,
+  PRIMARY KEY(contest_id, user_id, problem_id)
+);
+CREATE TABLE IF NOT EXISTS contest_hacks(
+  id INTEGER PRIMARY KEY,
+  contest_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  hacker_id INTEGER NOT NULL,
+  target_submission_id INTEGER NOT NULL,
+  input_path TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'queued',
+  verdict TEXT,
+  message TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL,
+  judged_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_hacks_contest ON contest_hacks(contest_id, problem_id, id DESC);
 CREATE TABLE IF NOT EXISTS batch_jobs(
   id INTEGER PRIMARY KEY, problem_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'running',
   student_level INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
@@ -176,6 +197,12 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'submissions', 'batch_id', 'INTEGER');
   ensureColumn(db, 'contests', 'ranking_rule_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'contests', 'archived_at', 'INTEGER');
+  ensureColumn(db, 'submissions', 'hacked_at', 'INTEGER');
+  ensureColumn(db, 'submissions', 'hacked_by', 'INTEGER');
+  ensureColumn(db, 'submissions', 'hack_id', 'INTEGER');
+  ensureColumn(db, 'contest_official_scores', 'submission_id', 'INTEGER');
+  ensureColumn(db, 'contest_official_scores', 'batch_score', 'INTEGER');
+  ensureColumn(db, 'contest_official_scores', 'batch_verdict', 'TEXT');
   ensureColumn(db, 'submissions', 'message', "TEXT NOT NULL DEFAULT ''");
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
