@@ -10,6 +10,24 @@ Windows 局域网 OI 评测系统：Electron 桌面程序内置 HTTP/WS 服务�
 
 ---
 
+## 界面预览
+
+> 以下为本地演示数据截图。
+
+| 正式榜 | 赛后订正榜 |
+|---|---|
+| <img src="docs/assets/screenshots/03-official-ranking.png" width="100%" alt="正式榜" /> | <img src="docs/assets/screenshots/04-correction.png" width="100%" alt="订正榜" /> |
+
+| 批量导入预览 | Hack 审计 |
+|---|---|
+| <img src="docs/assets/screenshots/05-batch-preview.png" width="100%" alt="批量导入预览" /> | <img src="docs/assets/screenshots/06-hack-audit.png" width="100%" alt="Hack 审计" /> |
+
+| 注册 | Markdown / LaTeX 题面 |
+|---|---|
+| <img src="docs/assets/screenshots/01-register.png" width="100%" alt="注册" /> | <img src="docs/assets/screenshots/02-rich-text.png" width="100%" alt="Markdown 与 LaTeX 题面" /> |
+
+---
+
 ## 1. 核心亮点
 
 ### 1.1 一场比赛从建题到成绩的完整闭环
