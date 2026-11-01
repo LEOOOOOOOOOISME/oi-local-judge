@@ -2,6 +2,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { getOfficialRanking } from '../src/services/official-ranking.js';
+import { syncOnlineOfficialScore } from '../src/judge/official-score.js';
+import { getOfficialScore } from '../src/storage/repos/official-scores.js';
 import { createContest } from '../src/storage/repos/contests.js';
 import { upsertOfficialScore } from '../src/storage/repos/official-scores.js';
 import { createProblem } from '../src/storage/repos/problems.js';
@@ -87,8 +89,47 @@ describe('official ranking service', () => {
     expect(data.archived).toBe(false);
   });
 
-  it('computes ACM ordering and archived status', () => {
+  it('updates the OI official cell from online submissions without lowering', () => {
     const contestId = createContest(db, {
+      name: 'Online sync',
+      mode: 'oi',
+      problemIds: [problemId],
+      startAt: Date.now() - 60_000,
+      endAt: Date.now() + 60 * 60_000,
+    });
+    db.prepare(
+      "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",
+    ).run(contestId, u1);
+    const first = createSubmission(db, {
+      contestId,
+      problemId,
+      userId: u1,
+      language: 'cpp17',
+      sourcePath: 'a.cpp',
+      sourceHash: 'a',
+    });
+    db.prepare("UPDATE submissions SET status='finished', verdict='PC', score=60 WHERE id=?").run(
+      first,
+    );
+    syncOnlineOfficialScore(db, first);
+    expect(getOfficialScore(db, contestId, u1, problemId)?.score).toBe(60);
+
+    const lower = createSubmission(db, {
+      contestId,
+      problemId,
+      userId: u1,
+      language: 'cpp17',
+      sourcePath: 'b.cpp',
+      sourceHash: 'b',
+    });
+    db.prepare("UPDATE submissions SET status='finished', verdict='WA', score=40 WHERE id=?").run(
+      lower,
+    );
+    syncOnlineOfficialScore(db, lower);
+    expect(getOfficialScore(db, contestId, u1, problemId)?.score).toBe(60);
+  });
+
+  it('computes ACM ordering and archived status', () => {    const contestId = createContest(db, {
       name: 'ACM',
       mode: 'acm',
       problemIds: [problemId],

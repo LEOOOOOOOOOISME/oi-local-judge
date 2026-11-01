@@ -38,6 +38,7 @@ import {
 } from './objective.js';
 import { parseOutputAnswers, writeAnswerFiles } from './output-only.js';
 import { runInteractive } from './interactive.js';
+import { syncOnlineOfficialScore } from './official-score.js';
 import { getAsset } from '../storage/repos/assets.js';
 import { runChecker, type CheckerMode } from './checker.js';
 import { runSandboxed } from './runner.js';
@@ -216,6 +217,7 @@ function persistJudged(
     message,
     results,
   });
+  syncOnlineOfficialScore(db, submissionId);
 }
 
 function markSubmissionFailed(
