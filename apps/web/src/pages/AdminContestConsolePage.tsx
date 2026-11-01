@@ -99,9 +99,10 @@ export function AdminContestConsolePage() {
   const [archiving, setArchiving] = useState(false);
   const [releasingOfficialFreeze, setReleasingOfficialFreeze] = useState(false);
   const [hackAuditFilter, setHackAuditFilter] = useState<
-    'all' | 'success' | 'failed' | 'invalid' | 'pending'
+    'all' | 'success' | 'failed' | 'invalid' | 'reverted' | 'pending'
   >('all');
   const [promotingAuditHackId, setPromotingAuditHackId] = useState<number | null>(null);
+  const [revertingAuditHackId, setRevertingAuditHackId] = useState<number | null>(null);
   const [hiddenOverrides, setHiddenOverrides] = useState<Record<number, boolean>>({});
   const [togglingHiddenUserId, setTogglingHiddenUserId] = useState<number | null>(null);
   const [csvModalOpen, setCsvModalOpen] = useState(false);
@@ -198,6 +199,7 @@ export function AdminContestConsolePage() {
     invalid: hackAuditRows.filter(
       (row) => row.status === 'invalid' || row.status === 'unjudgeable',
     ).length,
+    reverted: hackAuditRows.filter((row) => row.status === 'reverted').length,
   };
   const filteredHackAuditRows = hackAuditRows.filter((row) => {
     if (hackAuditFilter === 'success') {
@@ -207,6 +209,7 @@ export function AdminContestConsolePage() {
     if (hackAuditFilter === 'invalid') {
       return row.status === 'invalid' || row.status === 'unjudgeable';
     }
+    if (hackAuditFilter === 'reverted') return row.status === 'reverted';
     if (hackAuditFilter === 'pending') {
       return row.status === 'queued' || row.status === 'judging';
     }
@@ -483,6 +486,23 @@ export function AdminContestConsolePage() {
       message.error(error instanceof Error ? error.message : '强制晋升失败');
     } finally {
       setPromotingAuditHackId(null);
+    }
+  };
+
+  const revertAuditHack = async (hackId: number) => {
+    setRevertingAuditHackId(hackId);
+    try {
+      await apiPost<{ id: number; status: string }>(
+        `/api/admin/contests/${contestId}/hacks/${hackId}/revert`,
+      );
+      message.success('已撤销 HACKED，正式分已重算');
+      void queryClient.invalidateQueries({ queryKey: ['admin-hack-audit', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '撤销 HACKED 失败');
+    } finally {
+      setRevertingAuditHackId(null);
     }
   };
 
@@ -794,6 +814,7 @@ export function AdminContestConsolePage() {
     invalid: '非法',
     unjudgeable: '无法判定',
     promoted: '已晋升',
+    reverted: '已撤销',
   };
   const auditStatusColor: Record<string, string> = {
     queued: 'blue',
@@ -803,6 +824,7 @@ export function AdminContestConsolePage() {
     invalid: 'orange',
     unjudgeable: 'default',
     promoted: 'green',
+    reverted: 'default',
   };
 
   const hackAuditColumns: TableColumnsType<HackAuditItem> = [
@@ -889,26 +911,45 @@ export function AdminContestConsolePage() {
     },
     {
       title: '',
-      width: 110,
+      width: 120,
       align: 'center',
-      render: (_value, row) =>
-        row.status === 'failed' || row.status === 'queued' ? (
-          <Popconfirm
-            title="强制晋升为 HACKED？"
-            description="会标记目标提交为 HACKED 并重算正式分。"
-            okText="晋升"
-            cancelText="取消"
-            onConfirm={() => void promoteAuditHack(row.id)}
-          >
-            <Button
-              size="small"
-              danger
-              loading={promotingAuditHackId === row.id}
+      render: (_value, row) => {
+        if (row.status === 'failed' || row.status === 'queued') {
+          return (
+            <Popconfirm
+              title="强制晋升为 HACKED？"
+              description="会标记目标提交为 HACKED 并重算正式分。"
+              okText="晋升"
+              cancelText="取消"
+              onConfirm={() => void promoteAuditHack(row.id)}
             >
-              强制晋升
-            </Button>
-          </Popconfirm>
-        ) : null,
+              <Button
+                size="small"
+                danger
+                loading={promotingAuditHackId === row.id}
+              >
+                强制晋升
+              </Button>
+            </Popconfirm>
+          );
+        }
+        if (row.status === 'success' || row.status === 'promoted') {
+          return (
+            <Popconfirm
+              title="撤销 HACKED？"
+              description="清除目标提交的 HACKED 状态并按剩余提交重算正式分。"
+              okText="撤销"
+              cancelText="取消"
+              onConfirm={() => void revertAuditHack(row.id)}
+            >
+              <Button size="small" loading={revertingAuditHackId === row.id}>
+                撤销 HACKED
+              </Button>
+            </Popconfirm>
+          );
+        }
+        return null;
+      },
     },
   ];
 
@@ -1439,6 +1480,7 @@ export function AdminContestConsolePage() {
             <Tag color="green">成功 {hackAuditStats.success}</Tag>
             <Tag>失败 {hackAuditStats.failed}</Tag>
             <Tag color="orange">非法/无法判定 {hackAuditStats.invalid}</Tag>
+            <Tag>已撤销 {hackAuditStats.reverted}</Tag>
             <Select
               size="small"
               value={hackAuditFilter}
@@ -1447,6 +1489,7 @@ export function AdminContestConsolePage() {
                 { value: 'success', label: '成功' },
                 { value: 'failed', label: '失败' },
                 { value: 'invalid', label: '非法/无法判定' },
+                { value: 'reverted', label: '已撤销' },
                 { value: 'pending', label: '判断中' },
               ]}
               onChange={(value) => setHackAuditFilter(value)}
