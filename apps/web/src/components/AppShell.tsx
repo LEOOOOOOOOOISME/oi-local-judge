@@ -142,7 +142,7 @@ export function AppShell() {
         </Suspense>
       </main>
       <footer className="oij-footer">
-        OiJudge · 本地 OI 评测系统 · Phase A · <Link to="/help">帮助</Link>
+        OiJudge · 本地 OI 评测系统 · <Link to="/help">帮助</Link>
       </footer>
     </div>
   );
