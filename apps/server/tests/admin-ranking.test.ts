@@ -64,6 +64,20 @@ describe('admin ranking config and plugins', () => {
     expect(invalid.statusCode).toBe(400);
   });
 
+  it('releases the official hack freeze', async () => {
+    db.prepare('UPDATE contests SET official_frozen_until = ? WHERE id = ?').run(
+      Date.now() + 60_000,
+      contestId,
+    );
+    const released = await app.inject({
+      method: 'POST',
+      url: `/api/admin/contests/${contestId}/official-freeze/release`,
+      headers: { cookie },
+    });
+    expect(released.statusCode, released.body).toBe(200);
+    expect(getContest(db, contestId)!.official_frozen_until).toBeNull();
+  });
+
   it('uploads a compiled ranking plugin and allows selecting it', async () => {
     const source = Buffer.from(
       'export const apiVersion = 1; export function compute() { return []; }\n',

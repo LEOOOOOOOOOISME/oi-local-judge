@@ -64,6 +64,19 @@ export function registerAdminRankingRoutes(
   app: FastifyInstance,
   options: AdminRankingRouteOptions,
 ): void {
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/contests/:id/official-freeze/release',
+    { preHandler: options.adminGuard },
+    async (request, reply) => {
+      const contest = getContest(options.db, Number(request.params.id));
+      if (!contest) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      options.db
+        .prepare('UPDATE contests SET official_frozen_until = NULL WHERE id = ?')
+        .run(contest.id);
+      return { ok: true, data: { released: true } };
+    },
+  );
+
   app.get<{ Params: { id: string } }>(
     '/api/admin/contests/:id/ranking-config',
     { preHandler: options.adminGuard },
