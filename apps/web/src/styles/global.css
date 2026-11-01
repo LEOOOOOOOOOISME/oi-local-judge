@@ -1233,3 +1233,9 @@ a.oij-logo:hover {
     font-size: 18px;
   }
 }
+
+/* Phase C：Hack 模式 */
+.hack-lock-row {
+  margin-top: 12px;
+}
+

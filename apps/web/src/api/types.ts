@@ -605,6 +605,43 @@ export interface CorrectionRanking {
   archived: boolean;
 }
 
+/** Phase C：比赛 Hack。 */
+export type HackStatus =
+  | 'queued'
+  | 'judging'
+  | 'success'
+  | 'failed'
+  | 'invalid'
+  | 'unjudgeable';
+
+export interface HackTarget {
+  id: number;
+  userId: number;
+  verdict: Verdict | null;
+  score: number;
+  createdAt: number;
+}
+
+export interface HackSource {
+  submissionId: number;
+  language: string;
+  code: string;
+}
+
+export interface HackJob {
+  id: number;
+  contest_id: number;
+  problem_id: number;
+  hacker_id: number;
+  target_submission_id: number;
+  input_path: string;
+  status: HackStatus;
+  verdict: Verdict | null;
+  message: string;
+  created_at: number;
+  judged_at: number | null;
+}
+
 /** Phase A：排名规则配置与自定义插件。 */
 export interface ContestRankingRuleConfig {
   preset?: string;
