@@ -27,13 +27,15 @@ export interface CreateSubmissionInput {
   language: string;
   sourcePath: string;
   sourceHash: string;
+  phase?: string;
+  batchId?: number | null;
 }
 
 export function createSubmission(db: DatabaseSync, input: CreateSubmissionInput): number {
   const result = db
     .prepare(
       `INSERT INTO submissions(contest_id, problem_id, user_id, language, source_path,
-         source_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+         source_hash, created_at, phase, batch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.contestId ?? null,
@@ -43,6 +45,8 @@ export function createSubmission(db: DatabaseSync, input: CreateSubmissionInput)
       input.sourcePath,
       input.sourceHash,
       Date.now(),
+      input.phase ?? 'contest',
+      input.batchId ?? null,
     );
   return Number(result.lastInsertRowid);
 }
