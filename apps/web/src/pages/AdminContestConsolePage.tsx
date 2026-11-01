@@ -30,6 +30,7 @@ import type {
   ContestParticipant,
   ContestParticipantImportResult,
   ContestRankingRuleConfig,
+  ContestLockRecord,
   RankingPlugin,
   UpdateContestRequest,
 } from '../api/types';
@@ -108,8 +109,10 @@ export function AdminContestConsolePage() {
   const [hackPoints, setHackPoints] = useState(100);
   const [failedHackPenalty, setFailedHackPenalty] = useState(50);
   const [hackWindowMinutes, setHackWindowMinutes] = useState(0);
+  const [officialFreezeMinutes, setOfficialFreezeMinutes] = useState(0);
   const [savingRanking, setSavingRanking] = useState(false);
   const [rankingError, setRankingError] = useState<string | null>(null);
+  const [unlockingLock, setUnlockingLock] = useState<string | null>(null);
 
   const detailQuery = useQuery({
     queryKey: ['contest-detail', contestId],
@@ -149,6 +152,11 @@ export function AdminContestConsolePage() {
     queryKey: ['ranking-plugins'],
     queryFn: () => apiGet<RankingPlugin[]>('/api/admin/ranking-plugins'),
     enabled: validId && user?.role === 'admin',
+  });
+  const locksQuery = useQuery({
+    queryKey: ['admin-contest-locks', contestId],
+    queryFn: () => apiGet<ContestLockRecord[]>(`/api/admin/contests/${contestId}/locks`),
+    enabled: validId,
   });
 
   const detail = detailQuery.data ?? null;
@@ -203,6 +211,7 @@ export function AdminContestConsolePage() {
     setHackPoints(config.cfLike?.hackPoints ?? 100);
     setFailedHackPenalty(config.cfLike?.failedHackPenalty ?? 50);
     setHackWindowMinutes(config.hackWindowMinutes ?? 0);
+    setOfficialFreezeMinutes(config.officialFreezeMinutesAfterHack ?? 0);
   }, [contest, rankingConfigQuery.data]);
 
   useEffect(() => {
@@ -397,6 +406,29 @@ export function AdminContestConsolePage() {
     }
   };
 
+  const unlockProblem = async (record: ContestLockRecord) => {
+    const key = `${record.user_id}:${record.problem_id}`;
+    setUnlockingLock(key);
+    try {
+      await apiDelete<null>(
+        `/api/admin/contests/${contestId}/locks/${record.user_id}/${record.problem_id}`,
+      );
+      message.success('已解除该选手本题的锁定');
+      void queryClient.invalidateQueries({ queryKey: ['admin-contest-locks', contestId] });
+      void queryClient.invalidateQueries({
+        queryKey: ['hack-targets', contestId, record.problem_id],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ['hack-history', contestId, record.problem_id],
+      });
+      void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '解锁失败');
+    } finally {
+      setUnlockingLock(null);
+    }
+  };
+
   const saveRankingConfig = async () => {
     setSavingRanking(true);
     setRankingError(null);
@@ -407,6 +439,7 @@ export function AdminContestConsolePage() {
           preset: rankingPreset,
           tie: rankingTie,
           hackWindowMinutes,
+          officialFreezeMinutesAfterHack: officialFreezeMinutes,
           cfLike: {
             decay: rankingDecay,
             hackPoints,
@@ -617,6 +650,59 @@ export function AdminContestConsolePage() {
           </Button>
         </Popconfirm>
       ),
+    },
+  ];
+
+  const lockColumns: TableColumnsType<ContestLockRecord> = [
+    {
+      title: '选手',
+      dataIndex: 'username',
+      width: 180,
+      render: (value: string, row) => (
+        <span>
+          {row.real_name ?? value}
+          <span className="muted"> @{value}</span>
+        </span>
+      ),
+    },
+    {
+      title: '题目',
+      dataIndex: 'problem_title',
+      render: (value: string, row) => (
+        <span>
+          {value}
+          <span className="muted mono"> #{row.problem_id}</span>
+        </span>
+      ),
+    },
+    {
+      title: '锁定时间',
+      dataIndex: 'locked_at',
+      width: 170,
+      render: (value: number) => (
+        <span className="mono">{formatDateTime(value)}</span>
+      ),
+    },
+    {
+      title: '',
+      width: 100,
+      align: 'center',
+      render: (_value, row) => {
+        const key = `${row.user_id}:${row.problem_id}`;
+        return (
+          <Popconfirm
+            title="解除该选手本题的锁定？"
+            description="解锁后选手可再次提交，targets 将不可见。"
+            okText="解锁"
+            cancelText="取消"
+            onConfirm={() => void unlockProblem(row)}
+          >
+            <Button size="small" loading={unlockingLock === key}>
+              解锁
+            </Button>
+          </Popconfirm>
+        );
+      },
     },
   ];
 
@@ -955,9 +1041,23 @@ export function AdminContestConsolePage() {
                   style={{ width: 150 }}
                 />
               </div>
+              <div className="batch-field">
+                <span className="muted">Hack 后官方冻结（分钟）</span>
+                <InputNumber
+                  min={0}
+                  max={10080}
+                  precision={0}
+                  value={officialFreezeMinutes}
+                  onChange={(value) =>
+                    setOfficialFreezeMinutes(typeof value === 'number' ? value : 0)
+                  }
+                  style={{ width: 170 }}
+                />
+              </div>
             </div>
             <div className="batch-level-hint muted">
               比赛结束后 N 分钟关闭锁题/Hack；0 表示结束后立即关闭。
+              Hack 后官方冻结 N 分钟，期间正式分不更新（批量发布会被拒绝）。
               当前生效：{presetLabel(officialQuery.data?.preset ?? rankingPreset)}。
               自定义插件需先在“排名插件”页上传并启用，重启服务后才会加载；插件失败会自动回退 OI。
             </div>
@@ -1078,6 +1178,33 @@ export function AdminContestConsolePage() {
             pagination={false}
             locale={{ emptyText: '还没有参赛者' }}
           />
+        </Card>
+
+        <Card
+          className="oij-card"
+          title="锁题记录"
+          extra={<span className="muted">共 {locksQuery.data?.length ?? 0} 条</span>}
+        >
+          {locksQuery.isPending ? (
+            <div className="inline-loading">
+              <Spin />
+            </div>
+          ) : locksQuery.isError ? (
+            <ErrorResult
+              error={locksQuery.error}
+              onRetry={() => void locksQuery.refetch()}
+            />
+          ) : (
+            <Table<ContestLockRecord>
+              className="oij-table"
+              rowKey={(row) => `${row.user_id}:${row.problem_id}`}
+              size="small"
+              columns={lockColumns}
+              dataSource={locksQuery.data ?? []}
+              pagination={false}
+              locale={{ emptyText: '暂无锁定' }}
+            />
+          )}
         </Card>
 
         <Card

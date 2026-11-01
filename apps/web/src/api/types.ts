@@ -578,6 +578,7 @@ export interface OfficialRanking {
   archived: boolean;
   preset: string;
   pluginError?: string;
+  officialFrozenUntil?: number | null;
 }
 
 /** Phase B：独立订正榜。 */
@@ -665,11 +666,22 @@ export interface ContestRankingRuleConfig {
   preset?: string;
   tie?: 'same-rank' | 'none';
   hackWindowMinutes?: number;
+  officialFreezeMinutesAfterHack?: number;
   cfLike?: {
     decay: number;
     hackPoints?: number;
     failedHackPenalty?: number;
   };
+}
+
+export interface ContestLockRecord {
+  contest_id: number;
+  user_id: number;
+  problem_id: number;
+  locked_at: number;
+  username: string;
+  real_name: string | null;
+  problem_title: string;
 }
 
 export interface RankingPlugin {
