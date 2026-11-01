@@ -11,6 +11,7 @@ import {
 } from '../storage/repos/contests.js';
 import { getProblem } from '../storage/repos/problems.js';
 import { listContestSubmissions } from '../storage/repos/submissions.js';
+import { seedOfficialScoresFromSubmissions } from '../storage/repos/official-scores.js';
 import { getUserById } from '../storage/repos/users.js';
 
 export interface ContestRankingRow extends RankingRow {
@@ -110,6 +111,10 @@ export function freezeContest(db: DatabaseSync, contestId: number): void {
 export function unfreezeContest(db: DatabaseSync, contestId: number): void {
   setContestStatus(db, contestId, 'running');
   db.prepare('UPDATE contests SET unfreeze_at = ? WHERE id = ?').run(Date.now(), contestId);
+  const contest = getContest(db, contestId);
+  if (contest?.mode === 'oi') {
+    seedOfficialScoresFromSubmissions(db, contestId);
+  }
 }
 
 export function endContest(db: DatabaseSync, contestId: number): void {
