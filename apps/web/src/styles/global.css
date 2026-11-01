@@ -1239,3 +1239,9 @@ a.oij-logo:hover {
   margin-top: 12px;
 }
 
+.hack-history {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+

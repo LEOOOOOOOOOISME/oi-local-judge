@@ -547,6 +547,7 @@ export interface OfficialRankingRow {
   rank: number;
   userId: number;
   totalScore: number;
+  hackScore?: number;
   solved: number;
   penalty: number;
   lastAcAt: number | null;
@@ -612,7 +613,8 @@ export type HackStatus =
   | 'success'
   | 'failed'
   | 'invalid'
-  | 'unjudgeable';
+  | 'unjudgeable'
+  | 'promoted';
 
 export interface HackTarget {
   id: number;
@@ -642,10 +644,21 @@ export interface HackJob {
   judged_at: number | null;
 }
 
+export interface HackHistoryItem {
+  id: number;
+  hackerId: number;
+  targetSubmissionId: number;
+  status: HackStatus;
+  verdict: Verdict | null;
+  message: string;
+  createdAt: number;
+}
+
 /** Phase A：排名规则配置与自定义插件。 */
 export interface ContestRankingRuleConfig {
   preset?: string;
   tie?: 'same-rank' | 'none';
+  hackWindowMinutes?: number;
   cfLike?: { decay: number };
 }
 
