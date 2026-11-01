@@ -82,6 +82,9 @@ export interface SubmissionDto {
   message?: string;
   createdAt: string;
   judgedAt: string | null;
+  hackedAt?: string | null;
+  hackedBy?: number | null;
+  hackId?: number | null;
   code?: string;
   results?: TestResultDto[];
 }
