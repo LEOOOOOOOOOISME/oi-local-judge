@@ -338,6 +338,7 @@ export interface Contest {
   unfreeze_at: number | null;
   status: string;
   rules_json: string;
+  archived_at?: number | null;
 }
 
 /** GET /api/contests/:id 返回的比赛题目（含每题分值）。 */
@@ -356,6 +357,86 @@ export interface ContestDetail {
   contest: Contest;
   problems: ContestDetailProblem[];
   participantCount: number;
+}
+
+/** Phase A：比赛批量导入、名单与归档。 */
+export type ContestBatchMode = 'overwrite' | 'merge' | 'fill';
+
+export type ContestBatchStatus =
+  | 'draft'
+  | 'ready'
+  | 'failed'
+  | 'published'
+  | 'discarded';
+
+export interface ContestBatchMeta {
+  unknownUsers: string[];
+  unresolvedProblems: string[];
+  ignoredFiles: string[];
+}
+
+export interface ContestBatchItem {
+  student: string;
+  userId: number | null;
+  sourcePath: string;
+  problemId: number | null;
+  problemTitle: string | null;
+  submissionId?: number | null;
+  status: SubmissionStatus | 'missing';
+  verdict: Verdict | null;
+  score: number;
+  timeMs: number;
+  memoryKb: number;
+}
+
+export interface ContestBatchUploadResult {
+  id: number;
+  count: number;
+  items: Array<{ student: string; problemId: number; submissionId: number }>;
+  unknownUsers: string[];
+  unresolvedProblems: string[];
+}
+
+export interface ContestBatchDetail {
+  id: number;
+  contestId: number;
+  status: ContestBatchStatus;
+  mode: ContestBatchMode;
+  studentLevel: number;
+  problemLevel: number;
+  problemMap: Record<string, number>;
+  meta: ContestBatchMeta;
+  items: ContestBatchItem[];
+}
+
+export interface ContestBatchPreviewRow {
+  student: string;
+  userId: number | null;
+  problemId: number | null;
+  problemTitle: string | null;
+  currentScore: number;
+  currentVerdict: string | null;
+  batchScore: number;
+  batchVerdict: string | null;
+  afterScore: number;
+}
+
+export interface ContestBatchPreview {
+  mode: ContestBatchMode;
+  rows: ContestBatchPreviewRow[];
+  changed: number;
+}
+
+export interface ContestBatchPublishResult {
+  id: number;
+  published: number;
+  mode: ContestBatchMode;
+}
+
+export interface ContestParticipantImportResult {
+  added: string[];
+  skipped: string[];
+  unknown: string[];
 }
 
 /** Phase 1D 管理端：程序资产。 */

@@ -54,6 +54,11 @@ const AdminContestConsolePage = lazy(() =>
     default: module.AdminContestConsolePage,
   })),
 );
+const AdminContestBatchPage = lazy(() =>
+  import('./pages/AdminContestBatchPage').then((module) => ({
+    default: module.AdminContestBatchPage,
+  })),
+);
 const AdminUsersPage = lazy(() =>
   import('./pages/AdminUsersPage').then((module) => ({ default: module.AdminUsersPage })),
 );
@@ -145,6 +150,14 @@ export function AppRoutes() {
           element={
             <ContestAdminRoute>
               <AdminContestConsolePage />
+            </ContestAdminRoute>
+          }
+        />
+        <Route
+          path="/admin/contests/:contestId/batch"
+          element={
+            <ContestAdminRoute>
+              <AdminContestBatchPage />
             </ContestAdminRoute>
           }
         />

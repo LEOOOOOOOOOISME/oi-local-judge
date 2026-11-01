@@ -154,6 +154,14 @@ export function apiDelete<T>(
   return apiRequest<T>(path, { ...options, method: 'DELETE' });
 }
 
+export function apiPatch<T>(
+  path: string,
+  body?: unknown,
+  options: Omit<RequestOptions, 'method' | 'body' | 'rawBody'> = {},
+): Promise<T> {
+  return apiRequest<T>(path, { ...options, method: 'PATCH', body });
+}
+
 /** 文件上传：body 为原始 File/Blob 字节，不做 JSON 序列化。 */
 export function apiUpload<T>(
   path: string,

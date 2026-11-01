@@ -97,3 +97,55 @@
 .extra-time-input {
   width: 92px;
 }
+
+/* Phase A：比赛批量导入 */
+.contest-batch-levels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.contest-batch-summary {
+  font-size: 12px;
+}
+
+.contest-batch-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+}
+
+.contest-batch-preview {
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+}
+
+.batch-after-changed {
+  color: #b45309;
+}
+
+.batch-mapping-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr) 220px;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+}
+
+.batch-mapping-row-unresolved {
+  border-color: #ffccc7;
+  background: #fff2f0;
+}
+
+.batch-mapping-student {
+  font-weight: 500;
+}
+

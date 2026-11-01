@@ -9,6 +9,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Popconfirm,
   Row,
   Select,
@@ -20,19 +21,21 @@ import {
 import type { TableColumnsType } from 'antd';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, apiDelete, apiGet, apiPost, apiPut } from '../api/client';
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../api/client';
 import type {
   AdminUser,
   ClassStatRow,
   ContestDetail,
   ContestDetailProblem,
   ContestParticipant,
+  ContestParticipantImportResult,
   UpdateContestRequest,
 } from '../api/types';
 import { useContestAnnouncements } from '../components/ContestAnnouncements';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { formatDateTime } from '../utils/format';
+import { fetchOfficialRanking } from '../utils/officialRanking';
 import {
   contestModeLabel,
   contestStatusLabel,
@@ -87,6 +90,14 @@ export function AdminContestConsolePage() {
   const [announcementBody, setAnnouncementBody] = useState('');
   const [publishingAnnouncement, setPublishingAnnouncement] = useState(false);
   const [deletingContest, setDeletingContest] = useState(false);
+  const [archiving, setArchiving] = useState(false);
+  const [hiddenOverrides, setHiddenOverrides] = useState<Record<number, boolean>>({});
+  const [togglingHiddenUserId, setTogglingHiddenUserId] = useState<number | null>(null);
+  const [csvModalOpen, setCsvModalOpen] = useState(false);
+  const [csvText, setCsvText] = useState('');
+  const [importingCsv, setImportingCsv] = useState(false);
+  const [csvResult, setCsvResult] = useState<ContestParticipantImportResult | null>(null);
+  const [csvError, setCsvError] = useState<string | null>(null);
 
   const detailQuery = useQuery({
     queryKey: ['contest-detail', contestId],
@@ -110,11 +121,23 @@ export function AdminContestConsolePage() {
     staleTime: 30_000,
   });
   const announcementsQuery = useContestAnnouncements(contestId);
+  const officialQuery = useQuery({
+    queryKey: ['official-ranking', contestId],
+    queryFn: () => fetchOfficialRanking(contestId),
+    enabled: validId,
+    staleTime: 5_000,
+    retry: false,
+  });
 
   const detail = detailQuery.data ?? null;
   const contest = detail?.contest ?? null;
   const problems = detail?.problems ?? [];
   const participants = participantsQuery.data ?? [];
+  const archived = Boolean(contest?.archived_at) || contest?.status === 'archived';
+  const visibleUserIds = new Set((officialQuery.data?.rows ?? []).map((row) => row.userId));
+  const isParticipantHidden = (userId: number) =>
+    hiddenOverrides[userId] ??
+    (officialQuery.data ? !visibleUserIds.has(userId) : false);
 
   useEffect(() => {
     if (!contest) return;
@@ -145,6 +168,7 @@ export function AdminContestConsolePage() {
     void queryClient.invalidateQueries({ queryKey: ['contests'] });
     void queryClient.invalidateQueries({ queryKey: ['admin-class-stats', contestId] });
     void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
+    void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
   };
 
   const saveBasic = async (values: ContestFormValues) => {
@@ -257,8 +281,68 @@ export function AdminContestConsolePage() {
     }
   };
 
-  const saveExtraTime = async (participant: ContestParticipant) => {
-    const value = extraDraft[participant.user_id];
+  const toggleParticipantHidden = async (participant: ContestParticipant) => {
+    const nextHidden = !isParticipantHidden(participant.user_id);
+    setTogglingHiddenUserId(participant.user_id);
+    try {
+      await apiPatch<null>(
+        `/api/admin/contests/${contestId}/participants/${participant.user_id}`,
+        { hidden: nextHidden },
+      );
+      setHiddenOverrides((previous) => ({
+        ...previous,
+        [participant.user_id]: nextHidden,
+      }));
+      message.success(nextHidden ? '已从正式榜隐藏该选手' : '已恢复该选手的正式榜显示');
+      void queryClient.invalidateQueries({ queryKey: ['admin-participants', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '更新名单显示状态失败');
+    } finally {
+      setTogglingHiddenUserId(null);
+    }
+  };
+
+  const importParticipantCsv = async () => {
+    if (!csvText.trim()) {
+      setCsvError('请粘贴名单 CSV');
+      return;
+    }
+    setImportingCsv(true);
+    setCsvError(null);
+    setCsvResult(null);
+    try {
+      const result = await apiPost<ContestParticipantImportResult>(
+        `/api/admin/contests/${contestId}/participants/import`,
+        { csv: csvText },
+      );
+      setCsvResult(result);
+      message.success(`名单导入完成：新增 ${result.added.length} 人，跳过 ${result.skipped.length} 人`);
+      void queryClient.invalidateQueries({ queryKey: ['admin-participants', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
+    } catch (error) {
+      setCsvError(error instanceof Error ? error.message : '名单导入失败');
+    } finally {
+      setImportingCsv(false);
+    }
+  };
+
+  const archiveContest = async () => {
+    setArchiving(true);
+    try {
+      await apiPost<null>(`/api/admin/contests/${contestId}/archive`);
+      message.success('比赛已归档，正式榜进入只读状态');
+      invalidateContest();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '归档比赛失败');
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  const saveExtraTime = async (participant: ContestParticipant) => {    const value = extraDraft[participant.user_id];
     if (!Number.isFinite(value) || value < 0) {
       message.error('加时秒数必须是非负数字');
       return;
@@ -380,8 +464,13 @@ export function AdminContestConsolePage() {
     {
       title: '状态',
       dataIndex: 'status',
-      width: 100,
-      render: (value: string) => <Tag>{value}</Tag>,
+      width: 130,
+      render: (value: string, row) => (
+        <Space size={4} wrap>
+          <Tag>{value}</Tag>
+          {isParticipantHidden(row.user_id) ? <Tag color="red">已隐藏</Tag> : null}
+        </Space>
+      ),
     },
     {
       title: '加时(秒)',
@@ -411,6 +500,20 @@ export function AdminContestConsolePage() {
             保存加时
           </Button>
         </Space>
+      ),
+    },
+    {
+      title: '名单',
+      width: 86,
+      align: 'center',
+      render: (_value, row) => (
+        <Button
+          size="small"
+          loading={togglingHiddenUserId === row.user_id}
+          onClick={() => void toggleParticipantHidden(row)}
+        >
+          {isParticipantHidden(row.user_id) ? '恢复' : '隐藏'}
+        </Button>
       ),
     },
     {
@@ -479,6 +582,7 @@ export function AdminContestConsolePage() {
             <Tag className="mono">#{contest.id}</Tag>
             <Tag color={statusColor}>{contestStatusLabel(status)}</Tag>
             <Tag color="blue">{contestModeLabel(contest.mode)}</Tag>
+            {archived ? <Tag color="red">已归档 · 只读</Tag> : null}
           </>
         }
         subtitle={`开始 ${formatDateTime(contest.start_at)} · 结束 ${formatDateTime(
@@ -492,6 +596,25 @@ export function AdminContestConsolePage() {
             <Link to={`/contest/${contest.id}/ranking`}>
               <Button>榜单</Button>
             </Link>
+            {archived || contest.mode !== 'oi' ? (
+              <Button disabled>批量导入</Button>
+            ) : (
+              <Link to={`/admin/contests/${contest.id}/batch`}>
+                <Button>批量导入</Button>
+              </Link>
+            )}
+            <Popconfirm
+              title="归档这场比赛？"
+              description="归档后正式榜只读，批量导入与再次归档将禁用；此操作不可逆。"
+              okText="归档"
+              cancelText="取消"
+              disabled={archived}
+              onConfirm={() => void archiveContest()}
+            >
+              <Button danger disabled={archived} loading={archiving}>
+                {archived ? '已归档' : '归档比赛'}
+              </Button>
+            </Popconfirm>
             <Link to="/admin/contests">
               <Button>返回列表</Button>
             </Link>
@@ -717,7 +840,21 @@ export function AdminContestConsolePage() {
         <Card
           className="oij-card"
           title="参赛者"
-          extra={<span className="muted">共 {participants.length} 人</span>}
+          extra={
+            <Space>
+              <span className="muted">共 {participants.length} 人</span>
+              <Button
+                size="small"
+                onClick={() => {
+                  setCsvResult(null);
+                  setCsvError(null);
+                  setCsvModalOpen(true);
+                }}
+              >
+                CSV 导入名单
+              </Button>
+            </Space>
+          }
         >
           <div className="participants-add">
             <Select<number[]>
@@ -780,6 +917,51 @@ export function AdminContestConsolePage() {
           )}
         </Card>
       </div>
+
+      <Modal
+        title="CSV 导入参赛名单"
+        open={csvModalOpen}
+        onCancel={() => setCsvModalOpen(false)}
+        okText="导入名单"
+        cancelText="取消"
+        confirmLoading={importingCsv}
+        onOk={() => void importParticipantCsv()}
+      >
+        <div className="stack">
+          <Alert
+            type="info"
+            showIcon
+            message="每行一个已注册用户名；首列作为用户名，支持表头 username。"
+          />
+          <Input.TextArea
+            rows={8}
+            value={csvText}
+            onChange={(event) => setCsvText(event.target.value)}
+            placeholder={'alice\nbob\ncarol,备注'}
+          />
+          {csvError ? <Alert type="error" showIcon message={csvError} /> : null}
+          {csvResult ? (
+            <Alert
+              type="success"
+              showIcon
+              message={`新增 ${csvResult.added.length} 人，跳过 ${csvResult.skipped.length} 人，未知 ${csvResult.unknown.length} 人`}
+              description={
+                <div className="stack">
+                  {csvResult.added.length > 0 ? (
+                    <span>新增：{csvResult.added.join('、')}</span>
+                  ) : null}
+                  {csvResult.skipped.length > 0 ? (
+                    <span>跳过（已在名单）：{csvResult.skipped.join('、')}</span>
+                  ) : null}
+                  {csvResult.unknown.length > 0 ? (
+                    <span>未知用户：{csvResult.unknown.join('、')}</span>
+                  ) : null}
+                </div>
+              }
+            />
+          ) : null}
+        </div>
+      </Modal>
     </div>
   );
 }
