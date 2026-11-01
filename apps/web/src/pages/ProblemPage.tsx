@@ -106,6 +106,7 @@ export function ProblemPage() {
   const [activeHackId, setActiveHackId] = useState<number | null>(null);
   const [hackResult, setHackResult] = useState<HackJob | null>(null);
   const [promotingHackId, setPromotingHackId] = useState<number | null>(null);
+  const [revertingHackId, setRevertingHackId] = useState<number | null>(null);
   const [code, setCode] = useState<string>(
     () => (validProblem ? readDraft(problemId) : null) ?? DEFAULT_CODE,
   );
@@ -633,6 +634,7 @@ export function ProblemPage() {
     invalid: '输入无效',
     unjudgeable: '无法评测',
     promoted: 'HACKED',
+    reverted: '已撤销',
   };
   const hackStatusColor: Record<string, string> = {
     queued: 'blue',
@@ -642,6 +644,7 @@ export function ProblemPage() {
     invalid: 'orange',
     unjudgeable: 'default',
     promoted: 'red',
+    reverted: 'default',
   };
 
   const promoteHack = async (hackId: number) => {
@@ -661,6 +664,26 @@ export function ProblemPage() {
       message.error(error instanceof Error ? error.message : '强制晋升失败');
     } finally {
       setPromotingHackId(null);
+    }
+  };
+
+  const revertHack = async (hackId: number) => {
+    if (contestId === null) return;
+    setRevertingHackId(hackId);
+    try {
+      await apiPost<{ id: number; status: string }>(
+        `/api/admin/contests/${contestId}/hacks/${hackId}/revert`,
+      );
+      message.success('已撤销 HACKED，正式分已重算');
+      void queryClient.invalidateQueries({ queryKey: ['hack-history', contestId, problemId] });
+      void queryClient.invalidateQueries({ queryKey: ['hack-targets', contestId, problemId] });
+      void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['correction-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['submissions'] });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '撤销 HACKED 失败');
+    } finally {
+      setRevertingHackId(null);
     }
   };
 
@@ -720,21 +743,40 @@ export function ProblemPage() {
       ? [
           {
             title: '',
-            width: 110,
-            render: (_value: unknown, row: HackHistoryItem) =>
-              row.status === 'failed' || row.status === 'queued' ? (
-                <Popconfirm
-                  title="强制晋升为 HACKED？"
-                  description="会标记目标提交为 HACKED 并重算正式分。"
-                  okText="晋升"
-                  cancelText="取消"
-                  onConfirm={() => void promoteHack(row.id)}
-                >
-                  <Button size="small" danger loading={promotingHackId === row.id}>
-                    强制晋升
-                  </Button>
-                </Popconfirm>
-              ) : null,
+            width: 120,
+            render: (_value: unknown, row: HackHistoryItem) => {
+              if (row.status === 'failed' || row.status === 'queued') {
+                return (
+                  <Popconfirm
+                    title="强制晋升为 HACKED？"
+                    description="会标记目标提交为 HACKED 并重算正式分。"
+                    okText="晋升"
+                    cancelText="取消"
+                    onConfirm={() => void promoteHack(row.id)}
+                  >
+                    <Button size="small" danger loading={promotingHackId === row.id}>
+                      强制晋升
+                    </Button>
+                  </Popconfirm>
+                );
+              }
+              if (row.status === 'success' || row.status === 'promoted') {
+                return (
+                  <Popconfirm
+                    title="撤销 HACKED？"
+                    description="清除目标提交的 HACKED 状态并按剩余提交重算正式分。"
+                    okText="撤销"
+                    cancelText="取消"
+                    onConfirm={() => void revertHack(row.id)}
+                  >
+                    <Button size="small" loading={revertingHackId === row.id}>
+                      撤销
+                    </Button>
+                  </Popconfirm>
+                );
+              }
+              return null;
+            },
           },
         ]
       : []),

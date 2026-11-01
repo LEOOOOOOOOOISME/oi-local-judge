@@ -625,7 +625,8 @@ export type HackStatus =
   | 'failed'
   | 'invalid'
   | 'unjudgeable'
-  | 'promoted';
+  | 'promoted'
+  | 'reverted';
 
 export interface HackTarget {
   id: number;
