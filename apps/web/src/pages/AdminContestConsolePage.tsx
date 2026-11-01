@@ -29,13 +29,16 @@ import type {
   ContestDetailProblem,
   ContestParticipant,
   ContestParticipantImportResult,
+  ContestRankingRuleConfig,
+  RankingPlugin,
   UpdateContestRequest,
 } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
 import { useContestAnnouncements } from '../components/ContestAnnouncements';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { formatDateTime } from '../utils/format';
-import { fetchOfficialRanking } from '../utils/officialRanking';
+import { fetchOfficialRanking, presetLabel } from '../utils/officialRanking';
 import {
   contestModeLabel,
   contestStatusLabel,
@@ -73,6 +76,7 @@ export function AdminContestConsolePage() {
   const contestId = Number(contestIdParam);
   const validId = Number.isInteger(contestId) && contestId > 0;
   const { message } = App.useApp();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [form] = Form.useForm<ContestFormValues>();
@@ -98,6 +102,11 @@ export function AdminContestConsolePage() {
   const [importingCsv, setImportingCsv] = useState(false);
   const [csvResult, setCsvResult] = useState<ContestParticipantImportResult | null>(null);
   const [csvError, setCsvError] = useState<string | null>(null);
+  const [rankingPreset, setRankingPreset] = useState('oi');
+  const [rankingTie, setRankingTie] = useState<'same-rank' | 'none'>('same-rank');
+  const [rankingDecay, setRankingDecay] = useState(0.5);
+  const [savingRanking, setSavingRanking] = useState(false);
+  const [rankingError, setRankingError] = useState<string | null>(null);
 
   const detailQuery = useQuery({
     queryKey: ['contest-detail', contestId],
@@ -128,6 +137,16 @@ export function AdminContestConsolePage() {
     staleTime: 5_000,
     retry: false,
   });
+  const rankingConfigQuery = useQuery({
+    queryKey: ['ranking-config', contestId],
+    queryFn: () => apiGet<ContestRankingRuleConfig>(`/api/admin/contests/${contestId}/ranking-config`),
+    enabled: validId,
+  });
+  const rankingPluginsQuery = useQuery({
+    queryKey: ['ranking-plugins'],
+    queryFn: () => apiGet<RankingPlugin[]>('/api/admin/ranking-plugins'),
+    enabled: validId && user?.role === 'admin',
+  });
 
   const detail = detailQuery.data ?? null;
   const contest = detail?.contest ?? null;
@@ -138,6 +157,26 @@ export function AdminContestConsolePage() {
   const isParticipantHidden = (userId: number) =>
     hiddenOverrides[userId] ??
     (officialQuery.data ? !visibleUserIds.has(userId) : false);
+  const enabledPlugins = (rankingPluginsQuery.data ?? []).filter((plugin) => plugin.enabled);
+  const builtinPresetOptions = [
+    { value: 'oi', label: 'OI' },
+    { value: 'ioi', label: 'IOI' },
+    { value: 'acm', label: 'ACM' },
+    { value: 'cf-like', label: 'CF-like' },
+  ];
+  const rankingPresetOptions = [
+    ...builtinPresetOptions,
+    ...enabledPlugins.map((plugin) => ({
+      value: `plugin:${plugin.name}`,
+      label: `插件：${plugin.name}`,
+    })),
+  ];
+  if (!rankingPresetOptions.some((option) => option.value === rankingPreset)) {
+    rankingPresetOptions.push({
+      value: rankingPreset,
+      label: presetLabel(rankingPreset),
+    });
+  }
 
   useEffect(() => {
     if (!contest) return;
@@ -149,6 +188,16 @@ export function AdminContestConsolePage() {
       freezeAt: toLocalDateTimeInput(contest.freeze_at),
     });
   }, [contest, form]);
+
+  useEffect(() => {
+    if (!contest || !rankingConfigQuery.data) return;
+    const config = rankingConfigQuery.data;
+    const fallback =
+      contest.mode === 'acm' ? 'acm' : contest.mode === 'ioi' ? 'ioi' : 'oi';
+    setRankingPreset(config.preset ?? fallback);
+    setRankingTie(config.tie ?? 'same-rank');
+    setRankingDecay(config.cfLike?.decay ?? 0.5);
+  }, [contest, rankingConfigQuery.data]);
 
   useEffect(() => {
     if (!detail) return;
@@ -339,6 +388,31 @@ export function AdminContestConsolePage() {
       message.error(error instanceof Error ? error.message : '归档比赛失败');
     } finally {
       setArchiving(false);
+    }
+  };
+
+  const saveRankingConfig = async () => {
+    setSavingRanking(true);
+    setRankingError(null);
+    try {
+      await apiPut<ContestRankingRuleConfig>(
+        `/api/admin/contests/${contestId}/ranking-config`,
+        {
+          preset: rankingPreset,
+          tie: rankingTie,
+          cfLike: { decay: rankingDecay },
+        },
+      );
+      message.success('排名规则已保存');
+      void queryClient.invalidateQueries({ queryKey: ['ranking-config', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
+    } catch (error) {
+      const text = error instanceof Error ? error.message : '保存排名规则失败';
+      setRankingError(text);
+      message.error(text);
+    } finally {
+      setSavingRanking(false);
     }
   };
 
@@ -769,6 +843,69 @@ export function AdminContestConsolePage() {
                 结束
               </Button>
             </Space>
+          </div>
+        </Card>
+
+        <Card
+          className="oij-card"
+          title="排名规则"
+          extra={
+            <Button type="primary" loading={savingRanking} onClick={() => void saveRankingConfig()}>
+              保存排名规则
+            </Button>
+          }
+        >
+          <div className="stack">
+            {officialQuery.data?.pluginError ? (
+              <Alert
+                type="error"
+                showIcon
+                message="排名插件加载失败，当前已回退 OI"
+                description={officialQuery.data.pluginError}
+              />
+            ) : null}
+            {rankingError ? <Alert type="error" showIcon message={rankingError} /> : null}
+            <div className="ranking-config-grid">
+              <div className="batch-field">
+                <span className="muted">排名预设</span>
+                <Select
+                  value={rankingPreset}
+                  options={rankingPresetOptions}
+                  onChange={(value: string) => setRankingPreset(value)}
+                  style={{ width: 220 }}
+                />
+              </div>
+              <div className="batch-field">
+                <span className="muted">并列规则</span>
+                <Select
+                  value={rankingTie}
+                  options={[
+                    { value: 'same-rank', label: '同分同名次' },
+                    { value: 'none', label: '顺序名次' },
+                  ]}
+                  onChange={(value: 'same-rank' | 'none') => setRankingTie(value)}
+                  style={{ width: 180 }}
+                />
+              </div>
+              <div className="batch-field">
+                <span className="muted">CF-like 衰减</span>
+                <InputNumber
+                  min={0}
+                  max={2}
+                  step={0.1}
+                  precision={1}
+                  value={rankingDecay}
+                  onChange={(value) =>
+                    setRankingDecay(typeof value === 'number' ? value : 0.5)
+                  }
+                  style={{ width: 150 }}
+                />
+              </div>
+            </div>
+            <div className="batch-level-hint muted">
+              当前生效：{presetLabel(officialQuery.data?.preset ?? rankingPreset)}。
+              自定义插件需先在“排名插件”页上传并启用，重启服务后才会加载；插件失败会自动回退 OI。
+            </div>
           </div>
         </Card>
 

@@ -1,4 +1,4 @@
-import { Alert, App, Button, Card, Empty, Space, Table, Tag } from 'antd';
+﻿import { Alert, App, Button, Card, Empty, Space, Table, Tag } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
@@ -19,7 +19,7 @@ import {
 import {
   buildOfficialRankingCsv,
   fetchOfficialRanking,
-  PRESET_LABEL,
+  presetLabel,
 } from '../utils/officialRanking';
 import { downloadCsv } from '../utils/ranking';
 
@@ -187,7 +187,7 @@ export function ContestRankingPage() {
         title={`${contest.name} · 正式榜`}
         tags={
           <>
-            <Tag color="geekblue">{PRESET_LABEL[preset]}</Tag>
+            <Tag color="geekblue">{presetLabel(preset)}</Tag>
             <Tag>{contestModeLabel(contest.mode)}</Tag>
             <Tag color={PHASE_COLOR[phase]}>{CONTEST_PHASE_LABEL[phase]}</Tag>
             {archived ? <Tag color="red">已归档 · 只读</Tag> : null}
@@ -196,8 +196,8 @@ export function ContestRankingPage() {
         }
         subtitle={
           isAcm
-            ? `${PRESET_LABEL[preset]}：按通过题数与罚时排序，正式榜数据只读。`
-            : `${PRESET_LABEL[preset]}：每题取正式得分，总分降序；正式榜数据只读。`
+            ? `${presetLabel(preset)}：按通过题数与罚时排序，正式榜数据只读。`
+            : `${presetLabel(preset)}：每题取正式得分，总分降序；正式榜数据只读。`
         }
         extra={
           <Space>
