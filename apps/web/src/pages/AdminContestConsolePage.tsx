@@ -31,6 +31,7 @@ import type {
   ContestParticipantImportResult,
   ContestRankingRuleConfig,
   ContestLockRecord,
+  HackAuditItem,
   RankingPlugin,
   UpdateContestRequest,
 } from '../api/types';
@@ -97,6 +98,10 @@ export function AdminContestConsolePage() {
   const [deletingContest, setDeletingContest] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [releasingOfficialFreeze, setReleasingOfficialFreeze] = useState(false);
+  const [hackAuditFilter, setHackAuditFilter] = useState<
+    'all' | 'success' | 'failed' | 'invalid' | 'pending'
+  >('all');
+  const [promotingAuditHackId, setPromotingAuditHackId] = useState<number | null>(null);
   const [hiddenOverrides, setHiddenOverrides] = useState<Record<number, boolean>>({});
   const [togglingHiddenUserId, setTogglingHiddenUserId] = useState<number | null>(null);
   const [csvModalOpen, setCsvModalOpen] = useState(false);
@@ -160,6 +165,12 @@ export function AdminContestConsolePage() {
     enabled: validId,
     refetchInterval: 5_000,
   });
+  const hackAuditQuery = useQuery({
+    queryKey: ['admin-hack-audit', contestId],
+    queryFn: () => apiGet<HackAuditItem[]>(`/api/admin/contests/${contestId}/hacks`),
+    enabled: validId,
+    refetchInterval: 10_000,
+  });
 
   const detail = detailQuery.data ?? null;
   const contest = detail?.contest ?? null;
@@ -177,6 +188,30 @@ export function AdminContestConsolePage() {
           hour12: false,
         })
       : null;
+  const hackAuditRows = hackAuditQuery.data ?? [];
+  const hackAuditStats = {
+    total: hackAuditRows.length,
+    success: hackAuditRows.filter(
+      (row) => row.status === 'success' || row.status === 'promoted',
+    ).length,
+    failed: hackAuditRows.filter((row) => row.status === 'failed').length,
+    invalid: hackAuditRows.filter(
+      (row) => row.status === 'invalid' || row.status === 'unjudgeable',
+    ).length,
+  };
+  const filteredHackAuditRows = hackAuditRows.filter((row) => {
+    if (hackAuditFilter === 'success') {
+      return row.status === 'success' || row.status === 'promoted';
+    }
+    if (hackAuditFilter === 'failed') return row.status === 'failed';
+    if (hackAuditFilter === 'invalid') {
+      return row.status === 'invalid' || row.status === 'unjudgeable';
+    }
+    if (hackAuditFilter === 'pending') {
+      return row.status === 'queued' || row.status === 'judging';
+    }
+    return true;
+  });
   const visibleUserIds = new Set((officialQuery.data?.rows ?? []).map((row) => row.userId));
   const isParticipantHidden = (userId: number) =>
     hiddenOverrides[userId] ??
@@ -431,6 +466,23 @@ export function AdminContestConsolePage() {
       message.error(error instanceof Error ? error.message : '解除官方冻结失败');
     } finally {
       setReleasingOfficialFreeze(false);
+    }
+  };
+
+  const promoteAuditHack = async (hackId: number) => {
+    setPromotingAuditHackId(hackId);
+    try {
+      await apiPost<{ id: number; status: string }>(
+        `/api/admin/contests/${contestId}/hacks/${hackId}/promote`,
+      );
+      message.success('已强制晋升为 HACKED');
+      void queryClient.invalidateQueries({ queryKey: ['admin-hack-audit', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '强制晋升失败');
+    } finally {
+      setPromotingAuditHackId(null);
     }
   };
 
@@ -731,6 +783,132 @@ export function AdminContestConsolePage() {
           </Popconfirm>
         );
       },
+    },
+  ];
+
+  const auditStatusLabel: Record<string, string> = {
+    queued: '排队中',
+    judging: '评测中',
+    success: '成功',
+    failed: '失败',
+    invalid: '非法',
+    unjudgeable: '无法判定',
+    promoted: '已晋升',
+  };
+  const auditStatusColor: Record<string, string> = {
+    queued: 'blue',
+    judging: 'blue',
+    success: 'green',
+    failed: 'default',
+    invalid: 'orange',
+    unjudgeable: 'default',
+    promoted: 'green',
+  };
+
+  const hackAuditColumns: TableColumnsType<HackAuditItem> = [
+    {
+      title: '时间',
+      dataIndex: 'created_at',
+      width: 158,
+      render: (value: number) => <span className="mono">{formatDateTime(value)}</span>,
+    },
+    {
+      title: 'Hacker',
+      dataIndex: 'hacker_username',
+      width: 130,
+      render: (value: string | null, row) => (
+        <span>
+          {value ?? `用户 #${row.hacker_id}`}
+          <span className="muted mono"> #{row.hacker_id}</span>
+        </span>
+      ),
+    },
+    {
+      title: '目标选手',
+      dataIndex: 'target_username',
+      width: 150,
+      render: (value: string | null, row) => (
+        <span>
+          {row.target_real_name ?? value ?? '—'}
+          <span className="muted"> @{value ?? '—'}</span>
+        </span>
+      ),
+    },
+    {
+      title: '题目',
+      dataIndex: 'problem_title',
+      width: 150,
+      render: (value: string, row) => (
+        <span>
+          {value}
+          <span className="muted mono"> #{row.problem_id}</span>
+        </span>
+      ),
+    },
+    {
+      title: '目标结果',
+      dataIndex: 'target_verdict',
+      width: 110,
+      render: (value: HackAuditItem['target_verdict'], row) => (
+        <span className="mono">
+          {value ?? '—'} / {row.target_score ?? 0} 分
+        </span>
+      ),
+    },
+    {
+      title: 'Hack 状态',
+      dataIndex: 'status',
+      width: 112,
+      render: (value: HackAuditItem['status']) =>
+        value === 'success' || value === 'promoted' ? (
+          <span className="hack-hacked-label">HACKED</span>
+        ) : (
+          <Tag color={auditStatusColor[value] ?? 'default'}>
+            {auditStatusLabel[value] ?? value}
+          </Tag>
+        ),
+    },
+    {
+      title: 'Hack 结果',
+      dataIndex: 'verdict',
+      width: 92,
+      render: (value: HackAuditItem['verdict']) =>
+        value ? <Tag>{value}</Tag> : <span className="muted">—</span>,
+    },
+    {
+      title: '信息',
+      dataIndex: 'message',
+      render: (value: string) =>
+        value ? (
+          <span className="test-message" title={value}>
+            {value}
+          </span>
+        ) : (
+          <span className="muted">—</span>
+        ),
+    },
+    {
+      title: '',
+      width: 110,
+      align: 'center',
+      render: (_value, row) =>
+        row.status === 'failed' || row.status === 'queued' ? (
+          <Popconfirm
+            title="强制晋升为 HACKED？"
+            description="会标记目标提交为 HACKED 并重算正式分。"
+            okText="晋升"
+            cancelText="取消"
+            onConfirm={() => void promoteAuditHack(row.id)}
+          >
+            <Button
+              size="small"
+              danger
+              loading={promotingAuditHackId === row.id}
+            >
+              强制晋升
+            </Button>
+          </Popconfirm>
+        ) : null,
     },
   ];
 
@@ -1247,6 +1425,53 @@ export function AdminContestConsolePage() {
               dataSource={locksQuery.data ?? []}
               pagination={false}
               locale={{ emptyText: '暂无锁定' }}
+            />
+          )}
+        </Card>
+
+        <Card
+          className="oij-card"
+          title="Hack 审计"
+          extra={<span className="muted">{hackAuditStats.total} 条 · 每 10s 刷新</span>}
+        >
+          <Space wrap size={[8, 8]} style={{ marginBottom: 12 }}>
+            <Tag>总 Hack {hackAuditStats.total}</Tag>
+            <Tag color="green">成功 {hackAuditStats.success}</Tag>
+            <Tag>失败 {hackAuditStats.failed}</Tag>
+            <Tag color="orange">非法/无法判定 {hackAuditStats.invalid}</Tag>
+            <Select
+              size="small"
+              value={hackAuditFilter}
+              options={[
+                { value: 'all', label: '全部' },
+                { value: 'success', label: '成功' },
+                { value: 'failed', label: '失败' },
+                { value: 'invalid', label: '非法/无法判定' },
+                { value: 'pending', label: '判断中' },
+              ]}
+              onChange={(value) => setHackAuditFilter(value)}
+              style={{ width: 150 }}
+            />
+          </Space>
+          {hackAuditQuery.isPending ? (
+            <div className="inline-loading">
+              <Spin />
+            </div>
+          ) : hackAuditQuery.isError ? (
+            <ErrorResult
+              error={hackAuditQuery.error}
+              onRetry={() => void hackAuditQuery.refetch()}
+            />
+          ) : (
+            <Table<HackAuditItem>
+              className="oij-table"
+              rowKey="id"
+              size="small"
+              columns={hackAuditColumns}
+              dataSource={filteredHackAuditRows}
+              pagination={false}
+              scroll={{ x: 1180 }}
+              locale={{ emptyText: '暂无 Hack 记录' }}
             />
           )}
         </Card>

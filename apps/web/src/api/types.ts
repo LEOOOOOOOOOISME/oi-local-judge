@@ -665,6 +665,25 @@ export interface HackHistoryItem {
   createdAt: number;
 }
 
+export interface HackAuditItem {
+  id: number;
+  contest_id: number;
+  problem_id: number;
+  hacker_id: number;
+  target_submission_id: number;
+  status: HackStatus;
+  verdict: Verdict | null;
+  message: string;
+  created_at: number;
+  judged_at: number | null;
+  hacker_username: string | null;
+  target_username: string | null;
+  target_real_name: string | null;
+  problem_title: string;
+  target_verdict: Verdict | null;
+  target_score: number | null;
+}
+
 /** Phase A：排名规则配置与自定义插件。 */
 export interface ContestRankingRuleConfig {
   preset?: string;
