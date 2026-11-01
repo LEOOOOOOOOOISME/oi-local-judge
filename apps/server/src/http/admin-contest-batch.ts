@@ -394,6 +394,9 @@ export function registerContestBatchRoutes(
     if (contest.status === 'frozen') {
       return reply.code(409).send({ ok: false, error: { code: 'CONTEST_FROZEN' } });
     }
+    if (contest.official_frozen_until !== null && contest.official_frozen_until > Date.now()) {
+      return reply.code(409).send({ ok: false, error: { code: 'OFFICIAL_FROZEN' } });
+    }
     const mode = (request.body?.mode ?? 'merge') as BatchMode;
     if (!MODES.has(mode)) return reply.code(400).send({ ok: false, error: { code: 'BAD_MODE' } });
     const loaded = loadContestBatch(options.db, contestId, batchId);

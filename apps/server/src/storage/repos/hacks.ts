@@ -47,6 +47,38 @@ export function getLock(
   );
 }
 
+export function unlockProblem(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+  problemId: number,
+): void {
+  db.prepare(
+    'DELETE FROM contest_problem_locks WHERE contest_id = ? AND user_id = ? AND problem_id = ?',
+  ).run(contestId, userId, problemId);
+}
+
+export function listLocks(db: DatabaseSync, contestId: number) {
+  return db
+    .prepare(
+      `SELECT l.contest_id, l.user_id, l.problem_id, l.locked_at,
+              u.username, u.real_name, p.title AS problem_title
+       FROM contest_problem_locks l
+       JOIN users u ON u.id = l.user_id
+       JOIN problems p ON p.id = l.problem_id
+       WHERE l.contest_id = ? ORDER BY l.locked_at DESC`,
+    )
+    .all(contestId) as unknown as Array<{
+    contest_id: number;
+    user_id: number;
+    problem_id: number;
+    locked_at: number;
+    username: string;
+    real_name: string | null;
+    problem_title: string;
+  }>;
+}
+
 export function createHack(
   db: DatabaseSync,
   input: {

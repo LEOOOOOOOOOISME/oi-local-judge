@@ -7,7 +7,7 @@ import { submitSource } from '../src/services/submissions.js';
 import { hashPassword } from '../src/security/password.js';
 import { signSession } from '../src/security/session.js';
 import { upsertAsset } from '../src/storage/repos/assets.js';
-import { createContest } from '../src/storage/repos/contests.js';
+import { createContest, getContest } from '../src/storage/repos/contests.js';
 import { getOfficialRanking } from '../src/services/official-ranking.js';
 import { upsertOfficialScore, getOfficialScore } from '../src/storage/repos/official-scores.js';
 import { createProblem } from '../src/storage/repos/problems.js';
@@ -123,6 +123,10 @@ describe('contest hack', () => {
   });
 
   it('requires a lock, reveals source, and marks a failed target as HACKED', async () => {
+    db.prepare('UPDATE contests SET ranking_rule_json = ? WHERE id = ?').run(
+      JSON.stringify({ officialFreezeMinutesAfterHack: 30 }),
+      contestId,
+    );
     const beforeLock = await app.inject({
       method: 'GET',
       url: `/api/contests/${contestId}/problems/${problemId}/submissions/${targetSubmissionId}/source`,
@@ -182,6 +186,7 @@ describe('contest hack', () => {
     const ranking = await getOfficialRanking(db, contestId, root);
     expect(ranking?.rows.find((row) => row.userId === targetId)?.hackedCount).toBe(1);
     expect(ranking?.rows.find((row) => row.userId === hackerId)?.successfulHacks).toBe(1);
+    expect(getContest(db, contestId)!.official_frozen_until).toBeGreaterThan(Date.now());
   }, 30_000);
 
   it('rejects invalid hack input before touching the target', async () => {

@@ -37,6 +37,7 @@ export interface OfficialRankingResult {
   archived: boolean;
   preset: string;
   pluginError?: string;
+  officialFrozenUntil: number | null;
 }
 
 function parseConfig(contest: ContestRow): {
@@ -203,6 +204,7 @@ export async function getOfficialRanking(
     config: parsed.config,
     archived: contest.archived_at !== null,
     preset: parsed.rawPreset,
+    officialFrozenUntil: contest.official_frozen_until,
     ...(pluginError ? { pluginError } : {}),
   };
 }

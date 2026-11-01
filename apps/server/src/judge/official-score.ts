@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { getContest } from '../storage/repos/contests.js';
 import { getOfficialScore, upsertOfficialScore } from '../storage/repos/official-scores.js';
 import { getSubmission } from '../storage/repos/submissions.js';
+import { isOfficialFrozen } from '../services/official-freeze.js';
 
 /**
  * Mirrors a finished in-contest online submission into the OI official cell.
@@ -16,6 +17,7 @@ export function syncOnlineOfficialScore(db: DatabaseSync, submissionId: number):
   const contest = getContest(db, submission.contest_id);
   if (!contest || contest.mode !== 'oi') return;
   if (contest.archived_at !== null || contest.status === 'frozen') return;
+  if (isOfficialFrozen(contest)) return;
   if (contest.end_at !== null && submission.created_at > contest.end_at) return;
 
   const current = getOfficialScore(
