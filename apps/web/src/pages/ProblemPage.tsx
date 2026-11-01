@@ -205,6 +205,14 @@ export function ProblemPage() {
       Boolean(user) &&
       (hackLocked || canModerate),
     retry: false,
+    refetchInterval: (query) => {
+      const rows = query.state.data;
+      return rows?.some(
+        (row) => row.status === 'queued' || row.status === 'judging',
+      )
+        ? 2_000
+        : false;
+    },
   });
 
   useEffect(() => {
@@ -682,7 +690,7 @@ export function ProblemPage() {
       width: 120,
       render: (value: HackHistoryItem['status']) =>
         value === 'success' || value === 'promoted' ? (
-          <Tag color="red">HACKED</Tag>
+          <span className="hack-hacked-label">HACKED</span>
         ) : (
           <Tag color={hackStatusColor[value] ?? 'default'}>
             {hackStatusLabel[value] ?? value}

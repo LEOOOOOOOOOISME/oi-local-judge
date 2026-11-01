@@ -1256,3 +1256,15 @@ a.oij-logo:hover {
   font-weight: 600;
 }
 
+.hack-hacked-label {
+  display: inline-block;
+  padding: 0 6px;
+  border: 1px solid #ffa39e;
+  border-radius: 3px;
+  background: #fff1f0;
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 18px;
+}
+

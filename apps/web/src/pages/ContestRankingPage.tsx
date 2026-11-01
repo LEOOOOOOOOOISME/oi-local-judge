@@ -73,6 +73,16 @@ export function ContestRankingPage() {
   const isAcm = preset === 'acm' || preset === 'cf-like';
   const freezeAt = data?.config.freezeAt ?? null;
   const frozen = phase === 'frozen' || freezeAt !== null;
+  const officialFrozenUntil = data?.officialFrozenUntil ?? null;
+  const officialFrozen = officialFrozenUntil !== null && officialFrozenUntil > now;
+  const officialFrozenText =
+    officialFrozenUntil !== null
+      ? new Date(officialFrozenUntil).toLocaleTimeString('zh-CN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        })
+      : null;
 
   if (!validId) {
     return <ErrorResult error={new Error('无效的比赛编号')} />;
@@ -277,6 +287,15 @@ export function ContestRankingPage() {
                 ? formatDateTime(contest.freeze_at)
                 : '—'
           } 过滤，封榜后的提交暂不计入。`}
+        />
+      ) : null}
+      {officialFrozen ? (
+        <Alert
+          className="ranking-freeze"
+          type="warning"
+          showIcon
+          message={`官方分冻结至 ${officialFrozenText}（Hack 审核窗口）`}
+          description="冻结期间正式分不更新，批量发布会被拒绝；窗口结束后恢复。"
         />
       ) : null}
 
