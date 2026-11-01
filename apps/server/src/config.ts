@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -39,9 +39,25 @@ export function detectGxx(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
-  const dataDir =
-    env.OIJ_DATA_DIR ??
-    join(env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'OiJudge');
+  // Keep development/runtime data inside the repository when the server is
+  // launched from the project root. This avoids writes under %LOCALAPPDATA%,
+  // which may be blocked by sandbox/AV policies for the native runner.
+  let dataDir = env.OIJ_DATA_DIR;
+  if (!dataDir) {
+    const packagePath = join(process.cwd(), 'package.json');
+    let repoRoot: string | null = null;
+    if (existsSync(packagePath)) {
+      try {
+        const pkg = JSON.parse(readFileSync(packagePath, 'utf8')) as { name?: string };
+        if (pkg.name === 'oi-local-judge') repoRoot = process.cwd();
+      } catch {
+        repoRoot = null;
+      }
+    }
+    dataDir = repoRoot
+      ? join(repoRoot, 'runtime')
+      : join(env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'OiJudge');
+  }
   return {
     host: env.OIJ_HOST ?? '0.0.0.0',
     port: Number(env.OIJ_PORT ?? 8787),
