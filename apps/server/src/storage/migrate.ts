@@ -77,6 +77,31 @@ CREATE TABLE IF NOT EXISTS contest_participants(
   status TEXT NOT NULL DEFAULT 'accepted', extra_time INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY(contest_id, user_id)
 );
+CREATE TABLE IF NOT EXISTS contest_official_scores(
+  id INTEGER PRIMARY KEY,
+  contest_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  score INTEGER NOT NULL DEFAULT 0,
+  verdict TEXT NOT NULL DEFAULT 'WA',
+  source TEXT NOT NULL DEFAULT 'online',
+  batch_id INTEGER,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(contest_id, user_id, problem_id)
+);
+CREATE INDEX IF NOT EXISTS idx_official_contest_user
+  ON contest_official_scores(contest_id, user_id);
+CREATE INDEX IF NOT EXISTS idx_official_contest_problem
+  ON contest_official_scores(contest_id, problem_id);
+CREATE TABLE IF NOT EXISTS ranking_plugins(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  js_path TEXT NOT NULL,
+  sha256 TEXT NOT NULL,
+  enabled INTEGER NOT NULL DEFAULT 0,
+  uploaded_by INTEGER NOT NULL,
+  uploaded_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS batch_jobs(
   id INTEGER PRIMARY KEY, problem_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'running',
   student_level INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
@@ -134,6 +159,20 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'problems', 'compare_mode', "TEXT NOT NULL DEFAULT 'ignore-trailing'");
   ensureColumn(db, 'problems', 'objective_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'batch_items', 'problem_id', 'INTEGER');
+  ensureColumn(db, 'batch_items', 'score', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'batch_items', 'verdict', 'TEXT');
+  ensureColumn(db, 'batch_items', 'time_ms', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'batch_items', 'memory_kb', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn(db, 'batch_jobs', 'contest_id', 'INTEGER');
+  ensureColumn(db, 'batch_jobs', 'mode', 'TEXT');
+  ensureColumn(db, 'batch_jobs', 'problem_level', 'INTEGER');
+  ensureColumn(db, 'batch_jobs', 'problem_map_json', "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, 'batch_jobs', 'created_by', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'hidden_at', 'INTEGER');
+  ensureColumn(db, 'submissions', 'phase', "TEXT NOT NULL DEFAULT 'contest'");
+  ensureColumn(db, 'submissions', 'batch_id', 'INTEGER');
+  ensureColumn(db, 'contests', 'ranking_rule_json', "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, 'contests', 'archived_at', 'INTEGER');
   ensureColumn(db, 'submissions', 'message', "TEXT NOT NULL DEFAULT ''");
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
