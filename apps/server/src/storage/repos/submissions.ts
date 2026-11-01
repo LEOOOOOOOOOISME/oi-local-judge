@@ -16,6 +16,8 @@ export interface SubmissionRow {
   message: string;
   created_at: number;
   judged_at: number | null;
+  phase: string;
+  batch_id: number | null;
 }
 
 export interface CreateSubmissionInput {
