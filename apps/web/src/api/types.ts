@@ -444,6 +444,53 @@ export interface RankingRow {
   className: string | null;
 }
 
+/** Phase A：正式榜 official-ranking。 */
+export type RankingPreset = 'oi' | 'ioi' | 'acm' | 'cf-like';
+
+export interface OfficialRankingProblem {
+  id: number;
+  ordinal: number;
+  points: number;
+  title: string;
+}
+
+export interface OfficialRankingCell {
+  problemId: number;
+  score: number;
+  verdict: Verdict | null;
+  attempts: number;
+  firstAcAt: number | null;
+}
+
+export interface OfficialRankingRow {
+  rank: number;
+  userId: number;
+  totalScore: number;
+  solved: number;
+  penalty: number;
+  lastAcAt: number | null;
+  cells: OfficialRankingCell[];
+  username: string;
+  realName: string | null;
+  className: string | null;
+}
+
+export interface OfficialRankingConfig {
+  preset: RankingPreset;
+  tie: 'same-rank';
+  cfLike?: { decay: number };
+  freezeAt?: number | null;
+}
+
+export interface OfficialRanking {
+  contest: Contest;
+  problems: OfficialRankingProblem[];
+  rows: OfficialRankingRow[];
+  config: OfficialRankingConfig;
+  archived: boolean;
+  preset: RankingPreset;
+}
+
 // Phase 3A：讨论区 / 答疑 / 私信 / 通知。
 
 export type PostCategory = 'discuss' | 'solution' | 'announcement';

@@ -995,6 +995,52 @@ a.oij-logo:hover {
   margin-bottom: 12px;
 }
 
+/* Phase A：正式榜各题单元格 */
+.official-cell {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.official-cell-score {
+  font-weight: 600;
+}
+
+.official-cell-verdict {
+  margin-top: 1px;
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  opacity: 0.8;
+}
+
+.official-cell-ac {
+  background: #ecf8f1;
+  color: #15803d;
+}
+
+.official-cell-partial {
+  background: #fdf6e8;
+  color: #b45309;
+}
+
+.official-cell-empty {
+  background: #f5f6f8;
+  color: var(--text-3);
+}
+
+.rank-problem-points {
+  color: var(--text-3);
+  font-size: 9.5px;
+  font-weight: 400;
+}
+
 /* ---------- Login ---------- */
 
 .login-page {
