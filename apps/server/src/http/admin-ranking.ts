@@ -30,7 +30,11 @@ function parseConfig(body: Record<string, unknown>): Record<string, unknown> {
           decay: Math.min(2, Math.max(0, Number((body.cfLike as { decay?: number }).decay ?? 0.5))),
         }
       : undefined;
-  return { preset, tie, ...(cfLike ? { cfLike } : {}) };
+  const hackWindowMinutes = Math.min(
+    10_080,
+    Math.max(0, Math.floor(Number(body.hackWindowMinutes ?? 0))),
+  );
+  return { preset, tie, hackWindowMinutes, ...(cfLike ? { cfLike } : {}) };
 }
 
 export function registerAdminRankingRoutes(

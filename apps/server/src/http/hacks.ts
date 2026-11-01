@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
-import { judgeHack } from '../judge/hack.js';
+import { judgeHack, promoteHack } from '../judge/hack.js';
 import { getContest, getContestProblemEntries, isContestParticipant } from '../storage/repos/contests.js';
 import {
   createHack,
@@ -20,6 +20,7 @@ export interface HackRouteOptions {
   db: DatabaseSync;
   config: Config;
   auth: preHandlerHookHandler;
+  adminGuard: preHandlerHookHandler;
 }
 
 function contestProblem(
@@ -28,6 +29,25 @@ function contestProblem(
   problemId: number,
 ): boolean {
   return getContestProblemEntries(db, contestId).some((entry) => entry.problem_id === problemId);
+}
+
+function hackWindowOpen(contest: {
+  start_at: number | null;
+  end_at: number | null;
+  ranking_rule_json?: string;
+}, now = Date.now()): boolean {
+  let windowMinutes = 0;
+  try {
+    const config = JSON.parse(contest.ranking_rule_json || '{}') as {
+      hackWindowMinutes?: number;
+    };
+    windowMinutes = Math.max(0, Number(config.hackWindowMinutes ?? 0));
+  } catch {
+    windowMinutes = 0;
+  }
+  if (contest.start_at !== null && now < contest.start_at) return false;
+  if (contest.end_at !== null && now > contest.end_at + windowMinutes * 60_000) return false;
+  return true;
 }
 
 export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptions): void {
@@ -44,6 +64,9 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
       }
       if (!contestProblem(options.db, contestId, problemId)) {
         return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_IN_CONTEST' } });
+      }
+      if (!hackWindowOpen(contest)) {
+        return reply.code(409).send({ ok: false, error: { code: 'HACK_WINDOW_CLOSED' } });
       }
       lockProblem(options.db, contestId, request.user!.id, problemId);
       return { ok: true, data: { locked: true } };
@@ -92,6 +115,9 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
       if (!contest) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       if (contest.archived_at !== null) {
         return reply.code(409).send({ ok: false, error: { code: 'CONTEST_ARCHIVED' } });
+      }
+      if (!hackWindowOpen(contest)) {
+        return reply.code(409).send({ ok: false, error: { code: 'HACK_WINDOW_CLOSED' } });
       }
       if (!getLock(options.db, contestId, request.user!.id, problemId)) {
         return reply.code(403).send({ ok: false, error: { code: 'LOCK_REQUIRED' } });
@@ -145,6 +171,26 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
         return reply.code(403).send({ ok: false, error: { code: 'FORBIDDEN' } });
       }
       return { ok: true, data: hack };
+    },
+  );
+
+  app.post<{ Params: { id: string; hackId: string } }>(
+    '/api/admin/contests/:id/hacks/:hackId/promote',
+    { preHandler: options.adminGuard },
+    async (request, reply) => {
+      const hack = getHack(options.db, Number(request.params.hackId));
+      if (!hack || hack.contest_id !== Number(request.params.id)) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      try {
+        promoteHack(options.db, hack.id);
+        return { ok: true, data: { id: hack.id, status: 'promoted' } };
+      } catch (err) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'PROMOTE_FAILED', message: (err as Error).message },
+        });
+      }
     },
   );
 

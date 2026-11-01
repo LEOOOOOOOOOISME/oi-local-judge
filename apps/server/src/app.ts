@@ -102,7 +102,12 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
     pluginGuard: requireRole(['admin'], { db, config }),
   });
-  registerHackRoutes(app, { db, config, auth: requireAuth({ db, config }) });  registerContestRoutes(app, {
+  registerHackRoutes(app, {
+    db,
+    config,
+    auth: requireAuth({ db, config }),
+    adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
+  });  registerContestRoutes(app, {
     db,
     config,
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),

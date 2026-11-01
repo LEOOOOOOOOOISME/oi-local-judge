@@ -24,7 +24,7 @@ import { judgeTestcase, JUDGE_WALL_CLOCK_BUFFER_MS, resolveDataPath } from './pi
 import { runSandboxed } from './runner.js';
 import { runValidator } from './validator.js';
 
-function recomputeOfficialAfterHack(
+export function recomputeOfficialAfterHack(
   db: DatabaseSync,
   contestId: number,
   userId: number,
@@ -69,6 +69,22 @@ function recomputeOfficialAfterHack(
     verdict: 'WA',
     source: 'online',
     submissionId: null,
+  });
+}
+
+export function promoteHack(db: DatabaseSync, hackId: number): void {
+  const hack = getHack(db, hackId);
+  if (!hack) throw new Error('hack not found');
+  const target = getSubmission(db, hack.target_submission_id);
+  if (!target) throw new Error('hack target not found');
+  if (target.hacked_at === null) {
+    markSubmissionHacked(db, target.id, hack.hacker_id, hackId);
+    recomputeOfficialAfterHack(db, hack.contest_id, target.user_id, target.problem_id, target.id);
+  }
+  updateHack(db, hackId, {
+    status: 'promoted',
+    verdict: hack.verdict ?? 'AC',
+    message: hack.message || 'promoted by administrator',
   });
 }
 
