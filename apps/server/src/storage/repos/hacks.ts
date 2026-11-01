@@ -123,8 +123,21 @@ export function updateHack(
   ).run(patch.status, patch.verdict ?? null, patch.message ?? '', Date.now(), id);
 }
 
-export function listHacks(
+export function countRecentHacks(
   db: DatabaseSync,
+  contestId: number,
+  hackerId: number,
+  since: number,
+): number {
+  const row = db
+    .prepare(
+      'SELECT COUNT(*) AS n FROM contest_hacks WHERE contest_id = ? AND hacker_id = ? AND created_at >= ?',
+    )
+    .get(contestId, hackerId, since) as { n: number };
+  return Number(row.n);
+}
+
+export function listHacks(  db: DatabaseSync,
   contestId: number,
   problemId?: number,
 ): ContestHackRow[] {
