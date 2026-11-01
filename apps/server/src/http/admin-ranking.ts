@@ -47,7 +47,17 @@ function parseConfig(body: Record<string, unknown>): Record<string, unknown> {
     10_080,
     Math.max(0, Math.floor(Number(body.hackWindowMinutes ?? 0))),
   );
-  return { preset, tie, hackWindowMinutes, ...(cfLike ? { cfLike } : {}) };
+  const officialFreezeMinutesAfterHack = Math.min(
+    10_080,
+    Math.max(0, Math.floor(Number(body.officialFreezeMinutesAfterHack ?? 0))),
+  );
+  return {
+    preset,
+    tie,
+    hackWindowMinutes,
+    officialFreezeMinutesAfterHack,
+    ...(cfLike ? { cfLike } : {}),
+  };
 }
 
 export function registerAdminRankingRoutes(

@@ -12,6 +12,7 @@ export interface ContestRow {
   rules_json: string;
   ranking_rule_json: string;
   archived_at: number | null;
+  official_frozen_until: number | null;
 }
 
 export interface CreateContestInput {

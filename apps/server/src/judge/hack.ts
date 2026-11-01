@@ -23,6 +23,7 @@ import { ensureCompiledProgram } from './compile-cache.js';
 import { judgeTestcase, JUDGE_WALL_CLOCK_BUFFER_MS, resolveDataPath } from './pipeline.js';
 import { runSandboxed } from './runner.js';
 import { runValidator } from './validator.js';
+import { freezeOfficialAfterHack } from '../services/official-freeze.js';
 
 export function recomputeOfficialAfterHack(
   db: DatabaseSync,
@@ -81,6 +82,7 @@ export function promoteHack(db: DatabaseSync, hackId: number): void {
     markSubmissionHacked(db, target.id, hack.hacker_id, hackId);
     recomputeOfficialAfterHack(db, hack.contest_id, target.user_id, target.problem_id, target.id);
   }
+  freezeOfficialAfterHack(db, hack.contest_id);
   updateHack(db, hackId, {
     status: 'promoted',
     verdict: hack.verdict ?? 'AC',
@@ -249,6 +251,7 @@ export async function judgeHack(
     }
     markSubmissionHacked(db, target.id, hack.hacker_id, hackId);
     recomputeOfficialAfterHack(db, hack.contest_id, target.user_id, target.problem_id, target.id);
+    freezeOfficialAfterHack(db, hack.contest_id);
     updateHack(db, hackId, {
       status: 'success',
       verdict: result.verdict,

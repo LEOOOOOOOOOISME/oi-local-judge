@@ -11,7 +11,9 @@ import {
   getHack,
   getLock,
   listHacks,
+  listLocks,
   lockProblem,
+  unlockProblem,
 } from '../storage/repos/hacks.js';
 import { getSubmission, listHackTargets } from '../storage/repos/submissions.js';
 import { resolveDataPath } from '../judge/pipeline.js';
@@ -171,6 +173,26 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
         return reply.code(403).send({ ok: false, error: { code: 'FORBIDDEN' } });
       }
       return { ok: true, data: hack };
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/contests/:id/locks',
+    { preHandler: options.adminGuard },
+    async (request) => ({ ok: true, data: listLocks(options.db, Number(request.params.id)) }),
+  );
+
+  app.delete<{ Params: { id: string; userId: string; problemId: string } }>(
+    '/api/admin/contests/:id/locks/:userId/:problemId',
+    { preHandler: options.adminGuard },
+    async (request) => {
+      unlockProblem(
+        options.db,
+        Number(request.params.id),
+        Number(request.params.userId),
+        Number(request.params.problemId),
+      );
+      return { ok: true, data: { unlocked: true } };
     },
   );
 
