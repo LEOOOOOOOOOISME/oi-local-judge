@@ -21,6 +21,7 @@ import { createHub, type Hub } from './realtime/hub.js';
 import { authenticateRequest, requireRole } from './security/auth.js';
 import { migrate } from './storage/migrate.js';
 import { openDatabase } from './storage/db.js';
+import { repairLegacyTestcasePaths } from './services/problems.js';
 
 export interface AppOptions {
   logger?: boolean;
@@ -34,6 +35,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   const ownsDb = !opts.db;
   const db = opts.db ?? openDatabase(':memory:');
   if (ownsDb) migrate(db);
+  repairLegacyTestcasePaths(db, config.dataDir);
   const hub = opts.hub ?? createHub();
 
   const app = Fastify({ logger: opts.logger ?? false });
