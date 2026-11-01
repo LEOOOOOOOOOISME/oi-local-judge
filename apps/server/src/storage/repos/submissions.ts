@@ -202,6 +202,12 @@ export function markSubmissionHacked(
   );
 }
 
+export function clearSubmissionHacked(db: DatabaseSync, submissionId: number): void {
+  db.prepare(
+    'UPDATE submissions SET hacked_at = NULL, hacked_by = NULL, hack_id = NULL WHERE id = ?',
+  ).run(submissionId);
+}
+
 export function listUnhackedContestSubmissions(
   db: DatabaseSync,
   contestId: number,

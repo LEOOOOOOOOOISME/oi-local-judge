@@ -14,6 +14,7 @@ import {
 } from '../storage/repos/official-scores.js';
 import { getProblem, type TestcaseRow } from '../storage/repos/problems.js';
 import {
+  clearSubmissionHacked,
   getSubmission,
   listUnhackedContestSubmissions,
   markSubmissionHacked,
@@ -24,6 +25,52 @@ import { judgeTestcase, JUDGE_WALL_CLOCK_BUFFER_MS, resolveDataPath } from './pi
 import { runSandboxed } from './runner.js';
 import { runValidator } from './validator.js';
 import { freezeOfficialAfterHack } from '../services/official-freeze.js';
+
+export function recomputeOfficialCell(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+  problemId: number,
+): void {
+  const cell = getOfficialScore(db, contestId, userId, problemId);
+  const remaining = listUnhackedContestSubmissions(db, contestId, userId, problemId);
+  const best = remaining[0];
+  if (best) {
+    upsertOfficialScore(db, {
+      contestId,
+      userId,
+      problemId,
+      score: best.score,
+      verdict: best.verdict ?? 'WA',
+      source: 'online',
+      submissionId: best.id,
+    });
+    return;
+  }
+  if (cell && cell.batch_score !== null && cell.batch_score !== undefined) {
+    upsertOfficialScore(db, {
+      contestId,
+      userId,
+      problemId,
+      score: cell.batch_score,
+      verdict: cell.batch_verdict ?? 'WA',
+      source: 'batch',
+      batchId: cell.batch_id,
+      batchScore: cell.batch_score,
+      batchVerdict: cell.batch_verdict,
+    });
+    return;
+  }
+  upsertOfficialScore(db, {
+    contestId,
+    userId,
+    problemId,
+    score: 0,
+    verdict: 'WA',
+    source: 'online',
+    submissionId: null,
+  });
+}
 
 export function recomputeOfficialAfterHack(
   db: DatabaseSync,
@@ -87,6 +134,21 @@ export function promoteHack(db: DatabaseSync, hackId: number): void {
     status: 'promoted',
     verdict: hack.verdict ?? 'AC',
     message: hack.message || 'promoted by administrator',
+  });
+}
+
+export function revertHack(db: DatabaseSync, hackId: number): void {
+  const hack = getHack(db, hackId);
+  if (!hack) throw new Error('hack not found');
+  const target = getSubmission(db, hack.target_submission_id);
+  if (!target) throw new Error('hack target not found');
+  if (target.hack_id !== hack.id) throw new Error('target was not hacked by this record');
+  clearSubmissionHacked(db, target.id);
+  recomputeOfficialCell(db, hack.contest_id, target.user_id, target.problem_id);
+  updateHack(db, hackId, {
+    status: 'reverted',
+    verdict: hack.verdict,
+    message: 'reverted by administrator',
   });
 }
 

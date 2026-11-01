@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { revertHack } from '../src/judge/hack.js';
 import { buildApp } from '../src/app.js';
 import { ensureDataDirs, loadConfig } from '../src/config.js';
 import { submitSource } from '../src/services/submissions.js';
@@ -187,6 +188,9 @@ describe('contest hack', () => {
     expect(ranking?.rows.find((row) => row.userId === targetId)?.hackedCount).toBe(1);
     expect(ranking?.rows.find((row) => row.userId === hackerId)?.successfulHacks).toBe(1);
     expect(getContest(db, contestId)!.official_frozen_until).toBeGreaterThan(Date.now());
+    revertHack(db, hackId);
+    expect(getSubmission(db, targetSubmissionId)!.hacked_at).toBeNull();
+    expect(getOfficialScore(db, contestId, targetId, problemId)?.score).toBe(100);
   }, 30_000);
 
   it('rejects invalid hack input before touching the target', async () => {
