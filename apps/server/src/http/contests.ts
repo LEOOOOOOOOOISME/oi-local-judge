@@ -23,6 +23,7 @@ import {
   startContest,
   unfreezeContest,
 } from '../services/contests.js';
+import { getOfficialRanking } from '../services/official-ranking.js';
 
 export interface ContestRouteOptions {
   db: DatabaseSync;
@@ -50,6 +51,17 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     }
     return { ok: true, data: ranking.rows };
   });
+
+  app.get<{ Params: { id: string } }>(
+    '/api/contests/:id/official-ranking',
+    async (request, reply) => {
+      const ranking = getOfficialRanking(options.db, Number(request.params.id));
+      if (!ranking) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      return { ok: true, data: ranking };
+    },
+  );
 
   const guards = options.adminGuard ? [options.adminGuard] : [];
 

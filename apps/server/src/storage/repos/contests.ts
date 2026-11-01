@@ -10,6 +10,8 @@ export interface ContestRow {
   unfreeze_at: number | null;
   status: string;
   rules_json: string;
+  ranking_rule_json: string;
+  archived_at: number | null;
 }
 
 export interface CreateContestInput {
@@ -200,6 +202,16 @@ export function getParticipants(db: DatabaseSync, contestId: number): number[] {
   return (
     db
       .prepare('SELECT user_id FROM contest_participants WHERE contest_id = ? ORDER BY user_id')
+      .all(contestId) as Array<{ user_id: number }>
+  ).map((row) => row.user_id);
+}
+
+export function getVisibleParticipants(db: DatabaseSync, contestId: number): number[] {
+  return (
+    db
+      .prepare(
+        'SELECT user_id FROM contest_participants WHERE contest_id = ? AND hidden_at IS NULL ORDER BY user_id',
+      )
       .all(contestId) as Array<{ user_id: number }>
   ).map((row) => row.user_id);
 }
