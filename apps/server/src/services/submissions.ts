@@ -6,6 +6,10 @@ import type { SubmissionDto, TestResultDto, Verdict } from '@oij/shared';
 import type { Config } from '../config.js';
 import { getProblem } from '../storage/repos/problems.js';
 import {
+  getContest,
+  isContestParticipant,
+} from '../storage/repos/contests.js';
+import {
   createSubmission,
   getSubmission,
   getTestResults,
@@ -53,6 +57,22 @@ export function submitSource(
   if (bytes === 0) throw new Error('source is empty');
   if (bytes > MAX_SOURCE_BYTES) throw new Error('source is too large');
 
+  let phase = input.phase ?? 'contest';
+  if (!input.phase && input.contestId) {
+    const contest = getContest(deps.db, input.contestId);
+    if (!contest) throw new Error('contest not found');
+    const ended =
+      contest.status === 'ended' ||
+      contest.status === 'archived' ||
+      (contest.end_at !== null && Date.now() >= contest.end_at);
+    if (ended) {
+      if (!isContestParticipant(deps.db, input.contestId, input.userId)) {
+        throw new Error('only contest participants may submit corrections');
+      }
+      phase = 'correction';
+    }
+  }
+
   const now = new Date();
   const relativeDir = join(
     'submissions',
@@ -81,7 +101,7 @@ export function submitSource(
     language: input.language,
     sourcePath,
     sourceHash,
-    phase: input.phase,
+    phase,
     batchId: input.batchId,
   });
   createJudgeTask(deps.db, id, input.contestId ? 100 : 50);

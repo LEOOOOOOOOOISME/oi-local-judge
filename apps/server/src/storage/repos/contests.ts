@@ -227,6 +227,17 @@ export function getVisibleParticipants(db: DatabaseSync, contestId: number): num
   ).map((row) => row.user_id);
 }
 
+export function isContestParticipant(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+): boolean {
+  const row = db
+    .prepare('SELECT 1 AS ok FROM contest_participants WHERE contest_id = ? AND user_id = ?')
+    .get(contestId, userId) as { ok: number } | undefined;
+  return row !== undefined;
+}
+
 export function getParticipantRows(db: DatabaseSync, contestId: number) {
   return db
     .prepare(

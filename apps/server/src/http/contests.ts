@@ -25,6 +25,7 @@ import {
   unfreezeContest,
 } from '../services/contests.js';
 import { getOfficialRanking } from '../services/official-ranking.js';
+import { getCorrectionRanking } from '../services/correction-ranking.js';
 
 export interface ContestRouteOptions {
   db: DatabaseSync;
@@ -62,6 +63,17 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
         Number(request.params.id),
         options.config?.dataDir ?? process.cwd(),
       );
+      if (!ranking) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      return { ok: true, data: ranking };
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/api/contests/:id/correction-ranking',
+    async (request, reply) => {
+      const ranking = getCorrectionRanking(options.db, Number(request.params.id));
       if (!ranking) {
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       }
