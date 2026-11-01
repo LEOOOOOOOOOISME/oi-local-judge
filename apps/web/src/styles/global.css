@@ -1041,6 +1041,69 @@ a.oij-logo:hover {
   font-weight: 400;
 }
 
+/* Phase B：独立订正榜 */
+.correction-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.correction-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+}
+
+.correction-stat-value {
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.correction-pair {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  font-family: var(--mono);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
+.correction-pair-changed {
+  background: #fff7e6;
+}
+
+.correction-official {
+  color: var(--text-2);
+}
+
+.correction-sep {
+  color: var(--text-3);
+}
+
+.correction-after {
+  color: #15803d;
+  font-weight: 600;
+}
+
+.correction-pair-changed .correction-after {
+  color: #b45309;
+}
+
+.correction-total-changed {
+  color: #b45309;
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
 /* ---------- Login ---------- */
 
 .login-page {
