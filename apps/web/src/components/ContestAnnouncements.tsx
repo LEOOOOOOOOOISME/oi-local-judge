@@ -5,6 +5,7 @@ import { apiGet } from '../api/client';
 import type { PostDetail, PostSummary } from '../api/types';
 import { formatDateTime } from '../utils/format';
 import { ErrorResult } from './PageStates';
+import { StatementHtml } from './StatementHtml';
 import '../styles/contest-admin.css';
 
 /** 比赛公告：先取列表，再取每篇详情以获得服务端渲染的 bodyHtml。 */
@@ -65,9 +66,9 @@ export function ContestAnnouncements({ contestId }: { contestId: number }) {
                 {formatDateTime(post.createdAt)}
               </span>
             </div>
-            <div
-              className="rich-text announcement-body"
-              dangerouslySetInnerHTML={{ __html: post.bodyHtml }}
+            <StatementHtml
+              html={post.bodyHtml}
+              className="statement rich-text announcement-body"
             />
           </article>
         ))}

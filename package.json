@@ -30,6 +30,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "@types/sanitize-html": "^2.16.2",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
@@ -38,6 +39,9 @@
     "@fastify/static": "^10.1.8",
     "@types/markdown-it": "^14.2.0",
     "fflate": "^0.8.3",
-    "markdown-it": "^15.0.3"
+    "katex": "^0.19.1",
+    "markdown-it": "^15.0.3",
+    "markdown-it-texmath": "^1.0.0",
+    "sanitize-html": "^2.18.1"
   }
 }

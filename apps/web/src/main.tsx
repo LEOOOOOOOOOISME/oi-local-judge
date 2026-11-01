@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { App as AntApp, ConfigProvider } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import 'antd/dist/reset.css';
+import 'katex/dist/katex.min.css';
 import './styles/global.css';
 import { AppRoutes } from './App';
 import { ApiError } from './api/client';

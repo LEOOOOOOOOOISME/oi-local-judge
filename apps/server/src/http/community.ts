@@ -1,4 +1,4 @@
-import MarkdownIt from 'markdown-it';
+import { renderRichText } from '../services/rich-text.js';
 import type { FastifyInstance } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
@@ -31,13 +31,11 @@ export interface CommunityRouteOptions {
   config: Config;
 }
 
-const md = new MarkdownIt({ html: false, linkify: true, breaks: true });
+function renderMarkdown(value: string): string {
+  return renderRichText(value, { allowHtml: true, breaks: true });
+}
 
 const POST_CATEGORIES = new Set(['discuss', 'solution', 'announcement']);
-
-function renderMarkdown(value: string): string {
-  return md.render(value);
-}
 
 function authorDto(db: DatabaseSync, userId: number) {
   const user = getUserById(db, userId);
