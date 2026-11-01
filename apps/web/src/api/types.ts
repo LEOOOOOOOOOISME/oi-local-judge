@@ -342,6 +342,7 @@ export interface Contest {
   status: string;
   rules_json: string;
   archived_at?: number | null;
+  official_frozen_until?: number | null;
 }
 
 /** GET /api/contests/:id 返回的比赛题目（含每题分值）。 */

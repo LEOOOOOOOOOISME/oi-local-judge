@@ -151,6 +151,15 @@ export function ContestScreenPage() {
         </div>
       </header>
 
+      {officialFrozen ? (
+        <div className="screen-freeze screen-official-freeze-banner">
+          <strong>官方分冻结</strong>
+          <span>
+            官方分冻结至 {officialFrozenText}（Hack 审核窗口），期间正式分不更新。
+          </span>
+        </div>
+      ) : null}
+
       {frozen ? (
         <div className="screen-freeze">
           <strong>封榜中</strong>

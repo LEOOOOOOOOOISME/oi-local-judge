@@ -96,6 +96,7 @@ export function AdminContestConsolePage() {
   const [publishingAnnouncement, setPublishingAnnouncement] = useState(false);
   const [deletingContest, setDeletingContest] = useState(false);
   const [archiving, setArchiving] = useState(false);
+  const [releasingOfficialFreeze, setReleasingOfficialFreeze] = useState(false);
   const [hiddenOverrides, setHiddenOverrides] = useState<Record<number, boolean>>({});
   const [togglingHiddenUserId, setTogglingHiddenUserId] = useState<number | null>(null);
   const [csvModalOpen, setCsvModalOpen] = useState(false);
@@ -165,6 +166,17 @@ export function AdminContestConsolePage() {
   const problems = detail?.problems ?? [];
   const participants = participantsQuery.data ?? [];
   const archived = Boolean(contest?.archived_at) || contest?.status === 'archived';
+  const officialFrozenUntil =
+    contest?.official_frozen_until ?? officialQuery.data?.officialFrozenUntil ?? null;
+  const officialFrozen = officialFrozenUntil !== null && officialFrozenUntil > Date.now();
+  const officialFrozenText =
+    officialFrozenUntil !== null
+      ? new Date(officialFrozenUntil).toLocaleTimeString('zh-CN', {
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false,
+        })
+      : null;
   const visibleUserIds = new Set((officialQuery.data?.rows ?? []).map((row) => row.userId));
   const isParticipantHidden = (userId: number) =>
     hiddenOverrides[userId] ??
@@ -404,6 +416,21 @@ export function AdminContestConsolePage() {
       message.error(error instanceof Error ? error.message : '归档比赛失败');
     } finally {
       setArchiving(false);
+    }
+  };
+
+  const releaseOfficialFreeze = async () => {
+    setReleasingOfficialFreeze(true);
+    try {
+      await apiPost<{ released: boolean }>(
+        `/api/admin/contests/${contestId}/official-freeze/release`,
+      );
+      message.success('官方冻结已解除');
+      invalidateContest();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '解除官方冻结失败');
+    } finally {
+      setReleasingOfficialFreeze(false);
     }
   };
 
@@ -755,6 +782,22 @@ export function AdminContestConsolePage() {
             <Tag color={statusColor}>{contestStatusLabel(status)}</Tag>
             <Tag color="blue">{contestModeLabel(contest.mode)}</Tag>
             {archived ? <Tag color="red">已归档 · 只读</Tag> : null}
+            {officialFrozen ? (
+              <Tag color="gold">官方分冻结至 {officialFrozenText}</Tag>
+            ) : null}
+            {officialFrozen ? (
+              <Popconfirm
+                title="解除官方冻结？"
+                description="解除后正式分立即恢复更新。"
+                okText="解除"
+                cancelText="取消"
+                onConfirm={() => void releaseOfficialFreeze()}
+              >
+                <Button size="small" loading={releasingOfficialFreeze}>
+                  解除冻结
+                </Button>
+              </Popconfirm>
+            ) : null}
           </>
         }
         subtitle={`开始 ${formatDateTime(contest.start_at)} · 结束 ${formatDateTime(
