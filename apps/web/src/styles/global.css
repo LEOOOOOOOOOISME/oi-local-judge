@@ -1245,3 +1245,14 @@ a.oij-logo:hover {
   border-top: 1px dashed var(--border);
 }
 
+.rank-hacked-tag {
+  margin-left: 6px;
+  font-size: 10px;
+  line-height: 16px;
+}
+
+.hack-success-count {
+  color: #b91c1c;
+  font-weight: 600;
+}
+

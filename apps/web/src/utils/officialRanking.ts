@@ -55,6 +55,8 @@ export function legacyRankingToOfficial(
     solved: row.solved,
     penalty: legacyPenalty(row, contest),
     lastAcAt: row.lastAcAt,
+    hackedCount: 0,
+    successfulHacks: 0,
     cells: row.problems.map(
       (cell): OfficialRankingCell => ({
         problemId: cell.problemId,

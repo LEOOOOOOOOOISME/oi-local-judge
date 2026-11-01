@@ -267,6 +267,18 @@
   font-weight: 600;
 }
 
+.screen-hacked {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 3px;
+  background: rgba(248, 81, 73, 0.18);
+  color: #ff9b94;
+  font-size: 10px;
+  font-weight: 700;
+  vertical-align: middle;
+}
+
 .screen-player-meta {
   color: #6e86a3;
   font-size: 12px;
