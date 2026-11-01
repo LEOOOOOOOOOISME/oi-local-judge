@@ -14,6 +14,7 @@ export interface BatchItemRow {
   student: string;
   source_path: string;
   submission_id: number | null;
+  problem_id: number | null;
 }
 
 export function createBatchJob(
@@ -28,11 +29,23 @@ export function createBatchJob(
 
 export function addBatchItem(
   db: DatabaseSync,
-  input: { batchId: number; student: string; sourcePath: string; submissionId: number },
+  input: {
+    batchId: number;
+    student: string;
+    sourcePath: string;
+    submissionId: number;
+    problemId?: number | null;
+  },
 ): void {
   db.prepare(
-    'INSERT INTO batch_items(batch_id, student, source_path, submission_id) VALUES (?, ?, ?, ?)',
-  ).run(input.batchId, input.student, input.sourcePath, input.submissionId);
+    'INSERT INTO batch_items(batch_id, student, source_path, submission_id, problem_id) VALUES (?, ?, ?, ?, ?)',
+  ).run(
+    input.batchId,
+    input.student,
+    input.sourcePath,
+    input.submissionId,
+    input.problemId ?? null,
+  );
 }
 
 export function getBatchJob(db: DatabaseSync, id: number): BatchJobRow | null {
