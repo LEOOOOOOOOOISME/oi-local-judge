@@ -52,7 +52,7 @@ function addSubmission(input: {
 }
 
 describe('official ranking service', () => {
-  it('merges official batch cells and hides hidden participants', () => {
+  it('merges official batch cells and hides hidden participants', async () => {
     const contestId = createContest(db, {
       name: 'Official',
       mode: 'oi',
@@ -80,7 +80,7 @@ describe('official ranking service', () => {
       batchId: 1,
     });
 
-    const data = getOfficialRanking(db, contestId)!;
+    const data = await getOfficialRanking(db, contestId, root);
     expect(data.preset).toBe('oi');
     expect(data.rows.map((row) => row.userId)).toEqual([u2, u1]);
     expect(data.rows[0]).toMatchObject({ totalScore: 100, username: 'bob', className: '2班' });
@@ -129,7 +129,8 @@ describe('official ranking service', () => {
     expect(getOfficialScore(db, contestId, u1, problemId)?.score).toBe(60);
   });
 
-  it('computes ACM ordering and archived status', () => {    const contestId = createContest(db, {
+  it('computes ACM ordering and archived status', async () => {
+    const contestId = createContest(db, {
       name: 'ACM',
       mode: 'acm',
       problemIds: [problemId],
@@ -147,7 +148,7 @@ describe('official ranking service', () => {
     addSubmission({ contestId, userId: u2, score: 0, verdict: 'WA', createdAt: 3 * 60_000 });
     db.prepare('UPDATE contests SET archived_at = ? WHERE id = ?').run(Date.now(), contestId);
 
-    const data = getOfficialRanking(db, contestId)!;
+    const data = await getOfficialRanking(db, contestId, root);
     expect(data.preset).toBe('acm');
     expect(data.rows.map((row) => row.userId)).toEqual([u1, u2]);
     expect(data.rows[0].penalty).toBe(20);
