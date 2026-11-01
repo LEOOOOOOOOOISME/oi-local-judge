@@ -6,33 +6,45 @@ import {
   Card,
   Empty,
   Input,
+  Modal,
   Popconfirm,
   Select,
   Space,
   Spin,
+  Table,
   Tabs,
   Tag,
 } from 'antd';
+import type { TableColumnsType } from 'antd';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost } from '../api/client';
+import { ApiError, apiGet, apiPost } from '../api/client';
 import type {
   AnswerFile,
   Contest,
+  HackJob,
+  HackSource,
+  HackTarget,
   ObjectiveAnswerValue,
   ProblemDetail,
   RankingRow,
   Submission,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { CodeBlock } from '../components/CodeBlock';
 import { MetaList } from '../components/MetaList';
 import { ObjectiveAnswerForm } from '../components/ObjectiveAnswerForm';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { StatementHtml } from '../components/StatementHtml';
 import { SubmissionTable } from '../components/SubmissionTable';
-import { formatMemoryLimit, formatTimeLimit } from '../utils/format';
-import { difficultyLabel, problemLetter, problemTypeLabel } from '../utils/status';
+import { formatDateTime, formatMemoryLimit, formatTimeLimit } from '../utils/format';
+import {
+  difficultyLabel,
+  problemLetter,
+  problemTypeLabel,
+  verdictTitle,
+} from '../utils/status';
 import '../styles/objective.css';
 import '../styles/output.css';
 
@@ -82,6 +94,16 @@ export function ProblemPage() {
     Record<number, ObjectiveAnswerValue>
   >({});
   const [outputAnswers, setOutputAnswers] = useState<Record<number, string>>({});
+  const [locking, setLocking] = useState(false);
+  const [sourceTarget, setSourceTarget] = useState<HackTarget | null>(null);
+  const [sourceLoading, setSourceLoading] = useState(false);
+  const [source, setSource] = useState<HackSource | null>(null);
+  const [hackTarget, setHackTarget] = useState<HackTarget | null>(null);
+  const [hackInput, setHackInput] = useState('');
+  const [hackSubmitting, setHackSubmitting] = useState(false);
+  const [hackError, setHackError] = useState<string | null>(null);
+  const [activeHackId, setActiveHackId] = useState<number | null>(null);
+  const [hackResult, setHackResult] = useState<HackJob | null>(null);
   const [code, setCode] = useState<string>(
     () => (validProblem ? readDraft(problemId) : null) ?? DEFAULT_CODE,
   );
@@ -110,6 +132,13 @@ export function ProblemPage() {
     enabled: contestId !== null,
     staleTime: 60_000,
   });
+  const contest =
+    contestId !== null ? (contestsQuery.data?.find((item) => item.id === contestId) ?? null) : null;
+  const contestEnded =
+    contest !== null &&
+    (contest.status === 'ended' ||
+      contest.status === 'archived' ||
+      (contest.end_at !== null && Date.now() >= contest.end_at));
   const rankingQuery = useQuery({
     queryKey: ['ranking', contestId],
     queryFn: () => apiGet<RankingRow[]>(`/api/contests/${contestId}/ranking`),
@@ -131,6 +160,54 @@ export function ProblemPage() {
     queryFn: () => apiGet<AnswerFile[]>(`/api/problems/${problemId}/answer-files`),
     enabled: validProblem && problemQuery.data?.type === 'output-only',
   });
+  const hackTargetsQuery = useQuery({
+    queryKey: ['hack-targets', contestId, problemId],
+    queryFn: async (): Promise<{ locked: boolean; targets: HackTarget[] }> => {
+      try {
+        const targets = await apiGet<HackTarget[]>(
+          `/api/contests/${contestId}/problems/${problemId}/targets`,
+        );
+        return { locked: true, targets };
+      } catch (error) {
+        if (error instanceof ApiError && error.code === 'LOCK_REQUIRED') {
+          return { locked: false, targets: [] };
+        }
+        throw error;
+      }
+    },
+    enabled:
+      contestId !== null &&
+      validProblem &&
+      Boolean(user) &&
+      !contestEnded,
+    retry: false,
+  });
+  const hackStatusQuery = useQuery({
+    queryKey: ['hack-status', contestId, activeHackId],
+    queryFn: () => apiGet<HackJob>(`/api/contests/${contestId}/hacks/${activeHackId}`),
+    enabled: contestId !== null && activeHackId !== null,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'queued' || status === 'judging' ? 1_000 : false;
+    },
+  });
+
+  useEffect(() => {
+    const status = hackStatusQuery.data?.status;
+    if (
+      status === 'success' ||
+      status === 'failed' ||
+      status === 'invalid' ||
+      status === 'unjudgeable'
+    ) {
+      if (hackStatusQuery.data) setHackResult(hackStatusQuery.data);
+      void queryClient.invalidateQueries({ queryKey: ['hack-targets', contestId, problemId] });
+      void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['correction-ranking', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['submissions'] });
+      void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
+    }
+  }, [hackStatusQuery.data, queryClient, contestId, problemId]);
 
   useEffect(() => {
     if (
@@ -160,13 +237,6 @@ export function ProblemPage() {
     },
   });
 
-  const contest =
-    contestId !== null ? (contestsQuery.data?.find((item) => item.id === contestId) ?? null) : null;
-  const contestEnded =
-    contest !== null &&
-    (contest.status === 'ended' ||
-      contest.status === 'archived' ||
-      (contest.end_at !== null && Date.now() >= contest.end_at));
   const firstRankingRow = rankingQuery.data?.[0];
   const ordinalIndex = firstRankingRow
     ? firstRankingRow.problems.findIndex((cell) => cell.problemId === problemId)
@@ -462,6 +532,218 @@ export function ProblemPage() {
     </div>
   );
 
+  const hackLocked = hackTargetsQuery.data?.locked ?? false;
+  const hackTargets = hackTargetsQuery.data?.targets ?? [];
+
+  const lockProblem = async () => {
+    if (contestId === null) return;
+    setLocking(true);
+    try {
+      await apiPost<{ locked: boolean }>(
+        `/api/contests/${contestId}/problems/${problemId}/lock`,
+      );
+      message.success('本题已锁定：不能继续提交，可查看他人源码与 Hack');
+      void queryClient.invalidateQueries({
+        queryKey: ['hack-targets', contestId, problemId],
+      });
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '锁定题目失败');
+    } finally {
+      setLocking(false);
+    }
+  };
+
+  const openSource = async (target: HackTarget) => {
+    if (contestId === null) return;
+    setSourceTarget(target);
+    setSource(null);
+    setSourceLoading(true);
+    try {
+      const result = await apiGet<HackSource>(
+        `/api/contests/${contestId}/problems/${problemId}/submissions/${target.id}/source`,
+      );
+      setSource(result);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '加载源码失败');
+    } finally {
+      setSourceLoading(false);
+    }
+  };
+
+  const openHack = (target: HackTarget) => {
+    setHackTarget(target);
+    setHackInput('');
+    setHackError(null);
+    setActiveHackId(null);
+    setHackResult(null);
+  };
+
+  const submitHack = async () => {
+    if (contestId === null || !hackTarget) return;
+    if (hackInput.length === 0) {
+      setHackError('请输入 Hack 测试数据');
+      return;
+    }
+    setHackSubmitting(true);
+    setHackError(null);
+    setHackResult(null);
+    try {
+      const result = await apiPost<{ id: number; status: string }>(
+        `/api/contests/${contestId}/problems/${problemId}/hacks`,
+        { targetSubmissionId: hackTarget.id, input: hackInput },
+      );
+      setActiveHackId(result.id);
+      message.success(`Hack #${result.id} 已提交，正在评测`);
+    } catch (error) {
+      setHackError(error instanceof Error ? error.message : 'Hack 提交失败');
+    } finally {
+      setHackSubmitting(false);
+    }
+  };
+
+  const hackStatusLabel: Record<string, string> = {
+    queued: '排队中',
+    judging: '评测中',
+    success: 'Hack 成功',
+    failed: 'Hack 失败',
+    invalid: '输入无效',
+    unjudgeable: '无法评测',
+  };
+  const hackStatusColor: Record<string, string> = {
+    queued: 'blue',
+    judging: 'blue',
+    success: 'green',
+    failed: 'red',
+    invalid: 'orange',
+    unjudgeable: 'default',
+  };
+
+  const hackTargetColumns: TableColumnsType<HackTarget> = [
+    {
+      title: '目标提交',
+      dataIndex: 'id',
+      width: 100,
+      render: (value: number) => <span className="mono">#{value}</span>,
+    },
+    {
+      title: '选手',
+      dataIndex: 'userId',
+      width: 110,
+      render: (value: number) => <span className="mono">用户 #{value}</span>,
+    },
+    {
+      title: 'Verdict',
+      dataIndex: 'verdict',
+      width: 100,
+      render: (value: HackTarget['verdict']) =>
+        value ? <Tag>{value}</Tag> : <span className="muted">—</span>,
+    },
+    {
+      title: '得分',
+      dataIndex: 'score',
+      width: 80,
+      align: 'right',
+      render: (value: number) => <span className="score-value">{value}</span>,
+    },
+    {
+      title: '提交时间',
+      dataIndex: 'createdAt',
+      width: 160,
+      render: (value: number) => <span className="mono">{formatDateTime(value)}</span>,
+    },
+    {
+      title: '',
+      width: 170,
+      render: (_value, row) => (
+        <Space size={6}>
+          <Button size="small" onClick={() => void openSource(row)}>
+            查看源码
+          </Button>
+          <Button size="small" type="primary" onClick={() => openHack(row)}>
+            Hack
+          </Button>
+        </Space>
+      ),
+    },
+  ];
+
+  const hackPanel =
+    contestId !== null &&
+    !contestEnded &&
+    problem.type !== 'objective' &&
+    problem.type !== 'output-only' ? (
+      !user ? (
+        <Card className="oij-card">
+          <Empty description="登录且报名比赛后可锁定本题并 Hack" />
+        </Card>
+      ) : hackTargetsQuery.isPending ? (
+        <Card className="oij-card" title="Hack 模式">
+          <div className="inline-loading">
+            <Spin />
+          </div>
+        </Card>
+      ) : hackTargetsQuery.isError ? (
+        <Card className="oij-card" title="Hack 模式">
+          <ErrorResult
+            error={hackTargetsQuery.error}
+            onRetry={() => void hackTargetsQuery.refetch()}
+          />
+        </Card>
+      ) : !hackLocked ? (
+        <Card className="oij-card" title="Hack 模式">
+          <Alert
+            type="info"
+            showIcon
+            message="锁定本题后才能查看他人源码并 Hack"
+            description="锁题后本题不能再提交；锁定状态刷新后保持。请确认已提交自己的最终版本后再锁定。"
+          />
+          <div className="hack-lock-row">
+            <Popconfirm
+              title="锁定本题？"
+              description="锁定后本题不能再提交，且刷新后仍保持锁定。"
+              okText="锁定"
+              cancelText="取消"
+              onConfirm={() => void lockProblem()}
+            >
+              <Button type="primary" danger loading={locking}>
+                锁定本题
+              </Button>
+            </Popconfirm>
+          </div>
+        </Card>
+      ) : (
+        <Card
+          className="oij-card"
+          title="Hack 模式"
+          extra={<Tag color="red">已锁定 · 不可提交</Tag>}
+        >
+          <Alert
+            type="warning"
+            showIcon
+            message="本题已锁定"
+            description="不能再提交本题；可查看他人源码，提交 Hack 测试数据。"
+          />
+          {hackTargets.length === 0 ? (
+            <Empty description="暂无可 Hack 的目标提交" />
+          ) : (
+            <Table<HackTarget>
+              className="oij-table"
+              rowKey="id"
+              size="small"
+              columns={hackTargetColumns}
+              dataSource={hackTargets}
+              pagination={false}
+            />
+          )}
+        </Card>
+      )
+    ) : null;
+
+  const hackStatus = hackResult ?? hackStatusQuery.data;
+  const hackBusy =
+    activeHackId !== null &&
+    (!hackStatus || hackStatus.status === 'queued' || hackStatus.status === 'judging');
+
   const submitPanel = !user ? (
     <Card className="oij-card">
       <Empty description="登录后即可提交代码">
@@ -471,67 +753,77 @@ export function ProblemPage() {
       </Empty>
     </Card>
   ) : (
-    <Card
-      className="oij-card"
-      title="提交 C++17 代码"
-      extra={<span className="muted">{code.length} 字符 / 上限 256 KB</span>}
-    >
-      {contestEnded ? (
-        <Alert
-          className="ranking-freeze"
-          type="warning"
-          showIcon
-          message="赛后订正模式"
-          description="提交只计入订正榜，不影响正式榜。"
-        />
-      ) : null}
-      <div className="submit-toolbar">
-        <Space size={8} align="center">
-          <span className="muted">语言</span>
-          <Select
-            value="cpp17"
-            options={[{ value: 'cpp17', label: 'C++17' }]}
-            style={{ width: 120 }}
-            disabled
+    <div className="stack">
+      {hackPanel}
+      <Card
+        className="oij-card"
+        title="提交 C++17 代码"
+        extra={<span className="muted">{code.length} 字符 / 上限 256 KB</span>}
+      >
+        {hackLocked ? (
+          <Alert
+            className="ranking-freeze"
+            type="warning"
+            showIcon
+            message="本题已锁定，不能继续提交"
+            description="锁定后不可提交；可在上方 Hack 面板查看他人源码并提交 Hack。"
           />
-        </Space>
-        <span className="muted">编译选项：g++ -O2 -std=c++17 -static</span>
-      </div>
-      <Input.TextArea
-        className="code-editor"
-        value={code}
-        onChange={(event) => setCode(event.target.value)}
-        onKeyDown={handleEditorKeyDown}
-        rows={18}
-        spellCheck={false}
-        style={{
-          fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
-          fontSize: 13,
-          lineHeight: 1.6,
-        }}
-      />
-      <div className="submit-footer">
-        <Popconfirm
-          title="清空当前代码？"
-          description="会恢复为默认模板，本地草稿也会被覆盖。"
-          okText="清空"
-          cancelText="取消"
-          onConfirm={() => setCode(DEFAULT_CODE)}
-        >
-          <Button>重置代码</Button>
-        </Popconfirm>
-        <Button
-          type="primary"
-          onClick={() =>
-            submitMutation.mutate({ language: 'cpp17', code })
-          }
-          loading={submitMutation.isPending}
-          disabled={code.trim().length === 0}
-        >
-          提交评测
-        </Button>
-      </div>
-    </Card>
+        ) : null}
+        {contestEnded ? (
+          <Alert
+            className="ranking-freeze"
+            type="warning"
+            showIcon
+            message="赛后订正模式"
+            description="提交只计入订正榜，不影响正式榜。"
+          />
+        ) : null}
+        <div className="submit-toolbar">
+          <Space size={8} align="center">
+            <span className="muted">语言</span>
+            <Select
+              value="cpp17"
+              options={[{ value: 'cpp17', label: 'C++17' }]}
+              style={{ width: 120 }}
+              disabled
+            />
+          </Space>
+          <span className="muted">编译选项：g++ -O2 -std=c++17 -static</span>
+        </div>
+        <Input.TextArea
+          className="code-editor"
+          value={code}
+          onChange={(event) => setCode(event.target.value)}
+          onKeyDown={handleEditorKeyDown}
+          rows={18}
+          spellCheck={false}
+          style={{
+            fontFamily: 'Consolas, "Cascadia Mono", "Courier New", monospace',
+            fontSize: 13,
+            lineHeight: 1.6,
+          }}
+        />
+        <div className="submit-footer">
+          <Popconfirm
+            title="清空当前代码？"
+            description="会恢复为默认模板，本地草稿也会被覆盖。"
+            okText="清空"
+            cancelText="取消"
+            onConfirm={() => setCode(DEFAULT_CODE)}
+          >
+            <Button>重置代码</Button>
+          </Popconfirm>
+          <Button
+            type="primary"
+            onClick={() => submitMutation.mutate({ language: 'cpp17', code })}
+            loading={submitMutation.isPending}
+            disabled={code.trim().length === 0 || hackLocked}
+          >
+            提交评测
+          </Button>
+        </div>
+      </Card>
+    </div>
   );
 
   const submissionsPanel = !user ? (
@@ -753,6 +1045,139 @@ export function ProblemPage() {
           ) : null}
         </div>
       </div>
+
+      <Modal
+        title={sourceTarget ? `提交 #${sourceTarget.id} 源码` : '查看源码'}
+        open={sourceTarget !== null}
+        onCancel={() => {
+          setSourceTarget(null);
+          setSource(null);
+        }}
+        footer={<Button onClick={() => setSourceTarget(null)}>关闭</Button>}
+        width={920}
+      >
+        {sourceTarget ? (
+          <div className="stack">
+            <div className="muted">
+              选手 用户 #{sourceTarget.userId} · {sourceTarget.verdict ?? '—'} ·{' '}
+              {sourceTarget.score} 分 · {formatDateTime(sourceTarget.createdAt)}
+            </div>
+            {sourceLoading ? (
+              <div className="inline-loading">
+                <Spin />
+              </div>
+            ) : source ? (
+              <CodeBlock
+                code={source.code}
+                maxHeight={560}
+                title={`${source.language.toUpperCase()} · 提交 #${source.submissionId}`}
+              />
+            ) : (
+              <Empty description="源码加载失败" />
+            )}
+          </div>
+        ) : null}
+      </Modal>
+
+      <Modal
+        title={hackTarget ? `Hack 提交 #${hackTarget.id}` : 'Hack'}
+        open={hackTarget !== null}
+        onCancel={() => {
+          setHackTarget(null);
+          setActiveHackId(null);
+        }}
+        footer={
+          <>
+            <Button
+              onClick={() => {
+                setHackTarget(null);
+                setActiveHackId(null);
+              }}
+            >
+              关闭
+            </Button>
+            <Button
+              type="primary"
+              loading={hackSubmitting}
+              disabled={!hackInput.trim() || hackBusy}
+              onClick={() => void submitHack()}
+            >
+              提交 Hack
+            </Button>
+          </>
+        }
+        width={720}
+      >
+        {hackTarget ? (
+          <div className="stack">
+            <div className="muted">
+              目标：用户 #{hackTarget.userId} · {hackTarget.verdict ?? '—'} ·{' '}
+              {hackTarget.score} 分
+            </div>
+            <Alert
+              type="info"
+              showIcon
+              message="输入会作为目标程序的 stdin；目标输出与 std 不一致时 Hack 成功。"
+            />
+            <Input.TextArea
+              rows={10}
+              value={hackInput}
+              onChange={(event) => setHackInput(event.target.value)}
+              placeholder="输入 Hack 测试数据"
+              disabled={hackBusy}
+              style={{ fontFamily: 'Consolas, "Cascadia Mono", monospace' }}
+            />
+            {hackError ? <Alert type="error" showIcon message={hackError} /> : null}
+            {activeHackId !== null ? (
+              hackStatusQuery.isError ? (
+                <Alert
+                  type="error"
+                  showIcon
+                  message="Hack 状态查询失败"
+                  description={
+                    hackStatusQuery.error instanceof Error
+                      ? hackStatusQuery.error.message
+                      : undefined
+                  }
+                />
+              ) : hackStatusQuery.isPending || !hackStatus ? (
+                <div className="inline-loading">
+                  <Spin />
+                </div>
+              ) : (
+                <Alert
+                  type={
+                    hackStatus.status === 'success'
+                      ? 'success'
+                      : hackStatus.status === 'failed' || hackStatus.status === 'invalid'
+                        ? 'error'
+                        : 'info'
+                  }
+                  showIcon
+                  message={
+                    <Space>
+                      <Tag color={hackStatusColor[hackStatus.status] ?? 'default'}>
+                        {hackStatusLabel[hackStatus.status] ?? hackStatus.status}
+                      </Tag>
+                      {hackStatus.verdict ? (
+                        <span className="mono">
+                          {hackStatus.verdict} · {verdictTitle(hackStatus.verdict)}
+                        </span>
+                      ) : null}
+                    </Space>
+                  }
+                  description={
+                    hackStatus.message ||
+                    (hackStatus.status === 'queued' || hackStatus.status === 'judging'
+                      ? '正在评测 Hack…'
+                      : undefined)
+                  }
+                />
+              )
+            ) : null}
+          </div>
+        ) : null}
+      </Modal>
     </div>
   );
 }
