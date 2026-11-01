@@ -156,7 +156,14 @@ export function registerContestBatchRoutes(
 
     const sources = new Map<
       string,
-      { path: string; code: string; student: string; userId: number; problemId: number }
+      {
+        path: string;
+        code: string;
+        language: string;
+        student: string;
+        userId: number;
+        problemId: number;
+      }
     >();
     const unknownUsers = new Set<string>();
     const unresolvedProblems = new Set<string>();
@@ -178,7 +185,6 @@ export function registerContestBatchRoutes(
         continue;
       }
       const extension = relative.slice(relative.lastIndexOf('.')).toLowerCase();
-      if (!SOURCE_EXTENSIONS.has(extension)) continue;
       const student = parts[studentLevel - 1];
       const folder = parts[problemLevel - 1];
       const problemId = resolveProblem(folder);
@@ -186,6 +192,20 @@ export function registerContestBatchRoutes(
         unresolvedProblems.add(folder);
         continue;
       }
+      const problem = getProblem(options.db, problemId);
+      if (!problem) continue;
+      let language: string | null = null;
+      if (SOURCE_EXTENSIONS.has(extension)) {
+        language = 'cpp17';
+      } else if (parts[parts.length - 1].toLowerCase() === 'answers.json') {
+        if (problem.type === 'objective') language = 'objective';
+        else if (problem.type === 'output-only') language = 'answer';
+        else {
+          ignoredFiles.push(relative);
+          continue;
+        }
+      }
+      if (!language) continue;
       const user = getUserByUsername(options.db, student);
       if (!user) {
         unknownUsers.add(student);
@@ -196,6 +216,7 @@ export function registerContestBatchRoutes(
       sources.set(key, {
         path: relative,
         code: Buffer.from(content).toString('utf8'),
+        language,
         student,
         userId: user.id,
         problemId,
@@ -235,7 +256,7 @@ export function registerContestBatchRoutes(
         {
           userId: source.userId,
           problemId: source.problemId,
-          language: 'cpp17',
+          language: source.language,
           code: source.code,
           contestId,
           phase: 'batch_draft',
