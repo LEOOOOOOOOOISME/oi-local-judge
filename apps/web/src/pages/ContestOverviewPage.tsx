@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Empty, Result, Spin, Tabs, Tag } from 'antd';
+import { Button, Card, Empty, Result, Space, Spin, Tabs, Tag } from 'antd';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { apiGet } from '../api/client';
@@ -241,9 +241,14 @@ export function ContestOverviewPage() {
           </span>
         }
         extra={
-          <Link to={`${contestPath}/screen`} target="_blank" rel="noreferrer">
-            <Button>大屏</Button>
-          </Link>
+          <Space>
+            <Link to={`${contestPath}/screen`} target="_blank" rel="noreferrer">
+              <Button>大屏</Button>
+            </Link>
+            <Link to={`${contestPath}/correction`}>
+              <Button>订正榜</Button>
+            </Link>
+          </Space>
         }
       />
 

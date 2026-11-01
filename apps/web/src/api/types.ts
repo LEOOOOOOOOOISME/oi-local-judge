@@ -573,6 +573,38 @@ export interface OfficialRanking {
   pluginError?: string;
 }
 
+/** Phase B：独立订正榜。 */
+export interface CorrectionCell {
+  problemId: number;
+  officialScore: number;
+  officialVerdict: Verdict | null;
+  correctionScore: number;
+  correctionVerdict: Verdict | null;
+  correctedScore: number;
+  correctedVerdict: Verdict | null;
+}
+
+export interface CorrectionRankingRow {
+  rank: number;
+  userId: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  officialTotal: number;
+  correctedTotal: number;
+  officialSolved: number;
+  correctedSolved: number;
+  cells: CorrectionCell[];
+}
+
+export interface CorrectionRanking {
+  contest: Contest;
+  problems: OfficialRankingProblem[];
+  rows: CorrectionRankingRow[];
+  correctionsOpen: boolean;
+  archived: boolean;
+}
+
 /** Phase A：排名规则配置与自定义插件。 */
 export interface ContestRankingRuleConfig {
   preset?: string;

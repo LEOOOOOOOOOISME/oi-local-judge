@@ -90,6 +90,11 @@ const AdminRankingPluginsPage = lazy(() =>
 const HelpPage = lazy(() =>
   import('./pages/HelpPage').then((module) => ({ default: module.HelpPage })),
 );
+const ContestCorrectionPage = lazy(() =>
+  import('./pages/ContestCorrectionPage').then((module) => ({
+    default: module.ContestCorrectionPage,
+  })),
+);
 
 export function AppRoutes() {
   return (
@@ -103,6 +108,7 @@ export function AppRoutes() {
         <Route path="/problem/:problemId" element={<ProblemPage />} />
         <Route path="/contest/:contestId" element={<ContestOverviewPage />} />
         <Route path="/contest/:contestId/ranking" element={<ContestRankingPage />} />
+        <Route path="/contest/:contestId/correction" element={<ContestCorrectionPage />} />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/contest/:contestId/problem/:problemId" element={<ProblemPage />} />
         <Route

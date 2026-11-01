@@ -1,4 +1,4 @@
-﻿import { Alert, App, Button, Card, Empty, Space, Table, Tag } from 'antd';
+import { Alert, App, Button, Card, Empty, Space, Table, Tag } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
@@ -206,6 +206,9 @@ export function ContestRankingPage() {
             </Button>
             <Link to={`/contest/${contestId}/screen`}>
               <Button>大屏</Button>
+            </Link>
+            <Link to={`/contest/${contestId}/correction`}>
+              <Button>订正榜</Button>
             </Link>
             <Link to={`/contest/${contestId}`}>
               <Button>返回比赛</Button>

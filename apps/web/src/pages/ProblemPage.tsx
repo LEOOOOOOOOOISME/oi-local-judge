@@ -162,6 +162,11 @@ export function ProblemPage() {
 
   const contest =
     contestId !== null ? (contestsQuery.data?.find((item) => item.id === contestId) ?? null) : null;
+  const contestEnded =
+    contest !== null &&
+    (contest.status === 'ended' ||
+      contest.status === 'archived' ||
+      (contest.end_at !== null && Date.now() >= contest.end_at));
   const firstRankingRow = rankingQuery.data?.[0];
   const ordinalIndex = firstRankingRow
     ? firstRankingRow.problems.findIndex((cell) => cell.problemId === problemId)
@@ -268,6 +273,15 @@ export function ProblemPage() {
       <Card className="oij-card statement-card">
         <StatementHtml html={problem.statementHtml} />
       </Card>
+      {contestEnded ? (
+        <Alert
+          className="ranking-freeze"
+          type="warning"
+          showIcon
+          message="赛后订正模式"
+          description="提交只计入订正榜，不影响正式榜。"
+        />
+      ) : null}
       {problem.ioMode === 'file' ? (
         <Alert
           type="info"
@@ -462,6 +476,15 @@ export function ProblemPage() {
       title="提交 C++17 代码"
       extra={<span className="muted">{code.length} 字符 / 上限 256 KB</span>}
     >
+      {contestEnded ? (
+        <Alert
+          className="ranking-freeze"
+          type="warning"
+          showIcon
+          message="赛后订正模式"
+          description="提交只计入订正榜，不影响正式榜。"
+        />
+      ) : null}
       <div className="submit-toolbar">
         <Space size={8} align="center">
           <span className="muted">语言</span>

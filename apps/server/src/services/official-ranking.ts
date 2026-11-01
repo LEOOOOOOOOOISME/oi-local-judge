@@ -92,7 +92,7 @@ export async function getOfficialRanking(
   }
 
   const submissions = listContestSubmissions(db, contestId)
-    .filter((submission) => submission.phase !== 'batch_draft')
+    .filter((submission) => submission.phase === 'contest')
     .map((submission) => ({
       userId: submission.user_id,
       problemId: submission.problem_id,
