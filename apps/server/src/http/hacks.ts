@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
-import { judgeHack, promoteHack } from '../judge/hack.js';
+import { judgeHack, promoteHack, revertHack } from '../judge/hack.js';
 import { getContest, getContestProblemEntries, isContestParticipant } from '../storage/repos/contests.js';
 import {
   countRecentHacks,
@@ -207,6 +207,26 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
         Number(request.params.problemId),
       );
       return { ok: true, data: { unlocked: true } };
+    },
+  );
+
+  app.post<{ Params: { id: string; hackId: string } }>(
+    '/api/admin/contests/:id/hacks/:hackId/revert',
+    { preHandler: options.adminGuard },
+    async (request, reply) => {
+      const hack = getHack(options.db, Number(request.params.hackId));
+      if (!hack || hack.contest_id !== Number(request.params.id)) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      try {
+        revertHack(options.db, hack.id);
+        return { ok: true, data: { id: hack.id, status: 'reverted' } };
+      } catch (err) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'REVERT_FAILED', message: (err as Error).message },
+        });
+      }
     },
   );
 
