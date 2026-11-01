@@ -32,12 +32,14 @@ Windows 局域网 OI 评测系统：桌面程序（Electron）+ 浏览器选手�
 npm install --ignore-scripts --cache .npm-cache
 npm run build:native   # runner + interact
 npm run build
-npm run seed          # 默认数据目录 %LOCALAPPDATA%\OiJudge，可设 OIJ_DATA_DIR
+npm run seed          # 默认数据目录为仓库下 runtime/，可用 OIJ_DATA_DIR 覆盖
 npm start             # http://127.0.0.1:8787
 ```
 
+默认数据目录（从仓库根目录启动）为 `runtime/`，所有数据库、题目数据、提交、缓存都留在工作区内；仅在非仓库目录启动时才回退到 `%LOCALAPPDATA%\OiJudge`。可用 `OIJ_DATA_DIR` 显式指定。
+
 默认管理员 `admin / admin123`（首次启动自动创建，生产环境请用 `OIJ_ADMIN_PASSWORD` 覆盖并改密）。
-当前可用：登录、题库、题目页、C++17 提交、传统/文件 IO 评测、内置比较与 testlib/Lemon 六参数 SPJ、子任务与依赖、客观题（单选/多选/判断/填空）与混合组卷、TLE/MLE/RE/CE/WA/PC/AC、提交详情、比赛列表/主页/榜单、我的记录；管理端覆盖题目/资产/数据/校验/造数据/对拍/批量评测、比赛控制台、参赛者/班级统计、用户管理。首屏 JS gzip 约 268KB。
+当前可用：登录、题库、题目页、C++17 提交、传统/文件 IO/交互题/客观题/提交答案题评测、testlib/Lemon SPJ、子任务与依赖、TLE/MLE/RE/CE/WA/PC/AC、提交详情、比赛列表/主页/榜单/大屏、我的记录；管理端覆盖题目/资产/数据/校验/造数据/对拍/批量评测、比赛控制台、参赛者/班级统计、用户管理、社区审核、审计日志、OI/Cena/Lemon 题包。首屏 JS gzip 约 268KB。
 评测依赖本机 `ojrunner.exe`（`tools/build-runner.mjs`）与 GCC 16；未配置编译器时评测会报 SE。
 
 ## 目标能力
