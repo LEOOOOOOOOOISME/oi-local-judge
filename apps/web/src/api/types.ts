@@ -193,16 +193,21 @@ export interface BatchUploadResult {
 export interface BatchRunItem {
   student: string;
   submissionId: number;
+  problemId?: number;
+  problemTitle?: string | null;
 }
 
 export interface BatchRunResult {
   id: number;
   count: number;
   items: BatchRunItem[];
+  multiProblem?: boolean;
 }
 
 export interface BatchResultItem {
   student: string;
+  problemId: number;
+  problemTitle: string | null;
   sourcePath: string;
   submissionId: number | null;
   status: SubmissionStatus | 'missing';
@@ -215,6 +220,7 @@ export interface BatchResultItem {
 export interface BatchJob {
   id: number;
   problemId: number;
+  multiProblem?: boolean;
   status: 'running' | 'finished';
   studentLevel: number;
   items: BatchResultItem[];

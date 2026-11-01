@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
   Alert,
   App,
@@ -46,6 +46,14 @@ interface ParsedStudent {
   path: string;
 }
 
+interface MultiPair {
+  student: string;
+  folder: string;
+  problemId: number;
+  problemTitle: string;
+  path: string;
+}
+
 function extensionOf(path: string): string {
   const index = path.lastIndexOf('.');
   return index >= 0 ? path.slice(index).toLowerCase() : '';
@@ -53,6 +61,32 @@ function extensionOf(path: string): string {
 
 function isSourceFile(path: string): boolean {
   return SOURCE_EXTENSIONS.has(extensionOf(path));
+}
+
+function autoProblemId(
+  folder: string,
+  problems: Map<number, AdminProblemSummary>,
+): number | null {
+  if (!/^\d+$/.test(folder)) return null;
+  const id = Number(folder);
+  return Number.isInteger(id) && problems.has(id) ? id : null;
+}
+
+/** 多题模式下可选的题目文件夹（按学生层级/题目层级解析）。 */
+function parseFolderKeys(files: string[], studentLevel: number, problemLevel: number): string[] {
+  const maxLevel = Math.max(studentLevel, problemLevel);
+  const folders = new Set<string>();
+  for (const path of files) {
+    if (!isSourceFile(path)) continue;
+    const parts = path.split('/');
+    if (parts.length <= maxLevel) continue;
+    const student = parts[studentLevel - 1];
+    const folder = parts[problemLevel - 1];
+    if (student && folder) folders.add(folder);
+  }
+  return [...folders].sort((left, right) =>
+    left.localeCompare(right, undefined, { numeric: true }),
+  );
 }
 
 /** 与后端 batch/run 相同的层级规则：取第 level 段目录作为选手名。 */
@@ -107,6 +141,8 @@ function describeBatchError(error: unknown): string {
         return 'uploadId 无效，请重新上传 zip。';
       case 'PROBLEM_NOT_FOUND':
         return '题目不存在';
+      case 'UNMAPPED_PROBLEMS':
+        return `有题目文件夹未映射：${error.message}`;
       case 'BAD_REQUEST':
         return '请求参数有误';
       default:
@@ -125,6 +161,8 @@ export function AdminBatchPage() {
   const [uploadResult, setUploadResult] = useState<BatchUploadResult | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [studentLevel, setStudentLevel] = useState(1);
+  const [problemLevel, setProblemLevel] = useState(0);
+  const [problemMap, setProblemMap] = useState<Record<string, number | undefined>>({});
   const [problemId, setProblemId] = useState<number | undefined>(undefined);
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
@@ -148,6 +186,10 @@ export function AdminBatchPage() {
   });
 
   const job = batchQuery.data ?? null;
+  const problemsById = useMemo(
+    () => new Map((problemsQuery.data ?? []).map((problem) => [problem.id, problem])),
+    [problemsQuery.data],
+  );
   const sourcePaths = useMemo(
     () => (uploadResult?.files ?? []).filter(isSourceFile),
     [uploadResult],
@@ -164,13 +206,105 @@ export function AdminBatchPage() {
     [uploadResult, studentLevel],
   );
   const example = parsedStudents[0];
+  const multiProblem = problemLevel > 0;
+  const folderKeys = useMemo(
+    () =>
+      multiProblem
+        ? parseFolderKeys(uploadResult?.files ?? [], studentLevel, problemLevel)
+        : [],
+    [uploadResult, studentLevel, problemLevel, multiProblem],
+  );
+
+  const multiPreview = useMemo(() => {
+    if (!multiProblem || !uploadResult) {
+      return {
+        pairs: [] as MultiPair[],
+        unresolved: [] as string[],
+        studentCount: 0,
+        problemIds: [] as number[],
+      };
+    }
+    const maxLevel = Math.max(studentLevel, problemLevel);
+    const seen = new Set<string>();
+    const pairs: MultiPair[] = [];
+    const unresolved = new Set<string>();
+    for (const path of uploadResult.files) {
+      if (!isSourceFile(path)) continue;
+      const parts = path.split('/');
+      if (parts.length <= maxLevel) continue;
+      const student = parts[studentLevel - 1];
+      const folder = parts[problemLevel - 1];
+      if (!student || !folder) continue;
+      const resolved =
+        problemMap[folder] ??
+        autoProblemId(folder, problemsById) ??
+        undefined;
+      const problem = resolved ? problemsById.get(resolved) : undefined;
+      if (!resolved || !problem) {
+        unresolved.add(folder);
+        continue;
+      }
+      const key = `${student}|${resolved}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pairs.push({
+        student,
+        folder,
+        problemId: resolved,
+        problemTitle: problem.title,
+        path,
+      });
+    }
+    pairs.sort(
+      (left, right) =>
+        left.student.localeCompare(right.student) || left.problemId - right.problemId,
+    );
+    return {
+      pairs,
+      unresolved: [...unresolved].sort(),
+      studentCount: new Set(pairs.map((pair) => pair.student)).size,
+      problemIds: [...new Set(pairs.map((pair) => pair.problemId))].sort(
+        (left, right) => left - right,
+      ),
+    };
+  }, [
+    multiProblem,
+    uploadResult,
+    studentLevel,
+    problemLevel,
+    problemMap,
+    problemsById,
+  ]);
+
+  useEffect(() => {
+    if (!multiProblem || !uploadResult) {
+      setProblemMap({});
+      return;
+    }
+    setProblemMap((previous) => {
+      const next: Record<string, number | undefined> = {};
+      for (const folder of folderKeys) {
+        const auto = autoProblemId(folder, problemsById);
+        if (auto !== null) {
+          next[folder] = auto;
+        } else if (previous[folder] && problemsById.has(previous[folder]!)) {
+          next[folder] = previous[folder];
+        }
+      }
+      return next;
+    });
+  }, [multiProblem, uploadResult, folderKeys, problemsById]);
 
   const batchRunning = batchId !== null && job?.status !== 'finished';
+  const multiReady =
+    multiProblem &&
+    multiPreview.pairs.length > 0 &&
+    multiPreview.unresolved.length === 0;
   const canRun =
     Boolean(uploadResult) &&
-    problemId !== undefined &&
     !starting &&
-    !batchRunning;
+    !batchRunning &&
+    (multiProblem ? multiReady : problemId !== undefined);
 
   const uploadZip = async (file: File) => {
     if (!file.name.toLowerCase().endsWith('.zip')) {
@@ -195,6 +329,8 @@ export function AdminBatchPage() {
       );
       setUploadResult(result);
       setStudentLevel(1);
+      setProblemLevel(0);
+      setProblemMap({});
       message.success(`zip 解析成功，共 ${result.files.length} 个文件`);
     } catch (error) {
       setUploadError(describeBatchError(error));
@@ -215,15 +351,24 @@ export function AdminBatchPage() {
   };
 
   const startBatch = async () => {
-    if (!uploadResult || problemId === undefined || !canRun) return;
+    if (!uploadResult || !canRun) return;
     setStarting(true);
     setRunError(null);
     try {
       const result = await apiPost<BatchRunResult>('/api/admin/batch/run', {
         uploadId: uploadResult.uploadId,
-        problemId,
         studentLevel,
         language: 'cpp17',
+        ...(multiProblem
+          ? {
+              problemLevel,
+              problemMap: Object.fromEntries(
+                Object.entries(problemMap).filter(
+                  (entry): entry is [string, number] => typeof entry[1] === 'number',
+                ),
+              ),
+            }
+          : { problemId }),
       });
       setBatchId(result.id);
       message.success(`已提交 ${result.count} 份代码，开始评测`);
@@ -237,9 +382,10 @@ export function AdminBatchPage() {
 
   const exportCsv = () => {
     if (!job || job.items.length === 0) return;
-    const header = ['选手', '源文件', '状态', 'Verdict', '得分', '用时(ms)', '内存(KB)'];
+    const header = ['选手', '题目', '源文件', '状态', 'Verdict', '得分', '用时(ms)', '内存(KB)'];
     const rows = job.items.map((item) => [
       item.student,
+      item.problemTitle ?? `#${item.problemId}`,
       item.sourcePath,
       statusLabel(item.status),
       item.verdict ?? '',
@@ -264,6 +410,16 @@ export function AdminBatchPage() {
 
   const columns: TableColumnsType<BatchResultItem> = [
     { title: '选手', dataIndex: 'student', width: 130 },
+    {
+      title: '题目',
+      dataIndex: 'problemTitle',
+      width: 180,
+      render: (_value, item) => (
+        <span title={item.problemTitle ?? `#${item.problemId}`}>
+          {item.problemTitle ?? `#${item.problemId}`}
+        </span>
+      ),
+    },
     {
       title: '源文件',
       dataIndex: 'sourcePath',
@@ -319,6 +475,9 @@ export function AdminBatchPage() {
   const judgedCount =
     job?.items.filter((item) => item.status === 'finished' || item.status === 'failed')
       .length ?? 0;
+  const resultMulti = Boolean(job?.multiProblem);
+  const distinctStudentCount = new Set((job?.items ?? []).map((item) => item.student)).size;
+  const distinctProblemCount = new Set((job?.items ?? []).map((item) => item.problemId)).size;
 
   const problemOptions = (problemsQuery.data ?? []).map((problem) => ({
     value: problem.id,
@@ -439,32 +598,148 @@ export function AdminBatchPage() {
               disabled={!uploadResult || uploading}
             />
           </div>
+          <div className="batch-field batch-problem-level-field">
+            <span className="muted">题目层级</span>
+            <Select
+              value={problemLevel}
+              options={[
+                { value: 0, label: '不启用（单题模式）' },
+                ...LEVEL_OPTIONS.map((option) => ({
+                  ...option,
+                  label: `第 ${option.value} 层`,
+                })),
+              ]}
+              onChange={(value: number) => setProblemLevel(value)}
+              style={{ width: 190 }}
+              disabled={!uploadResult || uploading}
+            />
+          </div>
           <div className="batch-level-hint muted">
             {uploadResult
-              ? `zip 内路径最大深度 ${maxDepth}；当前取第 ${studentLevel} 层目录作为选手名。`
+              ? multiProblem
+                ? `zip 内路径最大深度 ${maxDepth}；学生取第 ${studentLevel} 层，题目取第 ${problemLevel} 层目录。`
+                : `zip 内路径最大深度 ${maxDepth}；当前取第 ${studentLevel} 层目录作为选手名。`
               : '上传 zip 后可调整层级。'}
           </div>
           <div className="batch-example">
-            {example ? (
+            {multiProblem && multiPreview.pairs[0] ? (
+              <span>
+                示例：<span className="mono">{multiPreview.pairs[0].path}</span> → 选手{' '}
+                <strong>{multiPreview.pairs[0].student}</strong> · 题目{' '}
+                <strong>
+                  {multiPreview.pairs[0].problemTitle}（#{multiPreview.pairs[0].problemId}）
+                </strong>
+              </span>
+            ) : example ? (
               <span>
                 示例：<span className="mono">{example.path}</span> → 选手{' '}
                 <strong>{example.student}</strong>
               </span>
             ) : uploadResult ? (
               <span className="batch-example-empty">
-                当前层级无法解析出选手（源文件路径层级不足），请调小层级。
+                {multiProblem
+                  ? '当前层级无法解析出“学生/题目”，请检查层级或题目映射。'
+                  : '当前层级无法解析出选手（源文件路径层级不足），请调小层级。'}
               </span>
             ) : (
               <span className="muted">等待上传 zip。</span>
             )}
           </div>
+          {uploadResult && multiProblem ? (
+            <div className="batch-folder-map">
+              <div className="batch-preview-head">
+                <span>文件夹 → 题目映射</span>
+                <span className="muted">
+                  {folderKeys.length} 个题目文件夹
+                  {multiPreview.unresolved.length > 0
+                    ? ` · ${multiPreview.unresolved.length} 个未映射`
+                    : ''}
+                </span>
+              </div>
+              {folderKeys.length === 0 ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description="当前题目层级没有可识别的文件夹"
+                />
+              ) : (
+                <div className="batch-map-list">
+                  {folderKeys.map((folder) => {
+                    const auto = autoProblemId(folder, problemsById);
+                    const selected = problemMap[folder] ?? auto ?? undefined;
+                    return (
+                      <div
+                        className={`batch-map-row${
+                          selected === undefined ? ' batch-map-row-unresolved' : ''
+                        }`}
+                        key={folder}
+                      >
+                        <span className="mono batch-map-folder">{folder}</span>
+                        <span className="muted batch-map-auto">
+                          {auto !== null ? '数字 ID 自动匹配' : '手动映射'}
+                        </span>
+                        <Select
+                          allowClear={auto === null}
+                          showSearch
+                          optionFilterProp="label"
+                          placeholder="选择题目"
+                          value={selected}
+                          options={problemOptions}
+                          onChange={(value: number | undefined) =>
+                            setProblemMap((previous) => ({
+                              ...previous,
+                              [folder]: value,
+                            }))
+                          }
+                          loading={problemsQuery.isPending}
+                          style={{ flex: 1, minWidth: 220 }}
+                        />
+                        {selected === undefined ? (
+                          <Tag color="red">未映射</Tag>
+                        ) : (
+                          <Tag color="green">已映射</Tag>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          ) : null}
           {uploadResult ? (
             <div className="batch-preview">
               <div className="batch-preview-head">
-                <span>解析预览</span>
-                <span className="muted">{parsedStudents.length} 位选手</span>
+                <span>{multiProblem ? '学生 × 题目预览' : '解析预览'}</span>
+                <span className="muted">
+                  {multiProblem
+                    ? `${multiPreview.studentCount} 位学生 × ${multiPreview.problemIds.length} 道题 · ${multiPreview.pairs.length} 条`
+                    : `${parsedStudents.length} 位选手`}
+                </span>
               </div>
-              {parsedStudents.length === 0 ? (
+              {multiProblem ? (
+                multiPreview.pairs.length === 0 ? (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description="当前层级没有可识别的“学生/题目”组合"
+                  />
+                ) : (
+                  <div className="batch-preview-list">
+                    {multiPreview.pairs.map((pair) => (
+                      <div
+                        className="batch-preview-row batch-preview-row-multi"
+                        key={`${pair.student}|${pair.problemId}`}
+                      >
+                        <span className="batch-preview-student">{pair.student}</span>
+                        <span className="batch-preview-problem">
+                          {pair.problemTitle} · #{pair.problemId}
+                        </span>
+                        <span className="mono batch-preview-path" title={pair.path}>
+                          {pair.path}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )
+              ) : parsedStudents.length === 0 ? (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
                   description="当前层级没有可识别的选手"
@@ -486,19 +761,29 @@ export function AdminBatchPage() {
         </Card>
 
         <Card className="oij-card" title="3. 评测配置">
-          <div className="batch-field batch-problem-field">
-            <span className="muted">题目</span>
-            <Select
-              showSearch
-              optionFilterProp="label"
-              placeholder={problemsQuery.isPending ? '正在加载题目…' : '选择题目'}
-              value={problemId}
-              options={problemOptions}
-              onChange={(value: number) => setProblemId(value)}
-              style={{ width: '100%' }}
-              loading={problemsQuery.isPending}
+          {multiProblem ? (
+            <Alert
+              className="batch-alert"
+              type="info"
+              showIcon
+              message="多题模式"
+              description={`按“学生第 ${studentLevel} 层 / 题目第 ${problemLevel} 层”解析，每位学生的每道题生成一条提交；数值文件夹自动映射题目 ID，其余文件夹需在上方选择题目。`}
             />
-          </div>
+          ) : (
+            <div className="batch-field batch-problem-field">
+              <span className="muted">题目</span>
+              <Select
+                showSearch
+                optionFilterProp="label"
+                placeholder={problemsQuery.isPending ? '正在加载题目…' : '选择题目'}
+                value={problemId}
+                options={problemOptions}
+                onChange={(value: number) => setProblemId(value)}
+                style={{ width: '100%' }}
+                loading={problemsQuery.isPending}
+              />
+            </div>
+          )}
           {problemsQuery.isError ? (
             <Alert
               className="batch-alert"
@@ -519,7 +804,11 @@ export function AdminBatchPage() {
           </div>
           <div className="batch-config-hint muted">
             {uploadResult
-              ? `将提交 ${parsedStudents.length} 位选手、共 ${sourcePaths.length} 个源文件。`
+              ? multiProblem
+                ? multiPreview.unresolved.length > 0
+                  ? `有 ${multiPreview.unresolved.length} 个题目文件夹未映射：${multiPreview.unresolved.join('、')}，请先完成映射。`
+                  : `将提交 ${multiPreview.studentCount} 位学生、${multiPreview.problemIds.length} 道题、共 ${multiPreview.pairs.length} 条提交。`
+                : `将提交 ${parsedStudents.length} 位选手、共 ${sourcePaths.length} 个源文件。`
               : '请先上传 zip。'}
           </div>
           {runError ? (
@@ -592,18 +881,31 @@ export function AdminBatchPage() {
         ) : job ? (
           <div>
             <div className="batch-result-meta muted">
-              批次 #{job.id} · 题目 #{job.problemId} · 层级 {job.studentLevel} · 已评测{' '}
-              {judgedCount} / {totalStudents}
+              {job.multiProblem
+                ? `批次 #${job.id} · 多题 · 学生层级 ${job.studentLevel} · 已评测 ${judgedCount} / ${totalStudents}`
+                : `批次 #${job.id} · 题目 #${job.problemId} · 层级 ${job.studentLevel} · 已评测 ${judgedCount} / ${totalStudents}`}
             </div>
             <div className="batch-summary">
               <div className="batch-stat">
                 <span className="batch-stat-value">{acCount}</span>
-                <span className="muted">AC 人数</span>
+                <span className="muted">{resultMulti ? 'AC 数量' : 'AC 人数'}</span>
               </div>
               <div className="batch-stat">
                 <span className="batch-stat-value">{totalStudents}</span>
-                <span className="muted">总人数</span>
+                <span className="muted">{resultMulti ? '总提交' : '总人数'}</span>
               </div>
+              {resultMulti ? (
+                <>
+                  <div className="batch-stat">
+                    <span className="batch-stat-value">{distinctStudentCount}</span>
+                    <span className="muted">学生数</span>
+                  </div>
+                  <div className="batch-stat">
+                    <span className="batch-stat-value">{distinctProblemCount}</span>
+                    <span className="muted">题目数</span>
+                  </div>
+                </>
+              ) : null}
               <div className="batch-stat">
                 <span className="batch-stat-value">{averageScore.toFixed(1)}</span>
                 <span className="muted">平均分</span>
@@ -611,7 +913,7 @@ export function AdminBatchPage() {
             </div>
             <Table<BatchResultItem>
               className="oij-table"
-              rowKey="student"
+              rowKey={(item) => `${item.student}:${item.problemId}`}
               size="small"
               columns={columns}
               dataSource={job.items}
