@@ -88,13 +88,14 @@ function seedFinishedSubmission(
     verdict?: string;
     score?: number;
     contestId?: number | null;
+    problemId?: number;
     withResults?: boolean;
   } = {},
 ): { submissionId: number; taskId: number } {
   const status = options.status ?? 'finished';
   const submissionId = createSubmission(ctx.db, {
     contestId: options.contestId ?? null,
-    problemId: ctx.problemId,
+    problemId: options.problemId ?? ctx.problemId,
     userId: ctx.userId,
     language: 'cpp17',
     sourcePath: `submissions/seed-${sourceSequence++}.cpp`,
@@ -338,6 +339,105 @@ describe('contest batch rejudge', () => {
       expect(getSubmission(ctx.db, tle2.submissionId)!.status).toBe('queued');
       expect(getTestResults(ctx.db, tle2.submissionId)).toEqual([]);
       expect(getSubmission(ctx.db, ac2.submissionId)!.status).toBe('finished');
+    } finally {
+      await app.close();
+    }
+  });
+});
+
+describe('problem batch rejudge', () => {
+  it('rejudges terminal submissions of one problem only', async () => {
+    const ctx = setup();
+    const otherProblemId = createProblem(ctx.db, {
+      title: 'Other',
+      type: 'standard',
+      timeMs: 1000,
+      memoryMb: 64,
+      testcases: [{ inputPath: '1.in', outputPath: '1.out', points: 100 }],
+    });
+    const first = seedFinishedSubmission(ctx);
+    const second = seedFinishedSubmission(ctx);
+    const other = seedFinishedSubmission(ctx, { problemId: otherProblemId });
+
+    const app = await buildApp({ db: ctx.db, config: ctx.config });
+    try {
+      const admin = createRoleUser(ctx, 'admin');
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/admin/problems/${ctx.problemId}/rejudge`,
+        headers: { cookie: admin.cookie },
+        payload: {},
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      const body = response.json() as {
+        data: { rejudged: number; skipped: number; ids: number[] };
+      };
+      expect(body.data.rejudged).toBe(2);
+      expect(body.data.skipped).toBe(0);
+      expect(body.data.ids.sort()).toEqual([first.submissionId, second.submissionId].sort());
+
+      for (const id of [first.submissionId, second.submissionId]) {
+        expect(getSubmission(ctx.db, id)!.status).toBe('queued');
+        expect(taskRows(ctx, id)).toHaveLength(1);
+        expect(taskRows(ctx, id)[0].status).toBe('queued');
+      }
+      expect(getSubmission(ctx.db, other.submissionId)!.status).toBe('finished');
+      expect(taskRows(ctx, other.submissionId)[0].status).toBe('done');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('skips queued and running rows even when their status is requested', async () => {
+    const ctx = setup();
+    const finished = seedFinishedSubmission(ctx);
+    const queued = seedFinishedSubmission(ctx, { status: 'queued', verdict: null });
+    const running = seedFinishedSubmission(ctx, { status: 'running', verdict: null });
+
+    const app = await buildApp({ db: ctx.db, config: ctx.config });
+    try {
+      const admin = createRoleUser(ctx, 'admin');
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/admin/problems/${ctx.problemId}/rejudge`,
+        headers: { cookie: admin.cookie },
+        payload: { statuses: ['finished', 'queued', 'running'] },
+      });
+      expect(response.statusCode, response.body).toBe(200);
+      const body = response.json() as {
+        data: { rejudged: number; skipped: number; ids: number[] };
+      };
+      expect(body.data).toEqual({
+        rejudged: 1,
+        skipped: 2,
+        ids: [finished.submissionId],
+      });
+
+      expect(getSubmission(ctx.db, finished.submissionId)!.status).toBe('queued');
+      expect(getSubmission(ctx.db, queued.submissionId)!.status).toBe('queued');
+      expect(taskRows(ctx, queued.submissionId)[0].status).toBe('done');
+      expect(getSubmission(ctx.db, running.submissionId)!.status).toBe('running');
+      expect(taskRows(ctx, running.submissionId)[0].status).toBe('done');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('returns 404 for an unknown problem', async () => {
+    const ctx = setup();
+    const app = await buildApp({ db: ctx.db, config: ctx.config });
+    try {
+      const admin = createRoleUser(ctx, 'admin');
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/admin/problems/99999/rejudge',
+        headers: { cookie: admin.cookie },
+        payload: {},
+      });
+      expect(response.statusCode).toBe(404);
+      const body = response.json() as { error: { code: string; message?: string } };
+      expect(body.error.code).toBe('NOT_FOUND');
+      expect(body.error.message).toBe('problem 99999 not found');
     } finally {
       await app.close();
     }

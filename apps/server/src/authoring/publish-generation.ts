@@ -185,9 +185,10 @@ export function publishGenerationJob(options: {
       problemId,
       publishCases.map(({ item }) => item),
     );
-    db.prepare('UPDATE problems SET time_ms = ?, memory_mb = ? WHERE id = ?').run(
+    db.prepare('UPDATE problems SET time_ms = ?, memory_mb = ?, output_mb = ? WHERE id = ?').run(
       plan.limits.timeMs,
       plan.limits.memoryMb,
+      plan.limits.outputMb,
       problemId,
     );
     markGenerationJobPublished(db, jobId, options.now ?? Date.now());
