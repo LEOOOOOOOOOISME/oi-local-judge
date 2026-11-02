@@ -868,7 +868,7 @@ export interface SubmissionUpdatedPayload {
 export interface ApiEnvelope<T> {
   ok: boolean;
   data?: T;
-  error?: { code?: string; message?: string };
+  error?: { code?: string; message?: string; report?: QualityGateReport };
 }
 
 /** Phase Authoring：Data Plan 与生成任务。 */
@@ -928,6 +928,7 @@ export type GenerationJobStatus =
   | 'queued'
   | 'running'
   | 'finished'
+  | 'published'
   | 'failed'
   | 'canceled';
 
@@ -1001,4 +1002,37 @@ export interface GenerationJobPreview {
   outputLines: number;
   inputBytes: number;
   outputBytes: number;
+}
+
+/** Phase Authoring：发布质量门禁（与后端 quality-gates.ts 对齐）。 */
+export type GateLevel = 'pass' | 'warn' | 'block';
+
+export interface GateFinding {
+  gate: string;
+  level: GateLevel;
+  message: string;
+  detail?: Record<string, unknown>;
+}
+
+export interface QualityGateStats {
+  totalCases: number;
+  maxTimeMs: number;
+  maxMemoryKb: number;
+  duplicateInputCount: number;
+  duplicateRate: number;
+  totalDiskBytes: number;
+}
+
+export interface QualityGateReport {
+  pass: boolean;
+  findings: GateFinding[];
+  stats: QualityGateStats;
+}
+
+/** POST /api/admin/problems/:id/generation-jobs/:jobId/publish 返回结构。 */
+export interface PublishGenerationResult {
+  testcases: number;
+  subtasks: number;
+  warnings: GateFinding[];
+  report: QualityGateReport;
 }

@@ -470,6 +470,15 @@
   white-space: pre-wrap;
 }
 
+.data-plan-gate-findings {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.data-plan-gate-findings li {
+  margin-bottom: 6px;
+}
+
 .help-tip-content {
   max-width: 320px;
   font-size: 12px;

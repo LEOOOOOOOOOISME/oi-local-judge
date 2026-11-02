@@ -20,6 +20,7 @@ import {
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
+  CloudUploadOutlined,
   EyeOutlined,
   PlayCircleOutlined,
   PlusOutlined,
@@ -28,15 +29,17 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiPut } from '../api/client';
+import { ApiError, apiGet, apiPost, apiPut } from '../api/client';
 import type {
   DataPlan,
   DataPlanIssue,
   DataPlanTemplateId,
+  GateFinding,
   GenerationJobCase,
   GenerationJobDetail,
   GenerationJobPreview,
   ProblemDetail,
+  PublishGenerationResult,
 } from '../api/types';
 import { formatBytes } from '../utils/format';
 import { AiPromptDrawer } from './AiPromptDrawer';
@@ -49,6 +52,11 @@ import {
   toGroupDrafts,
   type PlanGroupDraft,
 } from './data-plan-form';
+import {
+  publishErrorText,
+  publishSuccessText,
+  selectGateFindings,
+} from './data-plan-publish';
 
 const TEMPLATE_OPTIONS: Array<{ value: DataPlanTemplateId; label: string }> = [
   { value: '10-30-60', label: '10/30/60（常规题）' },
@@ -61,6 +69,7 @@ const STATUS_COLOR: Record<string, string> = {
   queued: 'blue',
   running: 'processing',
   finished: 'green',
+  published: 'cyan',
   failed: 'red',
   canceled: 'default',
   pending: 'default',
@@ -79,6 +88,30 @@ function newGroupDraft(index: number, seedStart: number): PlanGroupDraft {
   };
 }
 
+function GateFindingList({
+  findings,
+  empty,
+}: {
+  findings: GateFinding[];
+  empty: string;
+}) {
+  if (findings.length === 0) {
+    return <p className="muted">{empty}</p>;
+  }
+  return (
+    <ul className="data-plan-gate-findings">
+      {findings.map((finding, index) => (
+        <li key={`${finding.gate}-${finding.level}-${index}`}>
+          <Tag color={finding.level === 'block' ? 'red' : 'orange'}>
+            {finding.level}
+          </Tag>
+          <span className="mono">{finding.gate}</span>：{finding.message}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 export function DataPlanPanel({
   problemId,
   problem,
@@ -86,7 +119,7 @@ export function DataPlanPanel({
   problemId: number;
   problem: ProblemDetail;
 }) {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const queryClient = useQueryClient();
   const [basePlan, setBasePlan] = useState<DataPlan | null>(null);
   const [drafts, setDrafts] = useState<PlanGroupDraft[]>([]);
@@ -96,6 +129,7 @@ export function DataPlanPanel({
   const [saving, setSaving] = useState(false);
   const [validating, setValidating] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [publishing, setPublishing] = useState(false);
   const [jobId, setJobId] = useState<number | null>(null);
   const [preview, setPreview] = useState<
     (GenerationJobPreview & { title: string }) | null
@@ -236,6 +270,66 @@ export function DataPlanPanel({
       void jobQuery.refetch();
     } catch (error) {
       message.error(error instanceof Error ? error.message : '取消失败');
+    }
+  };
+
+  const publish = async (confirmWarnings: boolean) => {
+    if (!job) return;
+    setPublishing(true);
+    try {
+      const result = await apiPost<PublishGenerationResult>(
+        `/api/admin/problems/${problemId}/generation-jobs/${job.id}/publish`,
+        confirmWarnings ? { confirmWarnings: true } : undefined,
+      );
+      message.success(publishSuccessText(result));
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['admin-testcases', problemId] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-problem', problemId] }),
+        queryClient.invalidateQueries({ queryKey: ['admin-problems'] }),
+        queryClient.invalidateQueries({ queryKey: ['problems'] }),
+        queryClient.invalidateQueries({ queryKey: ['problem', problemId] }),
+      ]);
+      void jobQuery.refetch();
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'QUALITY_GATE_WARNINGS') {
+        modal.confirm({
+          title: '质量门禁有警告',
+          width: 640,
+          content: (
+            <GateFindingList
+              findings={selectGateFindings(error.report, ['warn'])}
+              empty="质量门禁返回了警告，但报告中没有具体条目。确认后仍可发布。"
+            />
+          ),
+          okText: '确认并发布',
+          cancelText: '取消',
+          onOk: () => publish(true),
+        });
+        return;
+      }
+      if (error instanceof ApiError && error.code === 'QUALITY_GATE_BLOCKED') {
+        modal.error({
+          title: '质量门禁未通过',
+          width: 640,
+          content: (
+            <GateFindingList
+              findings={selectGateFindings(error.report, ['block', 'warn'])}
+              empty="质量门禁未通过，但报告中没有具体条目。"
+            />
+          ),
+          okText: '知道了',
+        });
+        return;
+      }
+      message.error(
+        error instanceof ApiError
+          ? publishErrorText(error)
+          : error instanceof Error
+            ? error.message
+            : '发布失败',
+      );
+    } finally {
+      setPublishing(false);
     }
   };
 
@@ -614,7 +708,19 @@ export function DataPlanPanel({
         extra={
           job ? (
             <Space>
-              <Tag color={STATUS_COLOR[job.status]}>{job.status}</Tag>
+              <Tag color={STATUS_COLOR[job.status]}>
+                {job.status === 'published' ? '已发布' : job.status}
+              </Tag>
+              {job.status === 'finished' ? (
+                <Button
+                  type="primary"
+                  icon={<CloudUploadOutlined />}
+                  loading={publishing}
+                  onClick={() => void publish(false)}
+                >
+                  发布到题目
+                </Button>
+              ) : null}
               {job.status === 'queued' || job.status === 'running' ? (
                 <Popconfirm title="取消当前生成任务？" onConfirm={() => void cancelJob()}>
                   <Button danger icon={<StopOutlined />}>
@@ -655,6 +761,22 @@ export function DataPlanPanel({
                 { key: 'message', label: '状态', children: job.message || '—' },
               ]}
             />
+            {job.status === 'finished' ? (
+              <Alert
+                type="info"
+                showIcon
+                style={{ marginTop: 12 }}
+                message="生成已完成，可发布为正式测试点。发布前会跑质量门禁，并替换现有子任务与测试点。"
+              />
+            ) : null}
+            {job.status === 'published' ? (
+              <Alert
+                type="success"
+                showIcon
+                style={{ marginTop: 12 }}
+                message="该生成任务已发布为正式测试点。"
+              />
+            ) : null}
             <Table<GenerationJobCase>
               className="oij-table data-plan-cases"
               rowKey="id"
