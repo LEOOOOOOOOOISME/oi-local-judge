@@ -40,6 +40,7 @@ import type {
 } from '../api/types';
 import { formatBytes } from '../utils/format';
 import { AiPromptDrawer } from './AiPromptDrawer';
+import { HelpTip } from './HelpTip';
 import {
   fromGroupDrafts,
   parsePlanJson,
@@ -336,7 +337,12 @@ export function DataPlanPanel({
       ),
     },
     {
-      title: 'generator 参数',
+      title: (
+        <Space size={2}>
+          generator 参数
+          <HelpTip helpKey="std-generator" label="generator 参数帮助" />
+        </Space>
+      ),
       dataIndex: 'argsText',
       render: (value: string, _row, index) => (
         <Select
@@ -460,7 +466,12 @@ export function DataPlanPanel({
     <div className="data-plan-panel">
       <Card
         className="oij-card"
-        title="数据计划"
+        title={
+          <Space size={4}>
+            数据计划
+            <HelpTip helpKey="data-plan" label="数据计划帮助" />
+          </Space>
+        }
         extra={
           <Space>
             <AiPromptDrawer problem={problem} plan={draftPlan} />
@@ -594,7 +605,12 @@ export function DataPlanPanel({
 
       <Card
         className="oij-card data-plan-job-card"
-        title="生成任务"
+        title={
+          <Space size={4}>
+            生成任务
+            <HelpTip helpKey="std-generator" label="生成任务帮助" />
+          </Space>
+        }
         extra={
           job ? (
             <Space>
