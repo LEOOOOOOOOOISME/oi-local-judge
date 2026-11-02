@@ -5,6 +5,7 @@ export type GenerationJobStatus =
   | 'queued'
   | 'running'
   | 'finished'
+  | 'published'
   | 'failed'
   | 'canceled';
 
@@ -274,6 +275,14 @@ export function updateGenerationCase(
     ...values,
     id,
   );
+}
+
+export function markGenerationJobPublished(db: DatabaseSync, id: number, now: number): void {
+  db.prepare(
+    `UPDATE data_generation_jobs
+     SET status = 'published', finished_at = ?, heartbeat_at = ?
+     WHERE id = ?`,
+  ).run(now, now, id);
 }
 
 export function blockGenerationCases(
