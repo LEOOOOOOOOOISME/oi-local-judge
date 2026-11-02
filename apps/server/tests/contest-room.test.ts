@@ -207,7 +207,7 @@ describe('judge submission events', () => {
     return { db, config, dataDir, userId, problemId, contestId };
   }
 
-  it('adds the contest room to finished and failed submission events', async () => {
+  it('adds the contest and submitter rooms to finished and failed submission events', async () => {
     const { db, config, userId, problemId, contestId } = await setupJudge();
     const events: Array<{ type: string; data: unknown; room?: string }> = [];
 
@@ -226,12 +226,15 @@ describe('judge submission events', () => {
       events: { publish: (event) => events.push(event) },
     });
 
-    expect(events).toHaveLength(1);
-    expect(events[0]).toMatchObject({
-      type: WS_EVENTS.submissionUpdated,
-      room: `contest:${contestId}`,
-    });
-    expect(events[0].data).toMatchObject({ submissionId: finishedId, status: 'finished' });
+    expect(events).toHaveLength(2);
+    expect(events.map((event) => event.room)).toEqual([
+      `contest:${contestId}`,
+      `user:${userId}`,
+    ]);
+    for (const event of events) {
+      expect(event.type).toBe(WS_EVENTS.submissionUpdated);
+      expect(event.data).toMatchObject({ submissionId: finishedId, status: 'finished' });
+    }
 
     const failedEvents: Array<{ type: string; data: unknown; room?: string }> = [];
     const failedId = createSubmission(db, {
@@ -248,12 +251,51 @@ describe('judge submission events', () => {
       submissionId: failedId,
       events: { publish: (event) => failedEvents.push(event) },
     });
-    expect(failedEvents).toHaveLength(1);
-    expect(failedEvents[0]).toMatchObject({
-      type: WS_EVENTS.submissionUpdated,
-      room: `contest:${contestId}`,
+    expect(failedEvents).toHaveLength(2);
+    expect(failedEvents.map((event) => event.room)).toEqual([
+      `contest:${contestId}`,
+      `user:${userId}`,
+    ]);
+    for (const event of failedEvents) {
+      expect(event.type).toBe(WS_EVENTS.submissionUpdated);
+      expect(event.data).toMatchObject({ submissionId: failedId, status: 'failed' });
+    }
+  });
+
+  it('reaches the contest room and the submitter room, but not unrelated users', async () => {
+    const { db, config, userId, problemId, contestId } = await setupJudge();
+    const hub = createHub();
+    const submitter = fakeClient();
+    const otherUser = fakeClient();
+    const contestClient = fakeClient();
+    const admin = fakeClient();
+    hub.subscribe(submitter.client, [`user:${userId}`]);
+    hub.subscribe(otherUser.client, [`user:${userId + 1}`]);
+    hub.subscribe(contestClient.client, [`contest:${contestId}`]);
+    hub.subscribe(admin.client, ['admin']);
+
+    const submissionId = createSubmission(db, {
+      contestId,
+      problemId,
+      userId,
+      language: 'objective',
+      sourcePath: 'answers.json',
+      sourceHash: 'h',
     });
-    expect(failedEvents[0].data).toMatchObject({ submissionId: failedId, status: 'failed' });
+    await judgeSubmission({ db, config, submissionId, events: hub });
+
+    expect(contestClient.sent).toHaveLength(1);
+    expect(submitter.sent).toHaveLength(1);
+    expect(otherUser.sent).toHaveLength(0);
+    // Admin bypasses room scoping and may observe both publishes.
+    expect(admin.sent.length).toBeGreaterThan(0);
+    for (const payload of [contestClient.sent[0], submitter.sent[0]]) {
+      expect(JSON.parse(payload)).toMatchObject({
+        v: 1,
+        type: WS_EVENTS.submissionUpdated,
+        data: { submissionId, status: 'finished' },
+      });
+    }
   });
 
   it('does not scope events for submissions outside a contest', async () => {

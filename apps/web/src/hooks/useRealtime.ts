@@ -8,8 +8,8 @@ import { contestIdFromPathname, realtimeSocketPath } from '../utils/realtime';
 const INVALIDATE_DEBOUNCE_MS = 250;
 
 /**
- * 登录后维持一条 /ws 连接；比赛页额外订阅 `/ws?contestId=<id>` 房间（切换比赛会重连）。
- * 收到 submission.updated 时 debounce 250ms，只失效当前比赛相关的 query。
+ * 登录后维持一条 /ws 连接；比赛页/管理端控制台额外订阅 `/ws?contestId=<id>` 房间
+ * （切换比赛会重连）。收到 submission.updated 时 debounce 250ms，只失效当前比赛相关的 query。
  * 断线自动重连（指数退避，最多 30s）；服务端 1008（未认证）时停止重连。
  */
 export function useRealtime(enabled: boolean): void {
@@ -51,6 +51,7 @@ export function useRealtime(enabled: boolean): void {
         void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
         void queryClient.invalidateQueries({ queryKey: ['contest-detail', contestId] });
         void queryClient.invalidateQueries({ queryKey: ['class-stats', contestId] });
+        void queryClient.invalidateQueries({ queryKey: ['admin-class-stats', contestId] });
       }
     };
 
