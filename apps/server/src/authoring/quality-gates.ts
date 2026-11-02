@@ -178,7 +178,11 @@ export function evaluateQualityGates(input: QualityGateInput): QualityGateReport
     findings.push(finding('compile', 'pass', 'generator / std 编译通过'));
   }
 
-  if (input.determinism.length !== cases.length) {
+  if (input.determinism.length === 0) {
+    findings.push(
+      finding('determinism', 'warn', '未做确定性复跑；发布前请人工确认 generator 可复现'),
+    );
+  } else if (input.determinism.length !== cases.length) {
     findings.push(
       finding(
         'determinism',

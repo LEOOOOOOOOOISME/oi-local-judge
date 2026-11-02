@@ -18,6 +18,7 @@ import {
   startGenerationJob,
   type StartGenerationOptions,
 } from '../authoring/generation-job.js';
+import { publishGenerationJob, PublishError } from '../authoring/publish-generation.js';
 import { migrateAuthoring } from '../storage/authoring-migrate.js';
 import { getDataPlanRow, upsertDataPlan } from '../storage/repos/data-plans.js';
 import {
@@ -369,6 +370,34 @@ export function registerAdminAuthoringRoutes(
       const canceled = cancelGenerationJob(options.db, job.id);
       const current = getGenerationJob(options.db, job.id)!;
       return { ok: true, data: { canceled, status: current.status } };
+    },
+  );
+
+  app.post<{
+    Params: { id: string; jobId: string };
+    Body: { confirmWarnings?: boolean };
+  }>(
+    '/api/admin/problems/:id/generation-jobs/:jobId/publish',
+    { preHandler: guard },
+    async (request, reply) => {
+      try {
+        const data = publishGenerationJob({
+          db: options.db,
+          config: options.config,
+          problemId: Number(request.params.id),
+          jobId: Number(request.params.jobId),
+          confirmWarnings: request.body?.confirmWarnings === true,
+        });
+        return { ok: true, data };
+      } catch (error) {
+        if (error instanceof PublishError) {
+          return reply.code(error.status).send({
+            ok: false,
+            error: { code: error.code, message: error.message, report: error.report },
+          });
+        }
+        throw error;
+      }
     },
   );
 

@@ -236,6 +236,20 @@ export function updateTestcasePoints(
   for (const item of items) update.run(item.points, item.id, problemId);
 }
 
+export function replaceSubtasks(
+  db: DatabaseSync,
+  problemId: number,
+  items: Array<{ name: string; points: number; aggregation: string }>,
+): number[] {
+  db.prepare('DELETE FROM problem_subtasks WHERE problem_id = ?').run(problemId);
+  const insert = db.prepare(
+    'INSERT INTO problem_subtasks(problem_id, name, points, aggregation) VALUES (?, ?, ?, ?)',
+  );
+  return items.map((item) =>
+    Number(insert.run(problemId, item.name, item.points, item.aggregation).lastInsertRowid),
+  );
+}
+
 export function getSubtasks(db: DatabaseSync, problemId: number): SubtaskRow[] {
   return db
     .prepare('SELECT * FROM problem_subtasks WHERE problem_id = ? ORDER BY id')
