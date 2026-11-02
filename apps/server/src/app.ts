@@ -96,6 +96,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   registerCommunityRoutes(app, { db, config });
   registerAdminSystemRoutes(app, {
     db,
+    config,
     adminGuard: requireRole(['admin'], { db, config }),
   });
   registerContestBatchRoutes(app, {
