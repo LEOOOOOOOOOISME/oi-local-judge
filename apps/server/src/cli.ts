@@ -3,6 +3,7 @@ import { openDatabase } from './storage/db.js';
 import { migrate } from './storage/migrate.js';
 import { createHub } from './realtime/hub.js';
 import { ensureAdmin } from './services/bootstrap.js';
+import { recoverInterruptedJudgeTasks } from './storage/repos/judge.js';
 import { startScheduler } from './judge/scheduler.js';
 import { startContestClock } from './services/contest-clock.js';
 import { buildApp } from './app.js';
@@ -16,6 +17,10 @@ ensureAdmin(db, config);
 
 const hub = createHub();
 const app = await buildApp({ db, config, hub, logger: true });
+const recoveredTasks = recoverInterruptedJudgeTasks(db);
+if (recoveredTasks > 0) {
+  app.log.info({ recoveredTasks }, 'requeued interrupted judge tasks');
+}
 const scheduler = startScheduler({ db, config, events: hub });
 const contestClock = startContestClock(db);
 const port = config.port;

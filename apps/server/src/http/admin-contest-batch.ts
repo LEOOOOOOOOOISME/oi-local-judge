@@ -261,6 +261,7 @@ export function registerContestBatchRoutes(
           contestId,
           phase: 'batch_draft',
           batchId,
+          skipCooldown: true,
         },
       );
       addBatchItem(options.db, {

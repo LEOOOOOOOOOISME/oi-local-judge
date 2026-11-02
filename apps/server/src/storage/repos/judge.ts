@@ -1,4 +1,4 @@
-﻿import type { DatabaseSync } from 'node:sqlite';
+import type { DatabaseSync } from 'node:sqlite';
 
 export function createJudgeTask(db: DatabaseSync, submissionId: number, priority = 50): number {
   const result = db
@@ -53,4 +53,38 @@ export function finishJudgeTask(db: DatabaseSync, taskId: number, status: 'done'
 
 export function requeueTask(db: DatabaseSync, taskId: number): void {
   db.prepare("UPDATE judge_tasks SET status = 'queued', worker = NULL WHERE id = ?").run(taskId);
+}
+
+/**
+ * Resets judge tasks left in `running`/`compiling` by an interrupted process
+ * (crash, force-kill) back to `queued` and re-queues their submissions.
+ *
+ * Only interrupted tasks are touched: completed/failed tasks and all result
+ * rows are left intact. Returns the number of recovered tasks.
+ */
+export function recoverInterruptedJudgeTasks(db: DatabaseSync, now = Date.now()): number {
+  const interruptedStatuses = "('running', 'compiling')";
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row = db
+      .prepare(`SELECT COUNT(*) AS n FROM judge_tasks WHERE status IN ${interruptedStatuses}`)
+      .get() as unknown as { n: number };
+    if (row.n === 0) {
+      db.exec('COMMIT');
+      return 0;
+    }
+    db.prepare(
+      `UPDATE submissions SET status = 'queued' WHERE id IN
+         (SELECT submission_id FROM judge_tasks WHERE status IN ${interruptedStatuses})`,
+    ).run();
+    db.prepare(
+      `UPDATE judge_tasks SET status = 'queued', worker = NULL, heartbeat_at = ?
+       WHERE status IN ${interruptedStatuses}`,
+    ).run(now);
+    db.exec('COMMIT');
+    return row.n;
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
 }

@@ -207,6 +207,7 @@ export function registerAdminBatchRoutes(
           language,
           code: source.code,
           contestId: null,
+          skipCooldown: true,
         },
       );
       addBatchItem(options.db, {
