@@ -29,7 +29,7 @@ export function HelpTip({
           <p className="muted">
             文档：<code>{entry.path}</code>
           </p>
-          <Link to="/help">打开帮助中心</Link>
+          <Link to={`/help?doc=${entry.docSlug}`}>在帮助中心查看</Link>
         </div>
       }
     >
