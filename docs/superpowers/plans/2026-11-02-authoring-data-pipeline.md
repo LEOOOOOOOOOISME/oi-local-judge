@@ -2034,7 +2034,6 @@ import {
 import {
   runContractGenerator,
   type ContractGeneratorInput,
-  type ContractGeneratorResult,
 } from './generator-contract.js';
 import {
   blockGenerationCases,
@@ -2053,6 +2052,13 @@ export type GenerationAssetKind = 'generator' | 'std' | 'validator';
 export interface CompileOutcome {
   ok: boolean;
   exe?: string;
+  message: string;
+}
+
+export interface GenerateOutcome {
+  ok: boolean;
+  stdout: string;
+  stderr: string;
   message: string;
 }
 
@@ -2083,7 +2089,7 @@ export interface ValidatorOutcome {
 
 export interface GenerationRuntime {
   compile(kind: GenerationAssetKind): Promise<CompileOutcome>;
-  generate(input: ContractGeneratorInput): Promise<ContractGeneratorResult>;
+  generate(input: ContractGeneratorInput): Promise<GenerateOutcome>;
   runStd(input: StdRunInput): Promise<StdOutcome>;
   validate(input: {
     exe: string;
@@ -2120,7 +2126,15 @@ export function createDefaultGenerationRuntime(
       });
       return { ok: result.ok, exe: result.exe, message: result.message };
     },
-    generate: (input) => runContractGenerator(input),
+    async generate(input) {
+      const result = await runContractGenerator(input);
+      return {
+        ok: result.ok,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        message: result.message,
+      };
+    },
     async runStd(input) {
       const stderrFile = join(input.workdir, 'std.stderr.txt');
       try {
@@ -2436,7 +2450,7 @@ export async function runGenerationJob(
     const outputRel = relativeDataPath(options.config.dataDir, outputPath);
     const group = groupById.get(row.group_id);
 
-    let generated: ContractGeneratorResult;
+    let generated: GenerateOutcome;
     try {
       generated = await runtime.generate({
         generator: generatorExe,
