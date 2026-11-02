@@ -4,6 +4,7 @@ import { migrate } from './storage/migrate.js';
 import { createHub } from './realtime/hub.js';
 import { ensureAdmin } from './services/bootstrap.js';
 import { startScheduler } from './judge/scheduler.js';
+import { startContestClock } from './services/contest-clock.js';
 import { buildApp } from './app.js';
 import { join } from 'node:path';
 
@@ -16,6 +17,7 @@ ensureAdmin(db, config);
 const hub = createHub();
 const app = await buildApp({ db, config, hub, logger: true });
 const scheduler = startScheduler({ db, config, events: hub });
+const contestClock = startContestClock(db);
 const port = config.port;
 const host = config.host;
 await app.listen({ port, host });
@@ -32,6 +34,7 @@ const parentPort = (
 parentPort?.postMessage({ type: 'ready', port: actualPort });
 
 async function shutdown() {
+  contestClock.stop();
   await scheduler.stop();
   await app.close();
   db.close();
