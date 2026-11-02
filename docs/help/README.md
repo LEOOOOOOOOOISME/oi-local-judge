@@ -137,6 +137,6 @@ related: [authoring/std-generator-contract, authoring/ai-prompts]
 
 ## 6. 相关
 
-- [v0.3 需求与出题体验设计](../superpowers/specs/2026-11-02-oi-judge-v0.3-requirements.md)
+- v0.3 需求与出题体验设计：`docs/superpowers/specs/2026-11-02-oi-judge-v0.3-requirements.md`
 - [排名与赛制](../ranking.md)
 - [比赛批量导入](../batch-import.md)
