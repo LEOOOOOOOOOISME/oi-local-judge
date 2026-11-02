@@ -160,7 +160,11 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     '/api/admin/contests/:id/class-stats',
     { preHandler: guards },
     async (request, reply) => {
-      const rows = getClassStats(options.db, Number(request.params.id));
+      const rows = await getClassStats(
+        options.db,
+        Number(request.params.id),
+        options.config?.dataDir ?? process.cwd(),
+      );
       if (!rows) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       return { ok: true, data: rows };
     },

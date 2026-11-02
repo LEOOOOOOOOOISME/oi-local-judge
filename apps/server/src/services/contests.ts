@@ -13,6 +13,7 @@ import { getProblem } from '../storage/repos/problems.js';
 import { listContestSubmissions } from '../storage/repos/submissions.js';
 import { seedOfficialScoresFromSubmissions } from '../storage/repos/official-scores.js';
 import { getUserById } from '../storage/repos/users.js';
+import { getOfficialRanking } from './official-ranking.js';
 
 export interface ContestRankingRow extends RankingRow {
   username: string;
@@ -130,8 +131,12 @@ export interface ClassStatRow {
   bestRank: number;
 }
 
-export function getClassStats(db: DatabaseSync, contestId: number): ClassStatRow[] | null {
-  const ranking = getContestRanking(db, contestId);
+export async function getClassStats(
+  db: DatabaseSync,
+  contestId: number,
+  dataDir = process.cwd(),
+): Promise<ClassStatRow[] | null> {
+  const ranking = await getOfficialRanking(db, contestId, dataDir);
   if (!ranking) return null;
   const groups = new Map<string, { scores: number[]; ac: number; best: number }>();
   for (const row of ranking.rows) {

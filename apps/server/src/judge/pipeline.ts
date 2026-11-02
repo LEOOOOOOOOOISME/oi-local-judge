@@ -58,7 +58,7 @@ export const JUDGE_RESULT_MESSAGE_LIMIT = 512;
 const STATUS_QUOTA_EXCEEDED = 0xc0000044; // 3221225540
 
 export interface EventPublisher {
-  publish(event: { type: string; data: unknown }): void;
+  publish(event: { type: string; data: unknown; room?: string }): void;
 }
 
 export interface JudgeSubmissionOptions {
@@ -162,13 +162,29 @@ function firstStderrLine(path: string): string {
   }
 }
 
+function submissionRoom(db: DatabaseSync, submissionId: number): string | undefined {
+  try {
+    const contestId = getSubmission(db, submissionId)?.contest_id;
+    return contestId === null || contestId === undefined ? undefined : `contest:${contestId}`;
+  } catch {
+    return undefined;
+  }
+}
+
 function publishUpdate(
+  db: DatabaseSync,
+  submissionId: number,
   events: EventPublisher | undefined,
   data: Record<string, unknown>,
 ): void {
   if (!events) return;
+  const room = submissionRoom(db, submissionId);
   try {
-    events.publish({ type: WS_EVENTS.submissionUpdated, data });
+    events.publish({
+      type: WS_EVENTS.submissionUpdated,
+      data,
+      ...(room === undefined ? {} : { room }),
+    });
   } catch {
     // A broken event sink must never break judging.
   }
@@ -207,7 +223,7 @@ function persistJudged(
       message,
     });
   });
-  publishUpdate(events, {
+  publishUpdate(db, submissionId, events, {
     submissionId,
     status: 'finished',
     verdict,
@@ -238,7 +254,7 @@ function markSubmissionFailed(
       message: clipped,
     });
   });
-  publishUpdate(events, {
+  publishUpdate(db, submissionId, events, {
     submissionId,
     status: 'failed',
     verdict: 'SE',
