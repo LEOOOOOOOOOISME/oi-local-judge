@@ -139,6 +139,9 @@ export function getCorrectionRanking(
     row.rank = rows[index - 1].correctedTotal === row.correctedTotal ? rows[index - 1].rank : index + 1;
   });
 
+  const endedBySchedule =
+    contest.end_at !== null && now >= contest.end_at && contest.status !== 'draft';
+
   return {
     contest,
     problems,
@@ -146,7 +149,7 @@ export function getCorrectionRanking(
     correctionsOpen:
       contest.status === 'ended' ||
       contest.status === 'archived' ||
-      (contest.end_at !== null && now >= contest.end_at),
+      endedBySchedule,
     archived: contest.archived_at !== null,
   };
 }

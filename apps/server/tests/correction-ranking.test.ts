@@ -47,6 +47,7 @@ describe('correction ranking', () => {
         "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",
       ).run(contestId, userId);
     }
+    db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(contestId);
     upsertOfficialScore(db, {
       contestId,
       userId: alice,
@@ -102,6 +103,18 @@ describe('correction ranking', () => {
       correctedTotal: 100,
       rank: 1,
     });
+  });
+
+  it('does not open corrections for a draft contest whose end_at has passed', () => {
+    const contestId = createContest(db, {
+      name: 'Draft Past',
+      mode: 'oi',
+      problemIds: [problemId],
+      startAt: Date.now() - 100_000,
+      endAt: Date.now() - 1_000,
+    });
+    const data = getCorrectionRanking(db, contestId)!;
+    expect(data.correctionsOpen).toBe(false);
   });
 
   it('marks post-end submissions as correction and rejects non-participants', () => {
