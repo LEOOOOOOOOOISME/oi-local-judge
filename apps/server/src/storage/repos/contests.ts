@@ -239,6 +239,21 @@ export function isContestParticipant(
   return row !== undefined;
 }
 
+export function getContestParticipantStatus(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+): 'accepted' | 'pending' | 'rejected' | null {
+  const row = db
+    .prepare('SELECT status FROM contest_participants WHERE contest_id = ? AND user_id = ?')
+    .get(contestId, userId) as { status: string } | undefined;
+  if (!row) return null;
+  if (row.status === 'accepted' || row.status === 'pending' || row.status === 'rejected') {
+    return row.status;
+  }
+  return null;
+}
+
 export function getParticipantRows(db: DatabaseSync, contestId: number) {
   return db
     .prepare(
