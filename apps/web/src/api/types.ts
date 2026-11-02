@@ -1060,3 +1060,43 @@ export interface BackupEntry {
   sizeBytes: number;
   manifest: Record<string, unknown>;
 }
+
+/** Settings Center v1.1：运行时设置（GET/PUT /api/admin/system/settings）。 */
+export interface SystemSettingsEffective {
+  host: string;
+  port: number;
+  judgeConcurrency: number;
+  gxx: string;
+  sessionTtlSec: number;
+}
+
+/** `settings.json` 中实际持久化的字段；未写入的字段为 undefined。 */
+export interface SystemSettingsPersisted {
+  host?: string;
+  port?: number;
+  judgeConcurrency?: number;
+  gxx?: string;
+  sessionTtlSec?: number;
+}
+
+export interface SystemSettings {
+  effective: SystemSettingsEffective;
+  persisted: SystemSettingsPersisted;
+  /** 被环境变量覆盖的字段名（优先级高于 settings.json）。 */
+  envOverrides: string[];
+}
+
+export type SystemSettingsPatch = Partial<SystemSettingsEffective>;
+
+/** PUT /api/admin/system/settings 返回结构。 */
+export interface SystemSettingsUpdateResult {
+  settings: SystemSettings;
+  restartRequired: true;
+}
+
+/** POST /api/admin/system/restore 返回结构（恢复仅在下次启动时应用）。 */
+export interface RestoreRequestResult {
+  backupId: string;
+  requestedAt: number;
+  restartRequired: true;
+}

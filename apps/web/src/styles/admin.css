@@ -573,3 +573,64 @@
   margin-top: 10px;
   font-size: 12px;
 }
+
+/* Settings Center v1.1：运行时设置与恢复 */
+.system-settings-note {
+  margin-bottom: 12px;
+}
+
+.system-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+}
+
+@media (max-width: 900px) {
+  .system-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.system-settings-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.system-settings-source-title {
+  margin: 18px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.system-settings-value {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.system-settings-env {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.system-restore-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+  font-size: 12px;
+}
+
+.system-restore-hint {
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}
