@@ -1036,3 +1036,27 @@ export interface PublishGenerationResult {
   warnings: GateFinding[];
   report: QualityGateReport;
 }
+
+/** System Ops v1.1：系统诊断与备份。 */
+export type DiagnosticStatus = 'pass' | 'warn' | 'fail';
+
+export interface DiagnosticCheck {
+  name: string;
+  status: DiagnosticStatus;
+  detail: string;
+}
+
+export interface DiagnosticsReport {
+  ok: boolean;
+  generatedAt: number;
+  checks: DiagnosticCheck[];
+  queue: { queued: number; running: number; failed: number };
+}
+
+export interface BackupEntry {
+  id: string;
+  path: string;
+  createdAt: number;
+  sizeBytes: number;
+  manifest: Record<string, unknown>;
+}

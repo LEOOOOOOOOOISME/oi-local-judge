@@ -492,3 +492,84 @@
   margin: 0 0 8px;
   padding-left: 18px;
 }
+
+/* System Ops v1.1：系统诊断与备份 */
+.system-overall {
+  margin-bottom: 14px;
+}
+
+.system-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.system-stat {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+}
+
+.system-stat-ok {
+  border-color: #c8e9d5;
+  background: #ecf8f1;
+}
+
+.system-stat-warn {
+  border-color: #f0e2b8;
+  background: #fdf8e8;
+}
+
+.system-stat-bad {
+  border-color: #f3c9c9;
+  background: #fdf0f0;
+}
+
+.system-stat-label {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.system-stat-value {
+  margin-top: 1px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.system-stat-value-text {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.system-check-name {
+  font-size: 12px;
+}
+
+.system-check-detail {
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.system-backup-note,
+.system-backup-feedback {
+  margin-bottom: 12px;
+}
+
+.system-backup-path {
+  display: inline-block;
+  max-width: 420px;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.system-backup-footer {
+  margin-top: 10px;
+  font-size: 12px;
+}
