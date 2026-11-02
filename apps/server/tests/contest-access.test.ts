@@ -86,6 +86,7 @@ describe('contest submission access', () => {
       name: 'C', startAt: 1000, endAt: 2000, problemIds: [ctx.p1],
     });
     addParticipant(ctx.db, contestId, ctx.alice);
+    ctx.db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(contestId);
     const { id } = submit(ctx, ctx.alice, ctx.p1, contestId, 1500);
     const row = ctx.db.prepare('SELECT phase FROM submissions WHERE id = ?').get(id) as { phase: string };
     expect(row.phase).toBe('contest');
@@ -98,6 +99,7 @@ describe('contest submission access', () => {
       name: 'C', startAt: 1000, endAt: 2000, problemIds: [ctx.p1],
     });
     addParticipant(ctx.db, contestId, ctx.alice);
+    ctx.db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(contestId);
     const { id } = submit(ctx, ctx.alice, ctx.p1, contestId, 2500);
     const row = ctx.db.prepare('SELECT phase FROM submissions WHERE id = ?').get(id) as { phase: string };
     expect(row.phase).toBe('correction');
@@ -134,6 +136,26 @@ describe('contest submission access', () => {
     const { id } = submit(ctx, ctx.alice, ctx.p1, null, 500);
     const row = ctx.db.prepare('SELECT phase FROM submissions WHERE id = ?').get(id) as { phase: string };
     expect(row.phase).toBe('contest');
+    ctx.db.close();
+  });
+
+  it('rejects a draft contest even with no schedule', () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, { name: 'C', problemIds: [ctx.p1] });
+    addParticipant(ctx.db, contestId, ctx.alice);
+    expect(() => submit(ctx, ctx.alice, ctx.p1, contestId, 1500))
+      .toThrowError(/not started/i);
+    ctx.db.close();
+  });
+
+  it('rejects a draft contest even if start_at has passed', () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, {
+      name: 'C', startAt: 1000, endAt: 2000, problemIds: [ctx.p1],
+    });
+    addParticipant(ctx.db, contestId, ctx.alice);
+    expect(() => submit(ctx, ctx.alice, ctx.p1, contestId, 1500))
+      .toThrowError(/not started/i);
     ctx.db.close();
   });
 });

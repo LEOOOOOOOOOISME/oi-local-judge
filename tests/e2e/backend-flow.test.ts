@@ -32,6 +32,7 @@ beforeAll(async () => {
     sourceDir: join(process.cwd(), 'tools/seed/sample-problem'),
   });
   contestId = createContest(db, { name: 'E2E', problemIds: [problemId] });
+  db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(contestId);
   const admin = getUserByUsername(db, config.adminUsername)!;
   addParticipant(db, contestId, admin.id);
   const hub = createHub();
