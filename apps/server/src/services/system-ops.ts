@@ -14,12 +14,13 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  renameSync,
   rmSync,
   statSync,
   statfsSync,
   writeFileSync,
 } from 'node:fs';
-import { isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 
@@ -44,6 +45,31 @@ export interface BackupEntry {
   manifest: Record<string, unknown>;
 }
 
+/** A restore is only staged: it is applied by the next server start. */
+export interface RestoreRequest {
+  backupId: string;
+  requestedAt: number;
+  restartRequired: true;
+}
+
+export interface RestoreResult {
+  restored: boolean;
+  backupId?: string;
+  preRestoreId?: string;
+}
+
+export type RestoreErrorCode = 'INVALID_BACKUP_ID' | 'BACKUP_NOT_FOUND' | 'RESTORE_FAILED';
+
+export class RestoreError extends Error {
+  readonly code: RestoreErrorCode;
+
+  constructor(message: string, code: RestoreErrorCode) {
+    super(message);
+    this.name = 'RestoreError';
+    this.code = code;
+  }
+}
+
 /** Below this free space the disk check only warns; it never blocks judging. */
 const MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024;
 
@@ -52,6 +78,13 @@ const DATABASE_FILE_NAME = 'oijudge.db';
 /** User data directories copied into every backup, in addition to the database. */
 const BACKUP_DATA_DIRS = ['problems', 'submissions', 'plugins', 'hacks'] as const;
 const COMPILER_TIMEOUT_MS = 2_000;
+
+const RESTORE_DIR_NAME = 'restore';
+const PENDING_RESTORE_FILE_NAME = 'pending.json';
+const PRE_RESTORE_PREFIX = 'pre-restore-';
+/** Backup ids may only contain these characters; anything else could traverse paths. */
+const BACKUP_ID_PATTERN = /^[A-Za-z0-9._-]+$/;
+const MAX_BACKUP_ID_LENGTH = 128;
 
 interface BackupFileEntry {
   path: string;
@@ -317,12 +350,256 @@ export function listBackups(config: Config): BackupEntry[] {
 
 /** Builds a filesystem-safe, sortable backup id; disambiguates same-millisecond runs. */
 function nextBackupId(backupsRoot: string, now: number): string {
-  const base = new Date(now).toISOString().replace(/[:.]/g, '-');
+  return uniqueChildName(backupsRoot, new Date(now).toISOString().replace(/[:.]/g, '-'));
+}
+
+/** Returns `base`, suffixed with `-2`, `-3`, ... until it is unused in `parent`. */
+function uniqueChildName(parent: string, base: string): string {
   let candidate = base;
-  for (let suffix = 2; existsSync(join(backupsRoot, candidate)); suffix += 1) {
+  for (let suffix = 2; existsSync(join(parent, candidate)); suffix += 1) {
     candidate = `${base}-${suffix}`;
   }
   return candidate;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/** True when `candidate` resolves inside `parent` (or is `parent` itself). */
+function isContainedPath(candidate: string, parent: string): boolean {
+  const rel = relative(resolve(parent), resolve(candidate));
+  return rel === '' || (!isAbsolute(rel) && rel !== '..' && !rel.startsWith(`..${sep}`));
+}
+
+/** Rejects ids that could point outside `<dataDir>/backups` before touching disk. */
+function assertValidBackupId(backupId: string): void {
+  if (
+    backupId.length === 0 ||
+    backupId.length > MAX_BACKUP_ID_LENGTH ||
+    !BACKUP_ID_PATTERN.test(backupId) ||
+    backupId === '.' ||
+    backupId === '..'
+  ) {
+    throw new RestoreError(`备份 ID 非法：${JSON.stringify(backupId)}`, 'INVALID_BACKUP_ID');
+  }
+}
+
+/** Validates the id and proves the resolved directory stays inside `<dataDir>/backups`. */
+function resolveBackupDir(config: Config, backupId: string): string {
+  assertValidBackupId(backupId);
+  const backupsRoot = resolve(config.dataDir, BACKUP_DIR_NAME);
+  const backupDir = resolve(backupsRoot, backupId);
+  // Defence in depth: the charset check already rules out separators, but the
+  // resolved-path check also catches platform-specific quirks (drive letters, `..`).
+  if (backupDir === backupsRoot || !isContainedPath(backupDir, backupsRoot)) {
+    throw new RestoreError(`备份 ID 非法：${JSON.stringify(backupId)}`, 'INVALID_BACKUP_ID');
+  }
+  return backupDir;
+}
+
+/** Verifies a backup directory has a readable manifest and a restorable database file. */
+function assertRestorableBackup(backupDir: string, backupId: string): void {
+  if (!existsSync(backupDir)) {
+    throw new RestoreError(`备份不存在：${backupId}`, 'BACKUP_NOT_FOUND');
+  }
+  const manifestPath = join(backupDir, 'manifest.json');
+  if (!existsSync(manifestPath)) {
+    throw new RestoreError(`备份缺少清单文件：${backupId}`, 'BACKUP_NOT_FOUND');
+  }
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    throw new RestoreError(
+      `备份清单无法解析：${backupId}（${describeError(error)}）`,
+      'RESTORE_FAILED',
+    );
+  }
+  if (!isPlainObject(manifest)) {
+    throw new RestoreError(`备份清单格式错误：${backupId}`, 'RESTORE_FAILED');
+  }
+  // The manifest id and the directory name must agree: the marker stores the id
+  // and `applyPendingRestore` resolves it back to a directory by that name.
+  if (manifest.id !== undefined && manifest.id !== backupId) {
+    throw new RestoreError(`备份清单 ID 与备份目录不一致：${backupId}`, 'RESTORE_FAILED');
+  }
+  if (!existsSync(join(backupDir, 'db', DATABASE_FILE_NAME))) {
+    throw new RestoreError(`备份缺少数据库文件：${backupId}`, 'RESTORE_FAILED');
+  }
+}
+
+export function pendingRestorePath(dataDir: string): string {
+  return join(dataDir, RESTORE_DIR_NAME, PENDING_RESTORE_FILE_NAME);
+}
+
+function readPendingRestore(marker: string): RestoreRequest {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(marker, 'utf8'));
+  } catch (error) {
+    throw new RestoreError(
+      `待恢复标记无法读取或已损坏：${describeError(error)}`,
+      'RESTORE_FAILED',
+    );
+  }
+  if (!isPlainObject(parsed) || typeof parsed.backupId !== 'string' || parsed.backupId.length === 0) {
+    throw new RestoreError('待恢复标记缺少有效的 backupId', 'RESTORE_FAILED');
+  }
+  return {
+    backupId: parsed.backupId,
+    requestedAt: typeof parsed.requestedAt === 'number' ? parsed.requestedAt : 0,
+    restartRequired: true,
+  };
+}
+
+/**
+ * Stages a restore request by writing `<dataDir>/restore/pending.json`.
+ * Nothing else is touched: the database is only replaced by the next start,
+ * before it is opened. The backup id is validated (charset + path containment)
+ * so a crafted request cannot point outside `<dataDir>/backups`.
+ */
+export function requestRestore(
+  config: Config,
+  backupId: string,
+  now: number = Date.now(),
+): RestoreRequest {
+  assertValidBackupId(backupId);
+  const backupsRoot = resolve(config.dataDir, BACKUP_DIR_NAME);
+  const backupDir = resolveBackupDir(config, backupId);
+  const entry = listBackups(config).find((candidate) => candidate.id === backupId);
+  if (!entry) {
+    throw new RestoreError(`备份不存在：${backupId}`, 'BACKUP_NOT_FOUND');
+  }
+  if (!isContainedPath(entry.path, backupsRoot) || basename(entry.path) !== backupId) {
+    throw new RestoreError(`备份路径非法：${backupId}`, 'INVALID_BACKUP_ID');
+  }
+  // Verifies the manifest (and that the database file really exists) so an
+  // accepted request is guaranteed to be applicable on the next start.
+  assertRestorableBackup(backupDir, backupId);
+
+  const request: RestoreRequest = { backupId, requestedAt: now, restartRequired: true };
+  const marker = pendingRestorePath(config.dataDir);
+  const tmp = `${marker}.tmp`;
+  mkdirSync(dirname(marker), { recursive: true });
+  try {
+    writeFileSync(tmp, `${JSON.stringify(request, null, 2)}\n`, 'utf8');
+    renameSync(tmp, marker);
+  } finally {
+    // A failed rename must not leave a stale temp marker behind.
+    rmSync(tmp, { force: true });
+  }
+  return request;
+}
+
+/**
+ * Applies a staged restore. Must run before `openDatabase`: the database file is
+ * replaced only while no handle is open. The current data is snapshotted into
+ * `backups/pre-restore-<timestamp>/` first, so a restore can be rolled back.
+ *
+ * Failure is fail-closed: the pending marker is kept (so the next start can
+ * retry) and a readable `RestoreError` is thrown. The caller must abort startup
+ * rather than continue in a half-restored state.
+ */
+export function applyPendingRestore(config: Config): RestoreResult {
+  const dataRoot = resolve(config.dataDir);
+  const marker = pendingRestorePath(dataRoot);
+  if (!existsSync(marker)) return { restored: false };
+
+  const request = readPendingRestore(marker);
+  const backupId = request.backupId;
+  const backupDir = resolveBackupDir(config, backupId);
+  assertRestorableBackup(backupDir, backupId);
+
+  // Snapshot first: if this fails the live data is still untouched.
+  const preRestoreId = createPreRestoreBackup(dataRoot, Date.now());
+  replaceData(backupDir, dataRoot);
+
+  // Only a fully applied restore consumes the request.
+  rmSync(marker, { force: true });
+  return { restored: true, backupId, preRestoreId };
+}
+
+/**
+ * Copies the current database and user data directories into
+ * `backups/pre-restore-<timestamp>/`. A manifest is written so the snapshot is
+ * itself a valid backup that can be restored later.
+ */
+function createPreRestoreBackup(dataRoot: string, now: number): string {
+  const backupsRoot = join(dataRoot, BACKUP_DIR_NAME);
+  const id = uniqueChildName(
+    backupsRoot,
+    `${PRE_RESTORE_PREFIX}${new Date(now).toISOString().replace(/[:.]/g, '-')}`,
+  );
+  const backupDir = join(backupsRoot, id);
+  let created = false;
+  try {
+    mkdirSync(backupsRoot, { recursive: true });
+    mkdirSync(backupDir);
+    created = true;
+    const entries: BackupFileEntry[] = [];
+
+    const databaseSource = join(dataRoot, 'db', DATABASE_FILE_NAME);
+    if (existsSync(databaseSource)) {
+      // Copy the whole `db` directory so a WAL left by an unclean shutdown is
+      // preserved in the snapshot instead of silently dropped.
+      cpSync(join(dataRoot, 'db'), join(backupDir, 'db'), { recursive: true });
+      entries.push({
+        path: `db/${DATABASE_FILE_NAME}`,
+        kind: 'file',
+        sizeBytes: statSync(join(backupDir, 'db', DATABASE_FILE_NAME)).size,
+      });
+    }
+
+    for (const name of BACKUP_DATA_DIRS) {
+      const source = join(dataRoot, name);
+      if (!existsSync(source)) continue;
+      const target = join(backupDir, name);
+      cpSync(source, target, { recursive: true });
+      entries.push({ path: name, kind: 'dir', sizeBytes: directorySize(target) });
+    }
+
+    const manifest = {
+      id,
+      createdAt: now,
+      version: appVersion(),
+      source: dataRoot,
+      kind: 'pre-restore',
+      entries,
+      totalBytes: entries.reduce((sum, entry) => sum + entry.sizeBytes, 0),
+    };
+    writeFileSync(join(backupDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+    return id;
+  } catch (error) {
+    // Never leave a half-written snapshot behind; the marker still lets a retry happen.
+    if (created) rmSync(backupDir, { recursive: true, force: true });
+    throw new RestoreError(`创建恢复前备份失败：${describeError(error)}`, 'RESTORE_FAILED');
+  }
+}
+
+/** Replaces the live database and data directories with the backup contents. */
+function replaceData(backupDir: string, dataRoot: string): void {
+  const databaseTarget = join(dataRoot, 'db', DATABASE_FILE_NAME);
+  try {
+    mkdirSync(dirname(databaseTarget), { recursive: true });
+    // Stale WAL/SHM files must not be replayed against the restored database.
+    rmSync(`${databaseTarget}-wal`, { force: true });
+    rmSync(`${databaseTarget}-shm`, { force: true });
+    copyFileSync(join(backupDir, 'db', DATABASE_FILE_NAME), databaseTarget);
+
+    for (const name of BACKUP_DATA_DIRS) {
+      const source = join(backupDir, name);
+      // A directory that was absent at backup time is left untouched.
+      if (!existsSync(source)) continue;
+      const target = join(dataRoot, name);
+      // Replace, don't merge: stale files from the current state must not leak
+      // into the restored state.
+      rmSync(target, { recursive: true, force: true });
+      cpSync(source, target, { recursive: true });
+    }
+  } catch (error) {
+    throw new RestoreError(`恢复数据失败：${describeError(error)}`, 'RESTORE_FAILED');
+  }
 }
 
 function directorySize(directory: string): number {
