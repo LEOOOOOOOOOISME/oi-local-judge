@@ -7,7 +7,6 @@ import type {
   Contest,
   ContestDetail,
   ProblemSummary,
-  RankingRow,
   Submission,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
@@ -21,6 +20,7 @@ import { ProblemListTable, type ProblemScore } from '../components/ProblemListTa
 import { SubmissionTable } from '../components/SubmissionTable';
 import { useNow } from '../hooks/useNow';
 import { formatDateTime } from '../utils/format';
+import { fetchOfficialRanking } from '../utils/officialRanking';
 import {
   CONTEST_PHASE_LABEL,
   contestModeLabel,
@@ -77,11 +77,13 @@ export function ContestOverviewPage() {
     enabled: validId && useFallback,
     staleTime: 15_000,
   });
+  // 比赛页与正式榜共用 official-ranking（计算规则一致，404 时内部回退旧 /ranking）。
   const rankingQuery = useQuery({
-    queryKey: ['ranking', contestId],
-    queryFn: () => apiGet<RankingRow[]>(`/api/contests/${contestId}/ranking`),
+    queryKey: ['official-ranking', contestId],
+    queryFn: () => fetchOfficialRanking(contestId),
     enabled: validId,
     staleTime: 5_000,
+    retry: false,
   });
   const problemsQuery = useQuery({
     queryKey: ['problems'],
@@ -97,8 +99,11 @@ export function ContestOverviewPage() {
 
   const contest =
     detail?.contest ?? contestsQuery.data?.find((item) => item.id === contestId) ?? null;
-  const ranking = rankingQuery.data ?? [];
-  const myRow = user ? ranking.find((row) => row.userId === user.id) : undefined;
+  // 正式榜：rows 用于 top3 / 我的排名，problems 用于题目顺序与题号。
+  const official = rankingQuery.data;
+  const rows = official?.rows ?? [];
+  const officialProblems = official?.problems;
+  const myRow = user ? rows.find((row) => row.userId === user.id) : undefined;
 
   const problemMap = useMemo(
     () => new Map((problemsQuery.data ?? []).map((problem) => [problem.id, problem])),
@@ -117,12 +122,10 @@ export function ContestOverviewPage() {
         memoryMb: problem.memoryMb,
       }));
     }
-    const first = ranking[0];
-    if (!first) return [];
-    return first.problems
-      .map((cell) => problemMap.get(cell.problemId))
+    return (officialProblems ?? [])
+      .map((problem) => problemMap.get(problem.id))
       .filter((problem): problem is ProblemSummary => problem !== undefined);
-  }, [detail, ranking, problemMap]);
+  }, [detail, officialProblems, problemMap]);
 
   const letters = useMemo(() => {
     const map = new Map<number, string>();
@@ -132,12 +135,11 @@ export function ContestOverviewPage() {
       }
       return map;
     }
-    const first = ranking[0];
-    if (first) {
-      first.problems.forEach((cell, index) => map.set(cell.problemId, problemLetter(index)));
-    }
+    (officialProblems ?? []).forEach((problem, index) =>
+      map.set(problem.id, problemLetter(index)),
+    );
     return map;
-  }, [detail, ranking]);
+  }, [detail, officialProblems]);
 
   const points = useMemo(() => {
     const map = new Map<number, number>();
@@ -154,7 +156,7 @@ export function ContestOverviewPage() {
 
   const scores = useMemo(() => {
     const map = new Map<number, ProblemScore>();
-    for (const cell of myRow?.problems ?? []) {
+    for (const cell of myRow?.cells ?? []) {
       map.set(cell.problemId, { score: cell.score, verdict: cell.verdict });
     }
     return map;
@@ -220,7 +222,7 @@ export function ContestOverviewPage() {
   const loginHref = `/login?next=${encodeURIComponent(contestPath)}`;
   const listPending = !detail && rankingQuery.isPending;
   const listError = !detail ? rankingQuery.error : null;
-  const participantCount = detail?.participantCount ?? ranking.length;
+  const participantCount = detail?.participantCount ?? rows.length;
 
   return (
     <div>
@@ -357,11 +359,11 @@ export function ContestOverviewPage() {
                   重试
                 </Button>
               </div>
-            ) : ranking.length === 0 ? (
+            ) : rows.length === 0 ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无参赛者" />
             ) : (
               <div className="top3-list">
-                {ranking.slice(0, 3).map((row) => (
+                {rows.slice(0, 3).map((row) => (
                   <div className="top3-row" key={row.userId}>
                     <span className={`top3-rank top3-rank-${row.rank}`}>{row.rank}</span>
                     <span className="top3-name">{row.realName ?? row.username}</span>
