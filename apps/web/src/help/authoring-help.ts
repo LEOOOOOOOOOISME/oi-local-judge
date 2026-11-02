@@ -7,6 +7,8 @@ export interface AuthoringHelpEntry {
   article: string;
   /** 相对仓库根目录的 Markdown 路径。 */
   path: string;
+  /** 帮助中心内的文档 slug（即 /help?doc=<slug>）。 */
+  docSlug: string;
   summary: string;
   bullets: readonly string[];
 }
@@ -17,6 +19,7 @@ export const AUTHORING_HELP: Record<AuthoringHelpKey, AuthoringHelpEntry> = {
     title: 'std / generator 契约',
     article: 'std / generator 契约',
     path: 'docs/help/authoring/std-generator-contract.md',
+    docSlug: 'authoring/std-generator-contract',
     summary: 'std 与 generator 的最小输入、testlib 参数、安全边界与常见错误。',
     bullets: [
       'generator 必须支持 --seed/--group/--index',
@@ -29,6 +32,7 @@ export const AUTHORING_HELP: Record<AuthoringHelpKey, AuthoringHelpEntry> = {
     title: '数据计划（Data Plan）',
     article: '数据计划',
     path: 'docs/help/authoring/data-plan.md',
+    docSlug: 'authoring/data-plan',
     summary: '子任务、测试点数、seed、generator 参数、分值与依赖的配置方式。',
     bullets: [
       '所有子任务分值之和必须等于 100',
@@ -41,6 +45,7 @@ export const AUTHORING_HELP: Record<AuthoringHelpKey, AuthoringHelpEntry> = {
     title: 'AI 提示词库',
     article: 'AI 提示词库',
     path: 'docs/help/authoring/ai-prompts.md',
+    docSlug: 'authoring/ai-prompts',
     summary: '可复制的 std/generator/validator/checker 提示词；AI 代码必须人工审核。',
     bullets: [
       '只复制提示词，不默认调用外部 API',
