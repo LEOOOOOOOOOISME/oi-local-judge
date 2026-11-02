@@ -28,7 +28,7 @@ afterEach(async () => {
 function plan(): DataPlan {
   return {
     schema: DATA_PLAN_SCHEMA,
-    limits: { timeMs: 1000, memoryMb: 128, outputMb: 64 },
+    limits: { timeMs: 1000, memoryMb: 128, outputMb: 96 },
     groups: [
       {
         id: 'sub1',
@@ -203,6 +203,7 @@ describe('publish generation job', () => {
     const problem = getProblem(ctx.db, ctx.problemId)!;
     expect(problem.time_ms).toBe(1000);
     expect(problem.memory_mb).toBe(128);
+    expect(problem.output_mb).toBe(96);
 
     expect(readFileSync(join(ctx.config.dataDir, testcases[0].input_path), 'utf8')).toBe(
       'sub1 1 10\n1 2 3\n',
