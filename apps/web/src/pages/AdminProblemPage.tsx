@@ -51,6 +51,7 @@ import type {
 } from '../api/types';
 import { CodeBlock } from '../components/CodeBlock';
 import { ObjectiveQuestionEditor, validateObjectiveQuestions } from '../components/ObjectiveQuestionEditor';
+import { DataPlanPanel } from '../components/DataPlanPanel';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { VerdictBadge } from '../components/VerdictBadge';
@@ -1619,6 +1620,10 @@ export function AdminProblemPage() {
     </div>
   );
 
+  const dataPlanPanel = problem ? (
+    <DataPlanPanel problemId={problemId} problem={problem} />
+  ) : null;
+
   const validateColumns: TableColumnsType<ValidateTestcaseResult> = [
     {
       title: '测试点 ID',
@@ -1980,6 +1985,7 @@ export function AdminProblemPage() {
             : [
                 { key: 'basic', label: '基本信息', children: basicPanel },
                 { key: 'assets', label: '程序资产', children: assetsPanel },
+                { key: 'plan', label: '数据计划', children: dataPlanPanel },
                 { key: 'data', label: '测试数据', children: dataPanel },
                 { key: 'tools', label: '生成与对拍', children: toolsPanel },
                 { key: 'validation', label: '校验与自测', children: validationPanel },

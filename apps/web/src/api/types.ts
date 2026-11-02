@@ -870,3 +870,135 @@ export interface ApiEnvelope<T> {
   data?: T;
   error?: { code?: string; message?: string };
 }
+
+/** Phase Authoring：Data Plan 与生成任务。 */
+export type DataPlanPointsMode = 'group' | 'per-test' | 'auto';
+
+export interface DataPlanLimits {
+  timeMs: number;
+  memoryMb: number;
+  outputMb: number;
+}
+
+export interface DataPlanGroup {
+  id: string;
+  name: string;
+  points: number;
+  count: number;
+  seedStart: number;
+  args: string[];
+  dependsOn: string[];
+}
+
+export interface DataPlan {
+  schema: 'oijudge.data-plan/1';
+  limits: DataPlanLimits;
+  groups: DataPlanGroup[];
+  pointsMode: DataPlanPointsMode;
+  naming: string;
+}
+
+export interface DataPlanIssue {
+  path: string;
+  code: string;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+export interface DataPlanTotals {
+  testCount: number;
+  points: number;
+  estimatedSeconds: number;
+  estimatedBytes: number;
+}
+
+export interface DataPlanValidationResponse {
+  valid: boolean;
+  issues: DataPlanIssue[];
+  totals: DataPlanTotals;
+}
+
+export type DataPlanTemplateId =
+  | '10-30-60'
+  | 'subtask-ladder'
+  | 'extreme-random'
+  | 'single-group';
+
+export type GenerationJobStatus =
+  | 'queued'
+  | 'running'
+  | 'finished'
+  | 'failed'
+  | 'canceled';
+
+export type GenerationCaseStatus =
+  | 'pending'
+  | 'running'
+  | 'finished'
+  | 'failed'
+  | 'blocked'
+  | 'canceled';
+
+export interface GenerationJobCase {
+  id: number;
+  groupId: string;
+  groupName: string;
+  index: number;
+  seed: number;
+  status: GenerationCaseStatus;
+  inputPath: string | null;
+  outputPath: string | null;
+  inputSha256: string | null;
+  inputBytes: number;
+  inputLines: number;
+  inputUtf8: boolean;
+  outputBytes: number;
+  outputLines: number;
+  stdExitCode: number | null;
+  stdTimeMs: number;
+  stdMemoryKb: number;
+  validatorOk: boolean | null;
+  validatorMessage: string;
+  message: string;
+  startedAt: number | null;
+  finishedAt: number | null;
+}
+
+export interface GenerationJobSummary {
+  id: number;
+  problemId: number;
+  status: GenerationJobStatus;
+  total: number;
+  completed: number;
+  failed: number;
+  message: string;
+  createdAt: number;
+  startedAt: number | null;
+  finishedAt: number | null;
+}
+
+export interface GenerationJobDetail extends GenerationJobSummary {
+  planVersion: number;
+  plan: DataPlan;
+  stats: {
+    totalCases?: number;
+    maxTimeMs?: number;
+    maxMemoryKb?: number;
+    totalDiskBytes?: number;
+    duplicateInputCount?: number;
+    duplicateRate?: number;
+  };
+  cases: GenerationJobCase[];
+}
+
+export interface GenerationJobPreview {
+  caseId: number;
+  input: string;
+  output: string;
+  inputTruncated: boolean;
+  outputTruncated: boolean;
+  inputLines: number;
+  outputLines: number;
+  inputBytes: number;
+  outputBytes: number;
+}
