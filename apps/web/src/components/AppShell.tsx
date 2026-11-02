@@ -109,6 +109,9 @@ export function AppShell() {
                 <NavLink to="/admin/ranking-plugins" className={navClass}>
                   排名插件
                 </NavLink>
+                <NavLink to="/admin/system" className={navClass}>
+                  系统运维
+                </NavLink>
               </>
             ) : null}
           </nav>
