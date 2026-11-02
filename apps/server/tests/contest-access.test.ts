@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { submitSource } from '../src/services/submissions.js';
+import { ContestAccessError } from '../src/services/contest-access.js';
 import { addParticipant, createContest } from '../src/storage/repos/contests.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import { createUser } from '../src/storage/repos/users.js';
@@ -45,6 +46,17 @@ function submit(
     userId, problemId, contestId, language: 'cpp17', code: 'int main(){return 0;}',
     ...(now === undefined ? {} : { now }),
   });
+}
+
+function expectAccessError(fn: () => unknown, code: string, status: number) {
+  try {
+    fn();
+    throw new Error('expected ContestAccessError');
+  } catch (err) {
+    expect(err).toBeInstanceOf(ContestAccessError);
+    expect((err as ContestAccessError).code).toBe(code);
+    expect((err as ContestAccessError).status).toBe(status);
+  }
 }
 
 describe('contest submission access', () => {
@@ -156,6 +168,45 @@ describe('contest submission access', () => {
     addParticipant(ctx.db, contestId, ctx.alice);
     expect(() => submit(ctx, ctx.alice, ctx.p1, contestId, 1500))
       .toThrowError(/not started/i);
+    ctx.db.close();
+  });
+
+  it('rejects a running contest before start_at', () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, {
+      name: 'C', startAt: 1000, endAt: 2000, problemIds: [ctx.p1],
+    });
+    addParticipant(ctx.db, contestId, ctx.alice);
+    ctx.db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(contestId);
+    expectAccessError(() => submit(ctx, ctx.alice, ctx.p1, contestId, 500), 'CONTEST_NOT_STARTED', 403);
+    ctx.db.close();
+  });
+
+  it('rejects a draft contest after end_at', () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, {
+      name: 'C', startAt: 1000, endAt: 2000, problemIds: [ctx.p1],
+    });
+    addParticipant(ctx.db, contestId, ctx.alice);
+    expectAccessError(() => submit(ctx, ctx.alice, ctx.p1, contestId, 2500), 'CONTEST_NOT_STARTED', 403);
+    ctx.db.close();
+  });
+
+  it('rejects a rejected participant', () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, {
+      name: 'C', startAt: 1000, endAt: 2000, problemIds: [ctx.p1],
+    });
+    addParticipant(ctx.db, contestId, ctx.alice);
+    ctx.db.prepare("UPDATE contest_participants SET status = 'rejected' WHERE contest_id = ? AND user_id = ?")
+      .run(contestId, ctx.alice);
+    expectAccessError(() => submit(ctx, ctx.alice, ctx.p1, contestId, 1500), 'NOT_ACCEPTED', 403);
+    ctx.db.close();
+  });
+
+  it('returns CONTEST_NOT_FOUND for a missing contest', () => {
+    const ctx = setup();
+    expectAccessError(() => submit(ctx, ctx.alice, ctx.p1, 999999, 1500), 'CONTEST_NOT_FOUND', 404);
     ctx.db.close();
   });
 });
