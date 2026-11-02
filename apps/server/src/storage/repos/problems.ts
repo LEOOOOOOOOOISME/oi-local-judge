@@ -28,6 +28,8 @@ export interface ProblemRow {
   tags_json: string;
   time_ms: number;
   memory_mb: number;
+  /** stdout/stderr output limit in MiB; exceeding it yields OLE. */
+  output_mb: number;
   io_mode: string;
   input_file: string | null;
   output_file: string | null;
@@ -49,6 +51,8 @@ export interface CreateProblemInput {
   tags?: string[];
   timeMs: number;
   memoryMb: number;
+  /** Output limit in MiB (default 64). */
+  outputMb?: number;
   ioMode?: 'stdio' | 'file';
   inputFile?: string | null;
   outputFile?: string | null;
@@ -73,10 +77,10 @@ export interface CreateProblemInput {
 export function createProblem(db: DatabaseSync, input: CreateProblemInput): number {
   const result = db
     .prepare(
-      `INSERT INTO problems(title, type, difficulty, tags_json, time_ms, memory_mb,
+      `INSERT INTO problems(title, type, difficulty, tags_json, time_ms, memory_mb, output_mb,
          io_mode, input_file, output_file, statement_html, samples_json, checker_mode,
          checker_path, compare_mode, objective_json, visibility, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.title,
@@ -85,6 +89,7 @@ export function createProblem(db: DatabaseSync, input: CreateProblemInput): numb
       JSON.stringify(input.tags ?? []),
       input.timeMs,
       input.memoryMb,
+      input.outputMb ?? 64,
       input.ioMode ?? 'stdio',
       input.inputFile ?? null,
       input.outputFile ?? null,

@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS users(
 CREATE TABLE IF NOT EXISTS problems(
   id INTEGER PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL,
   difficulty INTEGER, tags_json TEXT NOT NULL DEFAULT '[]', time_ms INTEGER NOT NULL,
-  memory_mb INTEGER NOT NULL, io_mode TEXT NOT NULL DEFAULT 'stdio',
+  memory_mb INTEGER NOT NULL, output_mb INTEGER NOT NULL DEFAULT 64,
+  io_mode TEXT NOT NULL DEFAULT 'stdio',
   input_file TEXT, output_file TEXT, statement_html TEXT NOT NULL DEFAULT '',
   samples_json TEXT NOT NULL DEFAULT '[]',
   checker_mode TEXT NOT NULL DEFAULT 'builtin',
@@ -176,6 +177,7 @@ export function migrate(db: DatabaseSync): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
   db.exec(SCHEMA);
   ensureColumn(db, 'problems', 'samples_json', "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, 'problems', 'output_mb', 'INTEGER NOT NULL DEFAULT 64');
   ensureColumn(db, 'problems', 'checker_mode', "TEXT NOT NULL DEFAULT 'builtin'");
   ensureColumn(db, 'problems', 'checker_path', 'TEXT');
   ensureColumn(db, 'problems', 'compare_mode', "TEXT NOT NULL DEFAULT 'ignore-trailing'");

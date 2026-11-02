@@ -11,15 +11,23 @@ import {
   getLatestSubmissionAt,
   getSubmission,
   getTestResults,
+  resetSubmissionForRejudge,
   type SubmissionRow,
 } from '../storage/repos/submissions.js';
-import { createJudgeTask } from '../storage/repos/judge.js';
+import {
+  createJudgeTask,
+  enqueueRejudge,
+  getJudgeTaskBySubmission,
+} from '../storage/repos/judge.js';
+import { transaction } from '../storage/db.js';
 import { resolveContestSubmission } from './contest-access.js';
 
 export const ALLOWED_LANGUAGES = new Set(['cpp17', 'c11', 'objective', 'answer']);
 export const MAX_SOURCE_BYTES = 256 * 1024;
 /** Minimum interval between two submissions with the same user/problem/contest key. */
 export const SUBMIT_COOLDOWN_MS = 10_000;
+/** Priority used for admin rejudges so they jump ahead of regular submissions. */
+export const REJUDGE_PRIORITY = 100;
 
 /** Thrown when a submission arrives inside the per-key cooldown window. */
 export class SubmissionRateLimitError extends Error {
@@ -33,6 +41,19 @@ export class SubmissionRateLimitError extends Error {
     this.retryAfterSec = retryAfterSec;
   }
 }
+
+/** Thrown when a rejudge targets a submission a worker is actively grading. */
+export class SubmissionBusyError extends Error {
+  readonly status = 409;
+  readonly code = 'SUBMISSION_RUNNING';
+
+  constructor(status: string) {
+    super(`submission is already being judged (status: ${status})`);
+    this.name = 'SubmissionBusyError';
+  }
+}
+
+const ACTIVE_JUDGE_STATUSES = new Set(['running', 'compiling']);
 
 export interface SubmitInput {
   userId: number;
@@ -137,6 +158,40 @@ export function submitSource(
   });
   createJudgeTask(deps.db, id, input.contestId ? 100 : 50);
   return { id };
+}
+
+/**
+ * Resets a submission and re-queues its single judge task.
+ *
+ * Returns `null` when the submission does not exist. A submission whose worker
+ * is actively grading it (running/compiling — including the short window where
+ * the task was claimed but the submission row is still queued) is rejected with
+ * `SubmissionBusyError` (HTTP 409) instead of racing the worker. Rejudging an
+ * already queued submission is idempotent: the existing task is reset and no
+ * duplicate task row is inserted.
+ */
+export function rejudgeSubmission(
+  db: DatabaseSync,
+  submissionId: number,
+): { id: number; taskId: number } | null {
+  return transaction(db, () => {
+    const submission = getSubmission(db, submissionId);
+    if (!submission) return null;
+
+    const task = getJudgeTaskBySubmission(db, submissionId);
+    const activeStatus = ACTIVE_JUDGE_STATUSES.has(submission.status)
+      ? submission.status
+      : task && ACTIVE_JUDGE_STATUSES.has(task.status)
+        ? task.status
+        : null;
+    if (activeStatus) {
+      throw new SubmissionBusyError(activeStatus);
+    }
+
+    resetSubmissionForRejudge(db, submissionId);
+    const taskId = enqueueRejudge(db, submissionId, REJUDGE_PRIORITY);
+    return { id: submissionId, taskId };
+  });
 }
 
 function toResultDto(row: {

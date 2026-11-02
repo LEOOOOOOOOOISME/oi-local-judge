@@ -149,6 +149,20 @@ export function finishSubmission(
   );
 }
 
+/**
+ * Puts a submission back into the judging queue: clears every judge-produced
+ * field and drops its per-testcase rows, so a rejudge cannot display stale
+ * results. The caller is expected to run this inside a transaction together
+ * with `enqueueRejudge`.
+ */
+export function resetSubmissionForRejudge(db: DatabaseSync, submissionId: number): void {
+  db.prepare(
+    `UPDATE submissions SET status = 'queued', verdict = NULL, score = 0, time_ms = 0,
+       memory_kb = 0, message = '', judged_at = NULL WHERE id = ?`,
+  ).run(submissionId);
+  db.prepare('DELETE FROM test_results WHERE submission_id = ?').run(submissionId);
+}
+
 export function getTestResults(
   db: DatabaseSync,
   submissionId: number,
