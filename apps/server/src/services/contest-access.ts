@@ -44,6 +44,10 @@ export function resolveContestSubmission(input: {
     throw new ContestAccessError('NOT_ACCEPTED', 403, 'participant is not accepted');
   }
 
+  if (contest.status === 'draft') {
+    throw new ContestAccessError('CONTEST_NOT_STARTED', 403, 'contest has not started');
+  }
+
   const ended =
     contest.status === 'ended' ||
     (contest.end_at !== null && now >= contest.end_at);
@@ -54,7 +58,7 @@ export function resolveContestSubmission(input: {
   if (contest.start_at !== null && now < contest.start_at) {
     throw new ContestAccessError('CONTEST_NOT_STARTED', 403, 'contest has not started');
   }
-  if (contest.status !== 'draft' && contest.status !== 'running' && contest.status !== 'frozen') {
+  if (contest.status !== 'running' && contest.status !== 'frozen') {
     throw new ContestAccessError('CONTEST_NOT_RUNNING', 403, 'contest is not running');
   }
   return { phase: 'contest', contest };

@@ -115,6 +115,7 @@ describe('correction ranking', () => {
     db.prepare(
       "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",
     ).run(contestId, alice);
+    db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(contestId);
 
     const submitted = submitSource(
       { db, config },
