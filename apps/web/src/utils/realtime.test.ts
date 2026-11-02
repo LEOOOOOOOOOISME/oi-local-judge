@@ -10,10 +10,17 @@ describe('contestIdFromPathname', () => {
     expect(contestIdFromPathname('/contest/12/correction')).toBe(12);
   });
 
+  it('解析管理端比赛控制台路由', () => {
+    expect(contestIdFromPathname('/admin/contests/12')).toBe(12);
+    expect(contestIdFromPathname('/admin/contests/12/')).toBe(12);
+    expect(contestIdFromPathname('/admin/contests/12/batch')).toBe(12);
+  });
+
   it('非比赛页面返回 null', () => {
     expect(contestIdFromPathname('/')).toBeNull();
     expect(contestIdFromPathname('/contests')).toBeNull();
-    expect(contestIdFromPathname('/admin/contests/12')).toBeNull();
+    expect(contestIdFromPathname('/admin/contests')).toBeNull();
+    expect(contestIdFromPathname('/admin/contests/abc')).toBeNull();
     expect(contestIdFromPathname('/problem/12')).toBeNull();
     expect(contestIdFromPathname('')).toBeNull();
   });

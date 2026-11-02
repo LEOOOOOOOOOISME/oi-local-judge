@@ -162,10 +162,19 @@ function firstStderrLine(path: string): string {
   }
 }
 
-function submissionRoom(db: DatabaseSync, submissionId: number): string | undefined {
+/**
+ * Rooms a submission update must reach. Contest submissions go to the contest
+ * room and to the submitter's user room, so non-contest pages such as
+ * `/records` and `/submissions/:id` keep updating. Returns undefined for a
+ * non-contest submission, which keeps the global broadcast.
+ */
+function submissionRooms(db: DatabaseSync, submissionId: number): string[] | undefined {
   try {
-    const contestId = getSubmission(db, submissionId)?.contest_id;
-    return contestId === null || contestId === undefined ? undefined : `contest:${contestId}`;
+    const submission = getSubmission(db, submissionId);
+    if (!submission || submission.contest_id === null || submission.contest_id === undefined) {
+      return undefined;
+    }
+    return [`contest:${submission.contest_id}`, `user:${submission.user_id}`];
   } catch {
     return undefined;
   }
@@ -178,15 +187,20 @@ function publishUpdate(
   data: Record<string, unknown>,
 ): void {
   if (!events) return;
-  const room = submissionRoom(db, submissionId);
-  try {
-    events.publish({
-      type: WS_EVENTS.submissionUpdated,
-      data,
-      ...(room === undefined ? {} : { room }),
-    });
-  } catch {
-    // A broken event sink must never break judging.
+  const rooms = submissionRooms(db, submissionId);
+  // No contest: one global broadcast. Contest: contest room + submitter room;
+  // a submitter connected to both rooms sees a duplicate, which the client
+  // debounces.
+  for (const room of rooms ?? [undefined]) {
+    try {
+      events.publish({
+        type: WS_EVENTS.submissionUpdated,
+        data,
+        ...(room === undefined ? {} : { room }),
+      });
+    } catch {
+      // A broken event sink must never break judging.
+    }
   }
 }
 
