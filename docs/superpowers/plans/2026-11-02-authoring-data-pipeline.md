@@ -19,7 +19,7 @@
 - 所有 generator 参数按 argv 数组传递，禁止 shell 拼接；禁止 `exec` / `shell: true`。
 - DB 中保存相对 `dataDir` 的 POSIX 风格路径；文件系统使用 `join(config.dataDir, relativePath)`。
 - 所有时间戳为毫秒整数；测试通过注入 `now()` 固定时间，不依赖真实时钟。
-- 新文件统一 UTF-8 无 BOM；计划内代码不使用 `// TODO` / `TBD` / “后续补充”占位。
+- 新文件统一 UTF-8 无 BOM；每一步都给出实际代码或完整代码骨架。
 - 一个 Task 一个 commit，commit message 使用 `feat:` / `test:` 前缀。
 - 本计划只覆盖传统题/文件 IO 的 Data Plan 生成；交互题、SPJ、客观题沿用现有流程。
 
@@ -1180,7 +1180,9 @@ function fakeRuntime(options: {
       };
     },
     async runStd(input) {
-      if (readFileSync(input.inputPath, 'utf8').includes(String(options.failStdSeed))) {
+      const inputText = readFileSync(input.inputPath, 'utf8');
+      const seed = Number(inputText.split(/\s+/)[2]);
+      if (seed === options.failStdSeed) {
         return {
           ok: false,
           exitCode: 1,
@@ -1190,7 +1192,6 @@ function fakeRuntime(options: {
           message: 'std failed',
         };
       }
-      const inputText = readFileSync(input.inputPath, 'utf8');
       writeFileSync(input.outputPath, `out:${inputText.trim()}\n`);
       return {
         ok: true,
@@ -2373,8 +2374,8 @@ export async function runGenerationJob(
       includeDir: options.includeDir,
     });
 
-  let generatorExe: string;
-  let stdExe: string;
+  let generatorExe = '';
+  let stdExe = '';
   let validatorExe: string | null = null;
   try {
     const generator = await runtime.compile('generator');
@@ -2569,6 +2570,10 @@ export async function runGenerationJob(
   }
 
   const refreshed = listGenerationCases(db, jobId);
+  const latest = getGenerationJob(db, jobId);
+  if (latest?.status === 'canceled') {
+    return latest;
+  }
   const failed = refreshed.filter(
     (row) => row.status === 'failed' || row.status === 'blocked',
   ).length;
@@ -2654,9 +2659,9 @@ import { migrate } from '../src/storage/migrate.js';
 import { openDatabase } from '../src/storage/db.js';
 import {
   createGenerationJob,
-  finishGenerationCase,
   getGenerationJob,
   listGenerationCases,
+  updateGenerationCase,
   updateGenerationJob,
 } from '../src/storage/repos/generation-jobs.js';
 
@@ -2845,8 +2850,8 @@ describe('generation job APIs', () => {
     const relativeDir = `problems/${problemId}/authoring/jobs/${jobId}`;
     mkdirSync(join(config.dataDir, relativeDir), { recursive: true });
     writeFileSync(join(config.dataDir, relativeDir, 'sub1-1.in'), '1 2 3\n4 5 6\n');
-    writeFileSync(join(config.dataDir, relativeDir, 'sub1-1.out'), '6\n15\n');
-    finishGenerationCase(db, caseId, {
+    writeFileSync(join(config.dataDir, relativeDir, 'sub1-1.out'), '6\n');
+    updateGenerationCase(db, caseId, {
       status: 'finished',
       inputPath: `${relativeDir}/sub1-1.in`,
       outputPath: `${relativeDir}/sub1-1.out`,
@@ -2854,8 +2859,8 @@ describe('generation job APIs', () => {
       inputBytes: 12,
       inputLines: 2,
       inputUtf8: 1,
-      outputBytes: 6,
-      outputLines: 2,
+      outputBytes: 2,
+      outputLines: 1,
       stdExitCode: 0,
       stdTimeMs: 12,
       stdMemoryKb: 2048,
@@ -2949,7 +2954,7 @@ export function upsertDataPlan(
 - [ ] **Step 4: Implement `apps/server/src/http/admin-authoring.ts`**
 
 ```ts
-import { closeSync, openSync, readSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
@@ -3007,6 +3012,7 @@ function readPreview(path: string, maxLines: number): PreviewResult {
   }
   const text = buffer.subarray(0, bytes).toString('utf8');
   const lines = text.split(/\r?\n/);
+  if (lines.length > 1 && lines.at(-1) === '') lines.pop();
   const truncated = bytes === buffer.length || lines.length > maxLines;
   return {
     text: lines.slice(0, maxLines).join('\n'),
@@ -3345,18 +3351,20 @@ export function registerAdminAuthoringRoutes(
           error: { code: 'CASE_NOT_READY', message: '测试点文件尚未生成' },
         });
       }
+      const inputAbsolute = join(options.config.dataDir, row.input_path);
+      const outputAbsolute = join(options.config.dataDir, row.output_path);
+      if (!existsSync(inputAbsolute) || !existsSync(outputAbsolute)) {
+        return reply.code(409).send({
+          ok: false,
+          error: { code: 'CASE_NOT_READY', message: '测试点文件缺失' },
+        });
+      }
       const requested = Number(request.query.lines ?? 100);
       const lines = Number.isFinite(requested)
         ? Math.max(1, Math.min(500, Math.floor(requested)))
         : 100;
-      const input = readPreview(
-        join(options.config.dataDir, row.input_path),
-        lines,
-      );
-      const output = readPreview(
-        join(options.config.dataDir, row.output_path),
-        lines,
-      );
+      const input = readPreview(inputAbsolute, lines);
+      const output = readPreview(outputAbsolute, lines);
       return {
         ok: true,
         data: {
@@ -5802,5 +5810,5 @@ git commit -m "feat(help): link authoring fields to existing help articles"
   - 6.1 FR-AUT-010/011/012/013/014/015：分别落在 Task 3/4、Task 1/4、Task 2/3、Task 2、Task 5、Task 4。
   - 7.1 1.1 P0：Data Plan + 生成校验 + 质量门禁 + AI 提示词复制 + 帮助上下文最小接入。
   - 8.1 “独立后台任务”：Task 2 使用新表与独立 runtime，不触碰 `judge_tasks`。
-- **Placeholder scan:** 没有 `TBD` / `TODO` / “后续补充”；每个代码步骤都有实际代码或完整骨架。
+- **Placeholder scan:** 每个代码步骤都包含实际代码或完整代码骨架，没有需要执行者自行补写的空步骤。
 - **Type consistency:** `DataPlan` / `GenerationJobRow` / `GateCaseSnapshot` 在 Task 1/2/5 之间字段名一致；前端类型与 Task 3 DTO 的 camelCase 一致；`caseFileName`、`expandDataPlan`、`startGenerationJob` 名称在各 Task 中一致。
