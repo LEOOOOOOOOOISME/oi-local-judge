@@ -1,6 +1,7 @@
 import { Alert, Card, Table, Tag } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { PageHead } from '../components/PageHead';
+import { AUTHORING_HELP } from '../help/authoring-help';
 import '../styles/help.css';
 
 interface PresetRow {
@@ -60,6 +61,24 @@ export function HelpPage() {
       />
 
       <div className="help-sections">
+        <Card className="oij-card help-card" title="0. 出题与数据计划">
+          <p>
+            出题相关文档随安装包分发，位于仓库 <code>docs/help/authoring/</code>。
+            下面的摘要对应已有 Markdown 文章；页面内暂不渲染 Markdown 全文。
+          </p>
+          <div className="help-authoring-list">
+            {Object.values(AUTHORING_HELP).map((entry) => (
+              <div className="help-authoring-row" key={entry.key}>
+                <div>
+                  <strong>{entry.title}</strong>
+                  <span className="help-authoring-path mono">{entry.path}</span>
+                </div>
+                <p>{entry.summary}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+
         <Card className="oij-card help-card" title="1. 赛制与排序">
           <p>
             比赛创建时选择赛制，管理员也可以在该比赛控制台的“排名规则”中随时调整。
