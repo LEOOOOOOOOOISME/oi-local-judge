@@ -32,6 +32,8 @@ export interface CreateSubmissionInput {
   sourceHash: string;
   phase?: string;
   batchId?: number | null;
+  /** Submission timestamp override (used by tests and for deterministic callers). */
+  createdAt?: number;
 }
 
 export function createSubmission(db: DatabaseSync, input: CreateSubmissionInput): number {
@@ -47,11 +49,30 @@ export function createSubmission(db: DatabaseSync, input: CreateSubmissionInput)
       input.language,
       input.sourcePath,
       input.sourceHash,
-      Date.now(),
+      input.createdAt ?? Date.now(),
       input.phase ?? 'contest',
       input.batchId ?? null,
     );
   return Number(result.lastInsertRowid);
+}
+
+/**
+ * Returns the newest submission timestamp for a user/problem/contest key.
+ * `contestId` is part of the key; `null` (practice) is a distinct key.
+ */
+export function getLatestSubmissionAt(
+  db: DatabaseSync,
+  userId: number,
+  problemId: number,
+  contestId: number | null,
+): number | null {
+  const row = db
+    .prepare(
+      `SELECT MAX(created_at) AS latest FROM submissions
+       WHERE user_id = ? AND problem_id = ? AND contest_id IS ?`,
+    )
+    .get(userId, problemId, contestId) as unknown as { latest: number | null } | undefined;
+  return row?.latest ?? null;
 }
 
 export function getSubmission(db: DatabaseSync, id: number): SubmissionRow | null {

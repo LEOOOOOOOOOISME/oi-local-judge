@@ -26,7 +26,7 @@ afterAll(() => {
 function judgeCode(problemId: number, code: string) {
   const { id } = submitSource(
     { db, config },
-    { userId, problemId, language: 'cpp17', code, contestId: null },
+    { userId, problemId, language: 'cpp17', code, contestId: null, skipCooldown: true },
   );
   return judgeSubmission({ db, config, submissionId: id }).then(() => ({
     submission: getSubmission(db, id)!,

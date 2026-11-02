@@ -8,6 +8,7 @@ import { getProblem } from '../storage/repos/problems.js';
 import { getLock } from '../storage/repos/hacks.js';
 import {
   createSubmission,
+  getLatestSubmissionAt,
   getSubmission,
   getTestResults,
   type SubmissionRow,
@@ -17,6 +18,21 @@ import { resolveContestSubmission } from './contest-access.js';
 
 export const ALLOWED_LANGUAGES = new Set(['cpp17', 'c11', 'objective', 'answer']);
 export const MAX_SOURCE_BYTES = 256 * 1024;
+/** Minimum interval between two submissions with the same user/problem/contest key. */
+export const SUBMIT_COOLDOWN_MS = 10_000;
+
+/** Thrown when a submission arrives inside the per-key cooldown window. */
+export class SubmissionRateLimitError extends Error {
+  readonly status = 429;
+  readonly code = 'SUBMIT_COOLDOWN';
+  readonly retryAfterSec: number;
+
+  constructor(retryAfterSec: number) {
+    super(`please wait ${retryAfterSec}s before submitting again`);
+    this.name = 'SubmissionRateLimitError';
+    this.retryAfterSec = retryAfterSec;
+  }
+}
 
 export interface SubmitInput {
   userId: number;
@@ -26,6 +42,8 @@ export interface SubmitInput {
   contestId?: number | null;
   phase?: string;
   batchId?: number | null;
+  /** Bypass the cooldown check (admin rejudge/batch internal submissions). */
+  skipCooldown?: boolean;
   now?: number;
 }
 
@@ -71,7 +89,21 @@ export function submitSource(
     }
   }
 
-  const now = new Date();
+  const nowMs = input.now ?? Date.now();
+  if (!input.skipCooldown) {
+    const latest = getLatestSubmissionAt(
+      deps.db,
+      input.userId,
+      input.problemId,
+      input.contestId ?? null,
+    );
+    if (latest !== null && nowMs - latest < SUBMIT_COOLDOWN_MS) {
+      const retryAfterSec = Math.max(1, Math.ceil((SUBMIT_COOLDOWN_MS - (nowMs - latest)) / 1000));
+      throw new SubmissionRateLimitError(retryAfterSec);
+    }
+  }
+
+  const now = new Date(nowMs);
   const relativeDir = join(
     'submissions',
     String(now.getFullYear()),
@@ -101,6 +133,7 @@ export function submitSource(
     sourceHash,
     phase,
     batchId: input.batchId,
+    createdAt: nowMs,
   });
   createJudgeTask(deps.db, id, input.contestId ? 100 : 50);
   return { id };

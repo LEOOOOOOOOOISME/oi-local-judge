@@ -4,7 +4,11 @@ import type { FastifyInstance } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { requireAuth } from '../security/auth.js';
-import { getSubmissionDetail, submitSource } from '../services/submissions.js';
+import {
+  getSubmissionDetail,
+  SubmissionRateLimitError,
+  submitSource,
+} from '../services/submissions.js';
 import { ContestAccessError } from '../services/contest-access.js';
 import { listSubmissions, getSubmission } from '../storage/repos/submissions.js';
 
@@ -52,6 +56,19 @@ export function registerSubmissionRoutes(
           ok: false,
           error: { code: err.code, message: err.message },
         });
+      }
+      if (err instanceof SubmissionRateLimitError) {
+        return reply
+          .code(429)
+          .header('Retry-After', String(err.retryAfterSec))
+          .send({
+            ok: false,
+            error: {
+              code: err.code,
+              message: err.message,
+              retryAfterSec: err.retryAfterSec,
+            },
+          });
       }
       const message = (err as Error).message;
       const status = /too large/.test(message) ? 413 : /not found/.test(message) ? 404 : 400;
