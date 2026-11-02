@@ -80,7 +80,7 @@ export interface JudgedResult {
   message: string;
 }
 
-const VERDICT_PRIORITY: readonly Verdict[] = ['SE', 'MLE', 'TLE', 'RE', 'PE'];
+const VERDICT_PRIORITY: readonly Verdict[] = ['SE', 'MLE', 'TLE', 'OLE', 'RE', 'PE'];
 
 export function decideOverallVerdict(results: readonly JudgedResult[], score = 0): Verdict {
   if (results.length === 0) return 'SE';
@@ -344,6 +344,22 @@ export async function judgeTestcase(args: {
       verdict: 'TLE',
       message: clipMessage(
         `time limit exceeded (cpu ${run.cpuMs} ms, wall ${run.wallMs} ms, limit ${timeLimitMs} ms)`,
+      ),
+    };
+  }
+  // Output limit (OLE) is checked after the resource verdicts MLE/TLE (a
+  // process killed for those reasons may have produced partial output) but
+  // before RE/WA, so an output bomb is never misreported as a runtime error or
+  // a wrong answer.
+  const outputLimitMb = Math.max(1, Math.floor(problem.output_mb ?? 64));
+  const outputLimitBytes = outputLimitMb * 1024 * 1024;
+  const outputBytes = run.stdoutBytes + run.stderrBytes;
+  if (outputBytes > outputLimitBytes) {
+    return {
+      ...base,
+      verdict: 'OLE',
+      message: clipMessage(
+        `output limit exceeded (stdout ${run.stdoutBytes} bytes, stderr ${run.stderrBytes} bytes, limit ${outputLimitMb} MB)`,
       ),
     };
   }

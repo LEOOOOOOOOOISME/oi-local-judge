@@ -7,6 +7,34 @@ export function createJudgeTask(db: DatabaseSync, submissionId: number, priority
   return Number(result.lastInsertRowid);
 }
 
+/**
+ * Re-queues the single judge task that belongs to a submission.
+ *
+ * `judge_tasks.submission_id` is unique, so a rejudge must never insert a
+ * second row: the upsert resets the existing task (status/worker/heartbeat) and
+ * only inserts one when the submission never had a task. `attempts` restarts at
+ * 0 because the new run is a fresh grading attempt. Returns the task id.
+ */
+export function enqueueRejudge(db: DatabaseSync, submissionId: number, priority = 100): number {
+  db.prepare(
+    `INSERT INTO judge_tasks(submission_id, priority, status, worker, attempts, heartbeat_at, created_at)
+     VALUES (?, ?, 'queued', NULL, 0, NULL, ?)
+     ON CONFLICT(submission_id) DO UPDATE SET
+       status = 'queued',
+       worker = NULL,
+       heartbeat_at = NULL,
+       attempts = 0,
+       priority = MAX(judge_tasks.priority, excluded.priority)`,
+  ).run(submissionId, priority, Date.now());
+  const row = db
+    .prepare('SELECT id FROM judge_tasks WHERE submission_id = ?')
+    .get(submissionId) as unknown as { id: number } | undefined;
+  if (!row) {
+    throw new Error(`judge task for submission ${submissionId} not found after enqueue`);
+  }
+  return row.id;
+}
+
 export interface JudgeTaskRow {
   id: number;
   submission_id: number;
@@ -16,6 +44,17 @@ export interface JudgeTaskRow {
   attempts: number;
   heartbeat_at: number | null;
   created_at: number;
+}
+
+export function getJudgeTaskBySubmission(
+  db: DatabaseSync,
+  submissionId: number,
+): JudgeTaskRow | null {
+  return (
+    (db
+      .prepare('SELECT * FROM judge_tasks WHERE submission_id = ?')
+      .get(submissionId) as unknown as JudgeTaskRow) ?? null
+  );
 }
 
 export function claimNextTask(db: DatabaseSync, worker: string): JudgeTaskRow | null {

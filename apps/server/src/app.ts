@@ -19,6 +19,7 @@ import { registerSubmissionRoutes } from './http/submissions.js';
 import { registerAdminSystemRoutes } from './http/admin-system.js';
 import { registerContestBatchRoutes } from './http/admin-contest-batch.js';
 import { registerAdminRankingRoutes } from './http/admin-ranking.js';
+import { registerAdminJudgeRoutes } from './http/admin-judge.js';
 import { registerHackRoutes } from './http/hacks.js';
 import { recordAudit } from './storage/repos/audit.js';
 import { createHub, type Hub } from './realtime/hub.js';
@@ -107,6 +108,11 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     config,
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
     pluginGuard: requireRole(['admin'], { db, config }),
+  });
+  registerAdminJudgeRoutes(app, {
+    db,
+    config,
+    adminGuard: requireRole(['admin', 'setter', 'contestmanager'], { db, config }),
   });
   registerHackRoutes(app, {
     db,
