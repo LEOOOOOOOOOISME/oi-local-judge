@@ -392,3 +392,80 @@
   vertical-align: bottom;
   white-space: nowrap;
 }
+
+/* Phase Authoring：Data Plan */
+.data-plan-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.data-plan-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.data-plan-summary {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.data-plan-summary .score-ok {
+  color: var(--success, #52c41a);
+}
+
+.data-plan-summary .score-bad {
+  color: var(--danger, #ff4d4f);
+}
+
+.data-plan-groups {
+  margin-bottom: 10px;
+}
+
+.data-plan-add-group {
+  margin-bottom: 12px;
+}
+
+.data-plan-json {
+  margin-top: 8px;
+}
+
+.data-plan-issues {
+  margin-top: 12px;
+}
+
+.data-plan-job-card {
+  margin-top: 4px;
+}
+
+.data-plan-cases {
+  margin-top: 12px;
+}
+
+.data-plan-case-message {
+  display: inline-block;
+  max-width: 380px;
+  overflow: hidden;
+  color: var(--danger, #ff4d4f);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.data-plan-preview {
+  max-height: 420px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle, #fafafa);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
