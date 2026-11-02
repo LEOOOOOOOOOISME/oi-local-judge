@@ -5,6 +5,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { requireAuth } from '../security/auth.js';
 import { getSubmissionDetail, submitSource } from '../services/submissions.js';
+import { ContestAccessError } from '../services/contest-access.js';
 import { listSubmissions, getSubmission } from '../storage/repos/submissions.js';
 
 export interface SubmissionRouteOptions {
@@ -46,6 +47,12 @@ export function registerSubmissionRoutes(
       );
       return reply.code(201).send({ ok: true, data: { id, status: 'queued' } });
     } catch (err) {
+      if (err instanceof ContestAccessError) {
+        return reply.code(err.status).send({
+          ok: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
       const message = (err as Error).message;
       const status = /too large/.test(message) ? 413 : /not found/.test(message) ? 404 : 400;
       return reply.code(status).send({ ok: false, error: { code: 'SUBMIT_FAILED', message } });

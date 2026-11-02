@@ -5,10 +5,6 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { SubmissionDto, TestResultDto, Verdict } from '@oij/shared';
 import type { Config } from '../config.js';
 import { getProblem } from '../storage/repos/problems.js';
-import {
-  getContest,
-  isContestParticipant,
-} from '../storage/repos/contests.js';
 import { getLock } from '../storage/repos/hacks.js';
 import {
   createSubmission,
@@ -17,6 +13,7 @@ import {
   type SubmissionRow,
 } from '../storage/repos/submissions.js';
 import { createJudgeTask } from '../storage/repos/judge.js';
+import { resolveContestSubmission } from './contest-access.js';
 
 export const ALLOWED_LANGUAGES = new Set(['cpp17', 'c11', 'objective', 'answer']);
 export const MAX_SOURCE_BYTES = 256 * 1024;
@@ -29,6 +26,7 @@ export interface SubmitInput {
   contestId?: number | null;
   phase?: string;
   batchId?: number | null;
+  now?: number;
 }
 
 export function submitSource(
@@ -59,19 +57,16 @@ export function submitSource(
   if (bytes > MAX_SOURCE_BYTES) throw new Error('source is too large');
 
   let phase = input.phase ?? 'contest';
-  if (!input.phase && input.contestId) {
-    const contest = getContest(deps.db, input.contestId);
-    if (!contest) throw new Error('contest not found');
-    const ended =
-      contest.status === 'ended' ||
-      contest.status === 'archived' ||
-      (contest.end_at !== null && Date.now() >= contest.end_at);
-    if (ended) {
-      if (!isContestParticipant(deps.db, input.contestId, input.userId)) {
-        throw new Error('only contest participants may submit corrections');
-      }
-      phase = 'correction';
-    } else if (getLock(deps.db, input.contestId, input.userId, input.problemId)) {
+  if (input.contestId && !input.phase) {
+    const resolved = resolveContestSubmission({
+      db: deps.db,
+      contestId: input.contestId,
+      problemId: input.problemId,
+      userId: input.userId,
+      now: input.now,
+    });
+    phase = resolved.phase;
+    if (phase === 'contest' && getLock(deps.db, input.contestId, input.userId, input.problemId)) {
       throw new Error('problem is locked; no further submissions are accepted');
     }
   }

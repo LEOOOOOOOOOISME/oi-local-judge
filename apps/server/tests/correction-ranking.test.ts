@@ -142,6 +142,6 @@ describe('correction ranking', () => {
           contestId,
         },
       ),
-    ).toThrow(/participants/);
+    ).toThrow(/not a participant/i);
   });
 });
