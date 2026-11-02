@@ -4,8 +4,9 @@ import { join } from 'node:path';
 import Fastify from 'fastify';
 import { afterEach, describe, expect, it } from 'vitest';
 import { registerContestRoutes } from '../src/http/contests.js';
-import { getContestRanking } from '../src/services/contests.js';
+import { getClassStats, getContestRanking } from '../src/services/contests.js';
 import { createContest, addParticipant } from '../src/storage/repos/contests.js';
+import { upsertOfficialScore } from '../src/storage/repos/official-scores.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import { createSubmission } from '../src/storage/repos/submissions.js';
 import { createUser } from '../src/storage/repos/users.js';
@@ -24,7 +25,7 @@ function setup() {
   migrate(db);
   const app = Fastify();
   registerContestRoutes(app, { db });
-  return { db, app };
+  return { db, app, dir };
 }
 
 function addSubmission(
@@ -96,6 +97,66 @@ describe('contest ranking', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json() as { data: Array<{ userId: number; username: string }> };
     expect(body.data[0].username).toBe('alice');
+    db.close();
+    await app.close();
+  });
+
+  it('computes class stats from the official ranking source', async () => {
+    const { db, app, dir } = setup();
+    const alice = createUser(db, {
+      username: 'alice',
+      passwordHash: 'x',
+      className: '1班',
+    });
+    const bob = createUser(db, { username: 'bob', passwordHash: 'x', className: '2班' });
+    const p1 = createProblem(db, {
+      title: 'P1',
+      type: 'standard',
+      timeMs: 1000,
+      memoryMb: 64,
+      testcases: [{ inputPath: '1.in', outputPath: '1.out', points: 100 }],
+    });
+    const contestId = createContest(db, { name: 'Stats', mode: 'oi', problemIds: [p1] });
+    addParticipant(db, contestId, alice);
+    addParticipant(db, contestId, bob);
+    // The online submission is worth 60, but the official (batch) score is 100.
+    addSubmission(db, contestId, p1, alice, 'PC', 60, 100);
+    upsertOfficialScore(db, {
+      contestId,
+      userId: alice,
+      problemId: p1,
+      score: 100,
+      verdict: 'AC',
+      source: 'batch',
+      batchId: 1,
+    });
+
+    const rows = await getClassStats(db, contestId, dir);
+    expect(rows).toEqual([
+      {
+        className: '1班',
+        participants: 1,
+        totalScore: 100,
+        averageScore: 100,
+        acParticipants: 1,
+        bestRank: 1,
+      },
+      {
+        className: '2班',
+        participants: 1,
+        totalScore: 0,
+        averageScore: 0,
+        acParticipants: 0,
+        bestRank: 2,
+      },
+    ]);
+
+    const res = await app.inject({
+      method: 'GET',
+      url: `/api/admin/contests/${contestId}/class-stats`,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ ok: true, data: rows });
     db.close();
     await app.close();
   });

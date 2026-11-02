@@ -113,7 +113,8 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     config,
     auth: requireAuth({ db, config }),
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
-  });  registerContestRoutes(app, {
+  });
+  registerContestRoutes(app, {
     db,
     config,
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
@@ -159,6 +160,9 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     }
     const rooms = [`user:${authenticated.user.id}`];
     if (authenticated.user.role === 'admin') rooms.push('admin');
+    const rawContestId = (request.query as { contestId?: unknown } | undefined)?.contestId;
+    const contestId = typeof rawContestId === 'string' ? Number(rawContestId) : Number.NaN;
+    if (Number.isInteger(contestId) && contestId > 0) rooms.push(`contest:${contestId}`);
     hub.subscribe(socket, rooms);
 
     socket.send(JSON.stringify({ v: 1, type: 'hello', data: { userId: authenticated.user.id } }));
