@@ -10,6 +10,7 @@ import { registerAuthRoutes } from './http/auth.js';
 import { registerProblemRoutes } from './http/problems.js';
 import { registerAdminProblemRoutes } from './http/admin-problems.js';
 import { registerAdminToolRoutes } from './http/admin-tools.js';
+import { registerAdminAuthoringRoutes } from './http/admin-authoring.js';
 import { registerAdminBatchRoutes } from './http/admin-batch.js';
 import { registerAdminUserRoutes } from './http/admin-users.js';
 import { registerCommunityRoutes } from './http/community.js';
@@ -73,6 +74,11 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     adminGuard: requireRole(['admin', 'setter'], { db, config }),
   });
   registerAdminToolRoutes(app, {
+    db,
+    config,
+    adminGuard: requireRole(['admin', 'setter'], { db, config }),
+  });
+  registerAdminAuthoringRoutes(app, {
     db,
     config,
     adminGuard: requireRole(['admin', 'setter'], { db, config }),
