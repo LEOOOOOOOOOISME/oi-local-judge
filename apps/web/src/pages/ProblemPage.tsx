@@ -36,6 +36,7 @@ import { MetaList } from '../components/MetaList';
 import { ObjectiveAnswerForm } from '../components/ObjectiveAnswerForm';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
+import { ProblemSharePanel } from '../components/ProblemSharePanel';
 import { StatementHtml } from '../components/StatementHtml';
 import { SubmissionTable } from '../components/SubmissionTable';
 import { formatDateTime, formatMemoryLimit, formatTimeLimit } from '../utils/format';
@@ -1228,6 +1229,10 @@ export function ProblemPage() {
               {isObjective || isOutputOnly ? '去作答' : '提交代码'}
             </Button>
           </Card>
+
+          {contestId === null && user ? (
+            <ProblemSharePanel problemId={problem.id} />
+          ) : null}
 
           {contestId !== null ? (
             <Card className="oij-card" size="small" title="所属比赛">
