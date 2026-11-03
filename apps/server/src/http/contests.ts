@@ -29,6 +29,11 @@ import { getOfficialRanking } from '../services/official-ranking.js';
 import { getCorrectionRanking } from '../services/correction-ranking.js';
 import { getTeamRanking } from '../services/team-ranking.js';
 import {
+  AwardConfigError,
+  getContestAwards,
+  setAwardConfig,
+} from '../services/awards.js';
+import {
   ContestTeamError,
   getRegisteredTeamForUser,
   listContestTeams,
@@ -138,6 +143,91 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     options.auth ??
     (options.config ? requireAuth({ db: options.db, config: options.config }) : undefined);
   const teamGuards = teamAuth ? [teamAuth] : [];
+
+  app.get<{ Params: { id: string } }>(
+    '/api/contests/:id/awards',
+    { preHandler: teamGuards },
+    async (request, reply) => {
+      const contestId = Number(request.params.id);
+      const user = request.user;
+      if (!user) {
+        return reply.code(401).send({
+          ok: false,
+          error: { code: 'UNAUTHORIZED', message: 'authentication required' },
+        });
+      }
+      const contest = getContest(options.db, contestId);
+      if (!contest) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      const ready =
+        contest.status === 'ended' ||
+        contest.status === 'archived' ||
+        contest.archived_at !== null;
+      const isManager = user.role === 'admin' || user.role === 'contestmanager';
+      if (!ready && !isManager) {
+        return reply.code(403).send({
+          ok: false,
+          error: {
+            code: 'AWARDS_NOT_READY',
+            message: 'awards are available after the contest ends',
+          },
+        });
+      }
+      const awards = await getContestAwards(
+        options.db,
+        contestId,
+        options.config?.dataDir ?? process.cwd(),
+      );
+      if (!awards) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      return { ok: true, data: awards };
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/contests/:id/awards',
+    { preHandler: guards },
+    async (request, reply) => {
+      const awards = await getContestAwards(
+        options.db,
+        Number(request.params.id),
+        options.config?.dataDir ?? process.cwd(),
+      );
+      if (!awards) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      return { ok: true, data: awards };
+    },
+  );
+
+  app.put<{ Params: { id: string }; Body: unknown }>(
+    '/api/admin/contests/:id/awards/config',
+    { preHandler: guards },
+    async (request, reply) => {
+      const contestId = Number(request.params.id);
+      if (!getContest(options.db, contestId)) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      const body = (request.body ?? {}) as Record<string, unknown>;
+      const raw = body.config ?? body;
+      try {
+        const config = setAwardConfig(options.db, contestId, raw, {
+          actorId: request.user?.id ?? null,
+          ip: request.ip,
+        });
+        return { ok: true, data: config };
+      } catch (err) {
+        if (err instanceof AwardConfigError) {
+          return reply
+            .code(err.status)
+            .send({ ok: false, error: { code: err.code, message: err.message } });
+        }
+        throw err;
+      }
+    },
+  );
 
   if (teamAuth) {
     app.post<{ Params: { id: string }; Body: { teamId?: unknown } }>(
