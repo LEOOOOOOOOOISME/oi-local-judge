@@ -268,9 +268,14 @@ export interface ClassStatRow {
   bestRank: number;
 }
 
+/** 报名模式：个人 / 团队 / 个人与团队均可。默认 individual。 */
+export type TeamMode = 'individual' | 'team' | 'both';
+
 export interface CreateContestRequest {
   name: string;
   mode?: string;
+  /** 报名模式，省略时后端默认 individual。 */
+  teamMode?: TeamMode;
   startAt?: number;
   endAt?: number;
   freezeAt?: number;
@@ -281,6 +286,7 @@ export interface CreateContestRequest {
 export interface UpdateContestRequest {
   name?: string;
   mode?: string;
+  teamMode?: TeamMode;
   startAt?: number | null;
   endAt?: number | null;
   freezeAt?: number | null;
@@ -335,6 +341,10 @@ export interface Contest {
   id: number;
   name: string;
   mode: string;
+  /** 报名模式；旧后端/旧比赛可能没有该字段，前端按 individual 处理。 */
+  team_mode?: TeamMode;
+  /** 兼容已映射为 camelCase 的接口返回。 */
+  teamMode?: TeamMode;
   start_at: number | null;
   end_at: number | null;
   freeze_at: number | null;
@@ -343,6 +353,35 @@ export interface Contest {
   rules_json: string;
   archived_at?: number | null;
   official_frozen_until?: number | null;
+}
+
+/** GET /api/contests/:id/team-ranking 返回的比赛题目。 */
+export interface TeamRankingProblem {
+  id: number;
+  ordinal: number;
+  points: number;
+  title: string;
+}
+
+/** 团队榜中单个团队在某题上的最佳成绩。 */
+export interface TeamRankingCell {
+  problemId: number;
+  score: number;
+  verdict: Verdict | null;
+  attempts: number;
+  firstAcAt: number | null;
+}
+
+/** GET /api/contests/:id/team-ranking 返回的行。 */
+export interface TeamRankingRow {
+  rank: number;
+  teamId: number;
+  teamName: string;
+  memberCount: number;
+  totalScore: number;
+  solved: number;
+  lastAcAt: number | null;
+  cells: TeamRankingCell[];
 }
 
 /** GET /api/contests/:id 返回的比赛题目（含每题分值）。 */
@@ -1149,4 +1188,23 @@ export interface AddTeamMemberRequest {
 
 export interface TransferTeamCaptainRequest {
   userId: number;
+}
+
+/** 比赛团队报名：GET /api/contests/:id/teams 返回的成员。 */
+export interface TeamRegistrationMember {
+  userId: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  role: TeamRole;
+}
+
+/** GET /api/contests/:id/teams 返回的已报名团队。 */
+export interface TeamRegistration {
+  teamId: number;
+  name: string;
+  ownerId: number;
+  registeredBy: number | null;
+  registeredAt: number;
+  members: TeamRegistrationMember[];
 }
