@@ -333,6 +333,41 @@ export const HELP_DOCS: HelpDoc[] = [
     ]
   },
   {
+    "slug": "maintenance/release",
+    "title": "发布构建（维护者）",
+    "category": "维护",
+    "path": "docs/help/maintenance/release.md",
+    "html": "<h1 id=\"发布构建维护者\">发布构建（维护者）</h1>\n<p><code>npm run build:release</code> 一条命令生成 Windows 便携版目录和 ZIP。构建在临时\ngit worktree 中执行，不会改写当前开发工作树的 <code>apps/*/dist</code>、<code>runtime/</code> 或\n<code>release/</code>。</p>\n<h2 id=\"前置条件\">前置条件</h2>\n<ul>\n<li>Windows x64，Node.js 24+，npm 11+。</li>\n<li>已安装 Git for Windows（默认使用\n<code>C:\\Program Files\\Git\\cmd\\git.exe</code>；也可用 <code>OIJ_GIT</code> 指定）。</li>\n<li>首次构建前在开发工作树执行过一次 <code>npm install</code> 和 <code>npm run build:native</code>；\n发布构建只复用 <code>node_modules</code>、<code>native/runner/out</code>、<code>native/interact/out</code>\n和 <code>vendor</code>，不会重新安装依赖。</li>\n<li>MinGW（g++）可用时，构建会把 <code>libgcc_s_seh-1.dll</code>、<code>libstdc++-6.dll</code>、\n<code>libwinpthread-1.dll</code> 一起打包；找不到时输出警告，便携包在没有 MinGW 的\n机器上可能无法启动评测器。</li>\n</ul>\n<h2 id=\"用法\">用法</h2>\n<pre><code class=\"language-bash\"># 构建 HEAD 的便携目录 + ZIP\nnpm run build:release\n\n# 指定 revision / 不生成 ZIP / 保留临时 worktree（排查用）\nnpm run build:release -- --rev v1.1.0\nnpm run build:release -- --no-zip\nnpm run build:release -- --keep\n\n# 直接打包当前工作树（调试用，不隔离，会写当前工作树）\nnode tools/build-portable.mjs --zip\n</code></pre>\n<p>产物：</p>\n<pre><code class=\"language-text\">release/oi-local-judge-&lt;version&gt;-win-x64/\nrelease/oi-local-judge-&lt;version&gt;-win-x64.zip\n</code></pre>\n<h2 id=\"隔离与并发\">隔离与并发</h2>\n<ol>\n<li>在 <code>release/.build.lock</code> 独占创建锁文件。锁中的 PID 仍存活时，第二次构建\n会直接拒绝；PID 已退出（或锁文件损坏且超过宽限期）时自动清理陈旧锁。</li>\n<li>在系统临时目录创建 <code>oij-release-&lt;时间戳&gt;-&lt;pid&gt;</code> worktree：\n<code>git worktree add --detach &lt;temp&gt; &lt;rev&gt;</code>。</li>\n<li>通过 junction 链接开发工作树的 <code>node_modules</code>，复制 native 产物与\n<code>package-lock.json</code>。</li>\n<li>在临时 worktree 执行 <code>npm run build</code>，再用\n<code>tools/build-portable.mjs --source &lt;temp&gt; --release-dir &lt;main&gt;/release</code>\n打包。</li>\n<li>用 fflate <code>ZipDeflate</code>（level 1）流式写 <code>&lt;zip&gt;.tmp</code>，逐个文件压缩并直接\n落盘；完成后校验 EOCD/中央目录与关键条目，再原子 rename 为正式 ZIP。</li>\n<li>删除 worktree、junction、临时目录和锁；<code>--keep</code> 会保留 worktree。</li>\n</ol>\n<p>ZIP 校验会检查中央目录结构、条目数、路径安全（拒绝绝对路径和 <code>..</code>）以及\n<code>OiJudge.exe</code>、启动脚本、server/web/shared dist、native runner、关键\n<code>node_modules</code> 等必需条目，不需要解压整包。</p>\n<h2 id=\"验证建议\">验证建议</h2>\n<pre><code class=\"language-bash\"># 单元测试（不构建 700 MB 包）\nnpx vitest run tools/release/release.test.mjs\nnpm test\n\n# 解压后直接启动 server 做健康检查\nnode release/oi-local-judge-&lt;version&gt;-win-x64/resources/app/apps/server/dist/cli.js\n</code></pre>\n<p>发布目录和 ZIP 位于 <code>release/</code>，该目录已被 <code>.gitignore</code> 忽略，不会污染提交。</p>\n",
+    "plainText": "发布构建（维护者）\nnpm run build:release 一条命令生成 Windows 便携版目录和 ZIP。构建在临时\ngit worktree 中执行，不会改写当前开发工作树的 apps/*/dist、runtime/ 或\nrelease/。\n前置条件\n\nWindows x64，Node.js 24+，npm 11+。\n已安装 Git for Windows（默认使用\nC:\\Program Files\\Git\\cmd\\git.exe；也可用 OIJ_GIT 指定）。\n首次构建前在开发工作树执行过一次 npm install 和 npm run build:native；\n发布构建只复用 node_modules、native/runner/out、native/interact/out\n和 vendor，不会重新安装依赖。\nMinGW（g++）可用时，构建会把 libgcc_s_seh-1.dll、libstdc++-6.dll、\nlibwinpthread-1.dll 一起打包；找不到时输出警告，便携包在没有 MinGW 的\n机器上可能无法启动评测器。\n\n用法\n# 构建 HEAD 的便携目录 + ZIP\nnpm run build:release\n\n# 指定 revision / 不生成 ZIP / 保留临时 worktree（排查用）\nnpm run build:release -- --rev v1.1.0\nnpm run build:release -- --no-zip\nnpm run build:release -- --keep\n\n# 直接打包当前工作树（调试用，不隔离，会写当前工作树）\nnode tools/build-portable.mjs --zip\n\n产物：\nrelease/oi-local-judge-&lt;version&gt;-win-x64/\nrelease/oi-local-judge-&lt;version&gt;-win-x64.zip\n\n隔离与并发\n\n在 release/.build.lock 独占创建锁文件。锁中的 PID 仍存活时，第二次构建\n会直接拒绝；PID 已退出（或锁文件损坏且超过宽限期）时自动清理陈旧锁。\n在系统临时目录创建 oij-release-&lt;时间戳&gt;-&lt;pid&gt; worktree：\ngit worktree add --detach &lt;temp&gt; &lt;rev&gt;。\n通过 junction 链接开发工作树的 node_modules，复制 native 产物与\npackage-lock.json。\n在临时 worktree 执行 npm run build，再用\ntools/build-portable.mjs --source &lt;temp&gt; --release-dir &lt;main&gt;/release\n打包。\n用 fflate ZipDeflate（level 1）流式写 &lt;zip&gt;.tmp，逐个文件压缩并直接\n落盘；完成后校验 EOCD/中央目录与关键条目，再原子 rename 为正式 ZIP。\n删除 worktree、junction、临时目录和锁；--keep 会保留 worktree。\n\nZIP 校验会检查中央目录结构、条目数、路径安全（拒绝绝对路径和 ..）以及\nOiJudge.exe、启动脚本、server/web/shared dist、native runner、关键\nnode_modules 等必需条目，不需要解压整包。\n验证建议\n# 单元测试（不构建 700 MB 包）\nnpx vitest run tools/release/release.test.mjs\nnpm test\n\n# 解压后直接启动 server 做健康检查\nnode release/oi-local-judge-&lt;version&gt;-win-x64/resources/app/apps/server/dist/cli.js\n\n发布目录和 ZIP 位于 release/，该目录已被 .gitignore 忽略，不会污染提交。\n",
+    "headings": [
+      {
+        "id": "发布构建维护者",
+        "text": "发布构建（维护者）",
+        "level": 1
+      },
+      {
+        "id": "前置条件",
+        "text": "前置条件",
+        "level": 2
+      },
+      {
+        "id": "用法",
+        "text": "用法",
+        "level": 2
+      },
+      {
+        "id": "隔离与并发",
+        "text": "隔离与并发",
+        "level": 2
+      },
+      {
+        "id": "验证建议",
+        "text": "验证建议",
+        "level": 2
+      }
+    ]
+  },
+  {
     "slug": "contest/ranking",
     "title": "排名与赛制",
     "category": "比赛",

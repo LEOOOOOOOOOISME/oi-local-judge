@@ -24,6 +24,7 @@ const CATEGORY_BY_DIR = new Map([
   ['judging', '评测'],
   ['team', '团队'],
   ['system', '系统'],
+  ['maintenance', '维护'],
   ['faq', 'FAQ'],
 ]);
 const DEFAULT_CATEGORY = '开始';

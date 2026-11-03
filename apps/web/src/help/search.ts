@@ -1,6 +1,6 @@
 import type { HelpDoc } from './types';
 
-const CATEGORY_ORDER = ['开始', '出题', '比赛', '评测', '团队', '系统', 'FAQ'];
+const CATEGORY_ORDER = ['开始', '出题', '比赛', '评测', '团队', '系统', '维护', 'FAQ'];
 
 export function searchHelpDocs(docs: readonly HelpDoc[], query: string): HelpDoc[] {
   const q = query.trim().toLowerCase();

@@ -5,8 +5,10 @@ import react from '@vitejs/plugin-react';
 
 // Windows 上系统临时目录可能被安全软件占用，esbuild 清理临时文件时报 EACCES，
 // 导致构建在最后阶段失败。把 esbuild 临时目录固定到工程内，保证构建可重复。
+// 隔离发布构建再用 OIJ_VITE_TMP 指向 release/ 下的临时目录：临时 worktree
+// 位于系统 %TEMP% 时，esbuild 在 %TEMP% 里删除临时文件会被拒绝。
 if (process.platform === 'win32') {
-  const esbuildTmp = join(process.cwd(), '.vite-tmp');
+  const esbuildTmp = process.env.OIJ_VITE_TMP || join(process.cwd(), '.vite-tmp');
   try {
     mkdirSync(esbuildTmp, { recursive: true });
     process.env.TMP = esbuildTmp;
