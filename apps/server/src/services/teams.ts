@@ -56,10 +56,16 @@ function requireTeam(db: DatabaseSync, teamId: number): TeamRow {
   return team;
 }
 
-function requireCaptain(db: DatabaseSync, teamId: number, actorId: number): void {
+function requireCaptainOrAdmin(
+  db: DatabaseSync,
+  teamId: number,
+  actorId: number,
+  isAdmin: boolean,
+): void {
+  if (isAdmin) return;
   const member = getTeamMember(db, teamId, actorId);
   if (!member || member.role !== 'captain') {
-    throw new TeamError('TEAM_FORBIDDEN', 403, 'only the team captain can do that');
+    throw new TeamError('TEAM_FORBIDDEN', 403, 'only the team captain or an admin can do that');
   }
 }
 
@@ -121,10 +127,10 @@ export function getTeam(db: DatabaseSync, teamId: number): TeamDetail | null {
 
 export function addTeamMember(
   db: DatabaseSync,
-  input: { teamId: number; actorId: number; username: string; now?: number },
+  input: { teamId: number; actorId: number; username: string; now?: number; isAdmin?: boolean },
 ): void {
   requireTeam(db, input.teamId);
-  requireCaptain(db, input.teamId, input.actorId);
+  requireCaptainOrAdmin(db, input.teamId, input.actorId, input.isAdmin ?? false);
   const username = input.username.trim();
   const target = username ? getUserByUsername(db, username) : null;
   if (!target) {
@@ -156,10 +162,10 @@ export function addTeamMember(
 
 export function removeTeamMember(
   db: DatabaseSync,
-  input: { teamId: number; actorId: number; userId: number; now?: number },
+  input: { teamId: number; actorId: number; userId: number; now?: number; isAdmin?: boolean },
 ): void {
   requireTeam(db, input.teamId);
-  requireCaptain(db, input.teamId, input.actorId);
+  requireCaptainOrAdmin(db, input.teamId, input.actorId, input.isAdmin ?? false);
   if (input.userId === input.actorId) {
     throw new TeamError(
       'TEAM_FORBIDDEN',
@@ -199,10 +205,10 @@ export function leaveTeam(db: DatabaseSync, teamId: number, userId: number): voi
 
 export function transferCaptain(
   db: DatabaseSync,
-  input: { teamId: number; actorId: number; userId: number },
+  input: { teamId: number; actorId: number; userId: number; isAdmin?: boolean },
 ): void {
   requireTeam(db, input.teamId);
-  requireCaptain(db, input.teamId, input.actorId);
+  requireCaptainOrAdmin(db, input.teamId, input.actorId, input.isAdmin ?? false);
   if (input.userId === input.actorId) {
     throw new TeamError('TEAM_TRANSFER_SELF', 400, 'the captain is already the captain');
   }
@@ -213,8 +219,13 @@ export function transferCaptain(
   if (target.role === 'captain') {
     throw new TeamError('TEAM_ALREADY_CAPTAIN', 409, 'target is already a captain');
   }
+  const currentCaptains = listTeamMembers(db, input.teamId).filter(
+    (member) => member.role === 'captain',
+  );
   transaction(db, () => {
-    updateTeamMemberRole(db, input.teamId, input.actorId, 'member');
+    for (const captain of currentCaptains) {
+      updateTeamMemberRole(db, input.teamId, captain.userId, 'member');
+    }
     updateTeamMemberRole(db, input.teamId, input.userId, 'captain');
     updateTeamOwner(db, input.teamId, input.userId);
   });
