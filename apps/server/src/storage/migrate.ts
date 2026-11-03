@@ -18,7 +18,10 @@ CREATE TABLE IF NOT EXISTS problems(
   checker_path TEXT,
   compare_mode TEXT NOT NULL DEFAULT 'ignore-trailing',
   objective_json TEXT NOT NULL DEFAULT '{}',
-  visibility TEXT NOT NULL DEFAULT 'public', version INTEGER NOT NULL DEFAULT 1,
+  visibility TEXT NOT NULL DEFAULT 'public',
+  owner_type TEXT NOT NULL DEFAULT 'system',
+  owner_id INTEGER,
+  version INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS problem_testcases(
@@ -33,6 +36,18 @@ CREATE TABLE IF NOT EXISTS problem_subtasks(
   points INTEGER NOT NULL, aggregation TEXT NOT NULL DEFAULT 'min',
   FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS problem_shares(
+  problem_id INTEGER NOT NULL,
+  grantee_type TEXT NOT NULL,
+  grantee_id INTEGER NOT NULL,
+  permission TEXT NOT NULL,
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(problem_id, grantee_type, grantee_id),
+  FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_problem_shares_grantee
+  ON problem_shares(grantee_type, grantee_id);
 CREATE TABLE IF NOT EXISTS problem_assets(
   id INTEGER PRIMARY KEY, problem_id INTEGER NOT NULL, kind TEXT NOT NULL,
   name TEXT NOT NULL, path TEXT NOT NULL, language TEXT,
@@ -239,6 +254,8 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'problems', 'checker_path', 'TEXT');
   ensureColumn(db, 'problems', 'compare_mode', "TEXT NOT NULL DEFAULT 'ignore-trailing'");
   ensureColumn(db, 'problems', 'objective_json', "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, 'problems', 'owner_type', "TEXT NOT NULL DEFAULT 'system'");
+  ensureColumn(db, 'problems', 'owner_id', 'INTEGER');
   ensureColumn(db, 'batch_items', 'problem_id', 'INTEGER');
   ensureColumn(db, 'batch_items', 'score', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'batch_items', 'verdict', 'TEXT');
