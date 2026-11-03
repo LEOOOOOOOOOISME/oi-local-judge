@@ -1100,3 +1100,53 @@ export interface RestoreRequestResult {
   requestedAt: number;
   restartRequired: true;
 }
+
+/** Teams v1.2：常驻团队。 */
+export type TeamRole = 'captain' | 'member';
+
+/** GET /api/teams 列表项。 */
+export interface TeamSummary {
+  id: number;
+  name: string;
+  ownerId: number;
+  createdAt: number;
+  memberCount: number;
+  /** 当前用户在团队中的角色。 */
+  role: TeamRole;
+}
+
+export interface TeamMember {
+  userId: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  role: TeamRole;
+  joinedAt: number;
+}
+
+/** GET /api/teams/:id；members 仅团队成员与管理员可见。 */
+export interface TeamDetail {
+  id: number;
+  name: string;
+  ownerId: number;
+  createdAt: number;
+  /** 当前用户角色；非成员为 null。 */
+  viewerRole: TeamRole | null;
+  members?: TeamMember[];
+}
+
+export interface CreateTeamRequest {
+  name: string;
+}
+
+export interface CreateTeamResult {
+  id: number;
+}
+
+export interface AddTeamMemberRequest {
+  username: string;
+}
+
+export interface TransferTeamCaptainRequest {
+  userId: number;
+}
