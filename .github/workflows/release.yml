@@ -154,7 +154,12 @@ jobs:
           # it at the portable root, which already contains OiJudge.exe and
           # resources/app/. Pointing it at resources/app would produce an
           # installer whose install root has no executable.
-          npx electron-builder --win nsis --prepackaged "${{ steps.artifacts.outputs.portable }}" --config electron-builder.yml
+          #
+          # --publish never: GitHub Actions sets CI=true, which makes
+          # electron-builder try to publish a release afterwards; without
+          # GH_TOKEN that step fails the job even though the installer was
+          # built. The installer is uploaded as an artifact instead.
+          npx electron-builder --win nsis --prepackaged "${{ steps.artifacts.outputs.portable }}" --config electron-builder.yml --publish never
 
       - name: Verify installer
         shell: pwsh
