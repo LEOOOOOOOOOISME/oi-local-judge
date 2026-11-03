@@ -276,6 +276,27 @@ describe('teams service', () => {
     expect(audit).toMatchObject({ actor_id: bob, target_id: String(teamId) });
   });
 
+  it('lets an administrator add, remove and transfer without being captain', () => {
+    const { db, alice, bob, carol } = setup();
+    const teamId = createTeam(db, { name: 'Alpha', ownerId: alice });
+
+    addTeamMember(db, { teamId, actorId: bob, username: 'carol', isAdmin: true });
+    expect(getTeam(db, teamId)?.members.map((member) => member.username)).toEqual([
+      'alice',
+      'carol',
+    ]);
+
+    removeTeamMember(db, { teamId, actorId: bob, userId: carol, isAdmin: true });
+    expect(getTeam(db, teamId)?.members.map((member) => member.username)).toEqual(['alice']);
+
+    addTeamMember(db, { teamId, actorId: bob, username: 'carol', isAdmin: true });
+    transferCaptain(db, { teamId, actorId: bob, userId: carol, isAdmin: true });
+    const team = getTeam(db, teamId);
+    expect(team?.ownerId).toBe(carol);
+    expect(team?.members.find((member) => member.userId === carol)?.role).toBe('captain');
+    expect(team?.members.find((member) => member.userId === alice)?.role).toBe('member');
+  });
+
   it('supports one user in multiple teams', () => {
     const { db, alice, bob } = setup();
     const alpha = createTeam(db, { name: 'Alpha', ownerId: alice });
