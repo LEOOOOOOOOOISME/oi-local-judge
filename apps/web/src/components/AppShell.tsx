@@ -73,6 +73,9 @@ export function AppShell() {
             </NavLink>
             {user ? (
               <>
+                <NavLink to="/teams" className={navClass}>
+                  团队
+                </NavLink>
                 <NavLink to="/records" className={navClass}>
                   我的记录
                 </NavLink>

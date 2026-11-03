@@ -63,6 +63,12 @@ const AdminContestBatchPage = lazy(() =>
 const AdminUsersPage = lazy(() =>
   import('./pages/AdminUsersPage').then((module) => ({ default: module.AdminUsersPage })),
 );
+const TeamsPage = lazy(() =>
+  import('./pages/TeamsPage').then((module) => ({ default: module.TeamsPage })),
+);
+const TeamDetailPage = lazy(() =>
+  import('./pages/TeamDetailPage').then((module) => ({ default: module.TeamDetailPage })),
+);
 const DiscussPage = lazy(() =>
   import('./pages/DiscussPage').then((module) => ({ default: module.DiscussPage })),
 );
@@ -211,6 +217,22 @@ export function AppRoutes() {
             <AdminOnlyRoute>
               <AdminSystemPage />
             </AdminOnlyRoute>
+          }
+        />
+        <Route
+          path="/teams"
+          element={
+            <ProtectedRoute>
+              <TeamsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/teams/:id"
+          element={
+            <ProtectedRoute>
+              <TeamDetailPage />
+            </ProtectedRoute>
           }
         />
         <Route path="/discuss" element={<DiscussPage />} />
