@@ -359,6 +359,12 @@ export function ContestOverviewPage() {
   }
 
   const phase = contestPhase(contest, now);
+  // 奖项在比赛结束/归档后公开；管理员可提前预览（与后端 403 判定一致）。
+  const awardsReady =
+    phase === 'ended' ||
+    contest.status === 'archived' ||
+    Boolean(contest.archived_at);
+  const showAwardsEntry = awardsReady || isManager;
   const contestPath = `/contest/${contest.id}`;
   const loginHref = `/login?next=${encodeURIComponent(contestPath)}`;
   const listPending = !detail && rankingQuery.isPending;
@@ -400,6 +406,11 @@ export function ContestOverviewPage() {
             <Link to={`${contestPath}/correction`}>
               <Button>订正榜</Button>
             </Link>
+            {showAwardsEntry ? (
+              <Link to={`${contestPath}/awards`}>
+                <Button>{awardsReady ? '奖项/证书' : '奖项预览'}</Button>
+              </Link>
+            ) : null}
           </Space>
         }
       />
@@ -733,6 +744,15 @@ export function ContestOverviewPage() {
             >
               查看完整榜单
             </Button>
+            {showAwardsEntry ? (
+              <Button
+                block
+                className="side-action"
+                onClick={() => navigate(`${contestPath}/awards`)}
+              >
+                {awardsReady ? '奖项/证书' : '奖项预览（管理员）'}
+              </Button>
+            ) : null}
           </Card>
         </div>
               </div>

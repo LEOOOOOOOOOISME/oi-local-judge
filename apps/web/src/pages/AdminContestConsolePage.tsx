@@ -24,7 +24,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../api/client';
 import type {
   AdminUser,
+  AwardConfig,
   ClassStatRow,
+  ContestAwards,
   ContestDetail,
   ContestDetailProblem,
   ContestParticipant,
@@ -46,6 +48,10 @@ import { useContestAnnouncements } from '../components/ContestAnnouncements';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { formatDateTime } from '../utils/format';
+import {
+  computeAwardCounts,
+  isValidAwardConfig,
+} from '../utils/awards';
 import { fetchOfficialRanking, presetLabel } from '../utils/officialRanking';
 import {
   findTeamByIdOrName,
@@ -166,6 +172,13 @@ export function AdminContestConsolePage() {
   const [officialFreezeMinutes, setOfficialFreezeMinutes] = useState(0);
   const [savingRanking, setSavingRanking] = useState(false);
   const [rankingError, setRankingError] = useState<string | null>(null);
+  const [awardConfigDraft, setAwardConfigDraft] = useState<AwardConfig>({
+    goldPercent: 10,
+    silverPercent: 20,
+    bronzePercent: 30,
+  });
+  const [savingAwards, setSavingAwards] = useState(false);
+  const [awardsError, setAwardsError] = useState<string | null>(null);
   const [unlockingLock, setUnlockingLock] = useState<string | null>(null);
   const [registrationFilter, setRegistrationFilter] = useState<'all' | RegistrationStatus>(
     'all',
@@ -231,6 +244,12 @@ export function AdminContestConsolePage() {
     queryKey: ['ranking-plugins'],
     queryFn: () => apiGet<RankingPlugin[]>('/api/admin/ranking-plugins'),
     enabled: validId && user?.role === 'admin',
+  });
+  const awardsQuery = useQuery({
+    queryKey: ['admin-contest-awards', contestId],
+    queryFn: () => apiGet<ContestAwards>(`/api/admin/contests/${contestId}/awards`),
+    enabled: validId,
+    staleTime: 10_000,
   });
   const locksQuery = useQuery({
     queryKey: ['admin-contest-locks', contestId],
@@ -300,6 +319,13 @@ export function AdminContestConsolePage() {
         })
       : null;
   const hackAuditRows = hackAuditQuery.data ?? [];
+  const awardsTotal = awardsQuery.data?.rows.length ?? 0;
+  const awardPercentSum =
+    awardConfigDraft.goldPercent +
+    awardConfigDraft.silverPercent +
+    awardConfigDraft.bronzePercent;
+  const awardConfigValid = isValidAwardConfig(awardConfigDraft);
+  const awardPreview = computeAwardCounts(awardsTotal, awardConfigDraft);
   const hackAuditStats = {
     total: hackAuditRows.length,
     success: hackAuditRows.filter(
@@ -383,6 +409,11 @@ export function AdminContestConsolePage() {
       Object.fromEntries(detail.problems.map((problem) => [problem.problemId, problem.points])),
     );
   }, [detail]);
+
+  useEffect(() => {
+    if (!awardsQuery.data) return;
+    setAwardConfigDraft(awardsQuery.data.config);
+  }, [awardsQuery.data]);
 
   useEffect(() => {
     setExtraDraft(
@@ -754,6 +785,30 @@ export function AdminContestConsolePage() {
       message.error(text);
     } finally {
       setSavingRanking(false);
+    }
+  };
+
+  const saveAwardConfig = async () => {
+    if (!awardConfigValid) {
+      message.warning('金/银/铜比例需在 0–100 之间，且合计不超过 100%');
+      return;
+    }
+    setSavingAwards(true);
+    setAwardsError(null);
+    try {
+      await apiPut<AwardConfig>(
+        `/api/admin/contests/${contestId}/awards/config`,
+        awardConfigDraft,
+      );
+      message.success('奖项配置已保存');
+      void queryClient.invalidateQueries({ queryKey: ['admin-contest-awards', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['contest-awards', contestId] });
+    } catch (error) {
+      const text = error instanceof Error ? error.message : '保存奖项配置失败';
+      setAwardsError(text);
+      message.error(text);
+    } finally {
+      setSavingAwards(false);
     }
   };
 
@@ -1696,6 +1751,117 @@ export function AdminContestConsolePage() {
               Hack 后官方冻结 N 分钟，期间正式分不更新（批量发布会被拒绝）。
               当前生效：{presetLabel(officialQuery.data?.preset ?? rankingPreset)}。
               自定义插件需先在“排名插件”页上传并启用，重启服务后才会加载；插件失败会自动回退 OI。
+            </div>
+          </div>
+        </Card>
+
+        <Card
+          className="oij-card"
+          title="奖项配置"
+          extra={
+            <Space>
+              <Link to={`/contest/${contestId}/awards`}>
+                <Button size="small">预览奖项页</Button>
+              </Link>
+              <Button
+                type="primary"
+                loading={savingAwards}
+                disabled={!awardConfigValid}
+                onClick={() => void saveAwardConfig()}
+              >
+                保存奖项配置
+              </Button>
+            </Space>
+          }
+        >
+          <div className="stack">
+            {awardsError ? <Alert type="error" showIcon message={awardsError} /> : null}
+            <div className="ranking-config-grid award-config-grid">
+              <div className="batch-field">
+                <span className="muted">金牌比例（%）</span>
+                <InputNumber
+                  min={0}
+                  max={100}
+                  precision={0}
+                  value={awardConfigDraft.goldPercent}
+                  onChange={(value) =>
+                    setAwardConfigDraft((prev) => ({
+                      ...prev,
+                      goldPercent: typeof value === 'number' ? value : 0,
+                    }))
+                  }
+                  style={{ width: 150 }}
+                />
+              </div>
+              <div className="batch-field">
+                <span className="muted">银牌比例（%）</span>
+                <InputNumber
+                  min={0}
+                  max={100}
+                  precision={0}
+                  value={awardConfigDraft.silverPercent}
+                  onChange={(value) =>
+                    setAwardConfigDraft((prev) => ({
+                      ...prev,
+                      silverPercent: typeof value === 'number' ? value : 0,
+                    }))
+                  }
+                  style={{ width: 150 }}
+                />
+              </div>
+              <div className="batch-field">
+                <span className="muted">铜牌比例（%）</span>
+                <InputNumber
+                  min={0}
+                  max={100}
+                  precision={0}
+                  value={awardConfigDraft.bronzePercent}
+                  onChange={(value) =>
+                    setAwardConfigDraft((prev) => ({
+                      ...prev,
+                      bronzePercent: typeof value === 'number' ? value : 0,
+                    }))
+                  }
+                  style={{ width: 150 }}
+                />
+              </div>
+              <div className="batch-field">
+                <span className="muted">合计</span>
+                <Tag
+                  color={awardPercentSum > 100 ? 'red' : 'default'}
+                  className="award-percent-sum"
+                >
+                  {awardPercentSum}%
+                </Tag>
+              </div>
+            </div>
+            <Alert
+              type={awardConfigValid ? 'info' : 'warning'}
+              showIcon
+              message={
+                awardConfigValid
+                  ? `按正式榜人数分配：非零比例至少 1 人，并列名次同奖。`
+                  : '金/银/铜比例需在 0–100 之间，且合计不超过 100%。'
+              }
+            />
+            <div className="award-config-preview">
+              <span className="muted">预览（正式榜 {awardsTotal} 人）</span>
+              {awardsQuery.isPending ? (
+                <Spin size="small" />
+              ) : awardsQuery.isError ? (
+                <span className="muted">奖项数据加载失败，预览可能不准确</span>
+              ) : (
+                <Space wrap size={[6, 6]}>
+                  <Tag color="gold">金牌 {awardPreview.gold} 人</Tag>
+                  <Tag>银牌 {awardPreview.silver} 人</Tag>
+                  <Tag color="orange">铜牌 {awardPreview.bronze} 人</Tag>
+                  <Tag>未获奖 {Math.max(0, awardsTotal - awardPreview.total)} 人</Tag>
+                </Space>
+              )}
+            </div>
+            <div className="batch-level-hint muted">
+              默认金 10%、银 20%、铜 30%。管理员可随时保存；比赛结束后奖项按正式榜与
+              当前比例生成，保存操作会写入审计日志。
             </div>
           </div>
         </Card>

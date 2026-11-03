@@ -1361,3 +1361,42 @@ export interface AddProblemSetShareRequest {
   granteeId: number;
   permission: ProblemSetSharePermission;
 }
+
+/** Awards：比赛奖项与证书（GET /api/contests/:id/awards）。 */
+export type AwardLevel = 'gold' | 'silver' | 'bronze';
+
+/** 金/银/铜奖人数百分比；三项之和不超过 100。 */
+export interface AwardConfig {
+  goldPercent: number;
+  silverPercent: number;
+  bronzePercent: number;
+}
+
+/** 正式榜中的一行奖项数据；未获奖的行 award 为 null。 */
+export interface AwardRow {
+  rank: number;
+  userId: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  totalScore: number;
+  solved: number;
+  award: AwardLevel | null;
+  certificateNo: string;
+}
+
+export interface AwardCounts {
+  gold: number;
+  silver: number;
+  bronze: number;
+  /** 获奖总人数（金 + 银 + 铜）。 */
+  total: number;
+}
+
+/** GET /api/contests/:id/awards 与 GET /api/admin/contests/:id/awards 的返回结构。 */
+export interface ContestAwards {
+  contest: Contest;
+  config: AwardConfig;
+  rows: AwardRow[];
+  counts: AwardCounts;
+}
