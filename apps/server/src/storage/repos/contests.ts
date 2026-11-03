@@ -29,6 +29,7 @@ export interface ContestRow {
   status: string;
   rules_json: string;
   ranking_rule_json: string;
+  award_config_json: string;
   archived_at: number | null;
   official_frozen_until: number | null;
 }
@@ -79,6 +80,14 @@ export function listContests(db: DatabaseSync): ContestRow[] {
 
 export function setContestStatus(db: DatabaseSync, id: number, status: string): void {
   db.prepare('UPDATE contests SET status = ? WHERE id = ?').run(status, id);
+}
+
+export function setContestAwardConfig(
+  db: DatabaseSync,
+  id: number,
+  configJson: string,
+): void {
+  db.prepare('UPDATE contests SET award_config_json = ? WHERE id = ?').run(configJson, id);
 }
 
 export interface UpdateContestPatch {

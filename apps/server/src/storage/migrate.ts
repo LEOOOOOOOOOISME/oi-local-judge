@@ -279,6 +279,7 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'submissions', 'phase', "TEXT NOT NULL DEFAULT 'contest'");
   ensureColumn(db, 'submissions', 'batch_id', 'INTEGER');
   ensureColumn(db, 'contests', 'ranking_rule_json', "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, 'contests', 'award_config_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'contests', 'archived_at', 'INTEGER');
   ensureColumn(db, 'contests', 'official_frozen_until', 'INTEGER');
   ensureColumn(db, 'submissions', 'hacked_at', 'INTEGER');
