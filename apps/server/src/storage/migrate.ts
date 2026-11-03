@@ -195,6 +195,39 @@ CREATE TABLE IF NOT EXISTS contest_teams(
   PRIMARY KEY(contest_id, team_id)
 );
 CREATE INDEX IF NOT EXISTS idx_contest_teams_team ON contest_teams(team_id);
+CREATE TABLE IF NOT EXISTS problem_sets(
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  owner_type TEXT NOT NULL,
+  owner_id INTEGER NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'private',
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_problem_sets_owner ON problem_sets(owner_type, owner_id);
+CREATE INDEX IF NOT EXISTS idx_problem_sets_visibility ON problem_sets(visibility, updated_at DESC);
+CREATE TABLE IF NOT EXISTS problem_set_items(
+  set_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY(set_id, problem_id)
+);
+CREATE INDEX IF NOT EXISTS idx_problem_set_items_order ON problem_set_items(set_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_problem_set_items_problem ON problem_set_items(problem_id);
+CREATE TABLE IF NOT EXISTS problem_set_shares(
+  set_id INTEGER NOT NULL,
+  grantee_type TEXT NOT NULL,
+  grantee_id INTEGER NOT NULL,
+  permission TEXT NOT NULL,
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(set_id, grantee_type, grantee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_problem_set_shares_grantee
+  ON problem_set_shares(grantee_type, grantee_id);
 `;
 
 export function migrate(db: DatabaseSync): void {
