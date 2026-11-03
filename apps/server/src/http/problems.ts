@@ -3,12 +3,18 @@ import { basename, join } from 'node:path';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
+import { authenticateRequest } from '../security/auth.js';
 import {
   getProblemDetail,
   importProblemDirectory,
-  listProblemDtos,
+  problemToSummary,
   stripObjectiveAnswers,
 } from '../services/problems.js';
+import {
+  canViewProblem,
+  listVisibleProblems,
+  type ProblemActor,
+} from '../services/problem-acl.js';
 import { getProblem, getTestcases } from '../storage/repos/problems.js';
 
 export interface ProblemRouteOptions {
@@ -17,24 +23,44 @@ export interface ProblemRouteOptions {
   adminGuard?: preHandlerHookHandler;
 }
 
+interface RequestLike {
+  headers: { cookie?: string | string[] };
+}
+
+/** Optional authentication: anonymous/invalid sessions act as `{ userId: undefined }`. */
+function actorFor(
+  request: RequestLike,
+  options: ProblemRouteOptions,
+): ProblemActor {
+  const authenticated = authenticateRequest(request, options);
+  return authenticated
+    ? { userId: authenticated.user.id, isAdmin: authenticated.user.role === 'admin' }
+    : {};
+}
+
 export function registerProblemRoutes(app: FastifyInstance, options: ProblemRouteOptions): void {
-  app.get('/api/problems', async () => ({
+  app.get('/api/problems', async (request) => ({
     ok: true,
-    data: listProblemDtos(options.db),
+    data: listVisibleProblems(options.db, actorFor(request, options)).map(problemToSummary),
   }));
 
   app.get<{ Params: { id: string } }>('/api/problems/:id', async (request, reply) => {
     const id = Number(request.params.id);
-    const problem = Number.isInteger(id) ? getProblemDetail(options.db, id) : null;
-    if (!problem || problem.visibility === 'hidden') {
+    const problem = Number.isInteger(id) ? getProblem(options.db, id) : null;
+    if (!problem || !canViewProblem(options.db, problem, actorFor(request, options))) {
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND', message: 'problem not found' } });
     }
-    return { ok: true, data: stripObjectiveAnswers(problem) };
+    return { ok: true, data: stripObjectiveAnswers(getProblemDetail(options.db, problem.id)!) };
   });
 
   app.get<{ Params: { id: string } }>('/api/problems/:id/answer-files', async (request, reply) => {
-    const problem = getProblem(options.db, Number(request.params.id));
-    if (!problem || problem.type !== 'output-only' || problem.visibility === 'hidden') {
+    const id = Number(request.params.id);
+    const problem = Number.isInteger(id) ? getProblem(options.db, id) : null;
+    if (
+      !problem ||
+      problem.type !== 'output-only' ||
+      !canViewProblem(options.db, problem, actorFor(request, options))
+    ) {
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
     }
     return {
@@ -51,8 +77,13 @@ export function registerProblemRoutes(app: FastifyInstance, options: ProblemRout
   app.get<{ Params: { id: string; testcaseId: string } }>(
     '/api/problems/:id/answer-files/:testcaseId',
     async (request, reply) => {
-      const problem = getProblem(options.db, Number(request.params.id));
-      if (!problem || problem.type !== 'output-only' || problem.visibility === 'hidden') {
+      const id = Number(request.params.id);
+      const problem = Number.isInteger(id) ? getProblem(options.db, id) : null;
+      if (
+        !problem ||
+        problem.type !== 'output-only' ||
+        !canViewProblem(options.db, problem, actorFor(request, options))
+      ) {
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       }
       const testcase = getTestcases(options.db, problem.id).find(

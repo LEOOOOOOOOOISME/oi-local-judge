@@ -11,6 +11,7 @@ import {
 } from '../services/submissions.js';
 import { ContestAccessError } from '../services/contest-access.js';
 import { ContestTeamError } from '../services/contest-teams.js';
+import { ProblemAclError } from '../services/problem-acl.js';
 import { listSubmissions, getSubmission } from '../storage/repos/submissions.js';
 
 export interface SubmissionRouteOptions {
@@ -71,6 +72,12 @@ export function registerSubmissionRoutes(
         });
       }
       if (err instanceof ContestTeamError) {
+        return reply.code(err.status).send({
+          ok: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      if (err instanceof ProblemAclError) {
         return reply.code(err.status).send({
           ok: false,
           error: { code: err.code, message: err.message },

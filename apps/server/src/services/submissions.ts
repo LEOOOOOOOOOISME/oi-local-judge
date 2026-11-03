@@ -22,6 +22,7 @@ import {
 import { transaction } from '../storage/db.js';
 import { resolveContestSubmission } from './contest-access.js';
 import { resolveSubmissionTeam } from './contest-teams.js';
+import { canViewProblem, ProblemAclError } from './problem-acl.js';
 
 export const ALLOWED_LANGUAGES = new Set(['cpp17', 'c11', 'objective', 'answer']);
 export const MAX_SOURCE_BYTES = 256 * 1024;
@@ -71,6 +72,11 @@ export interface SubmitInput {
   teamId?: number | null;
   /** Bypass the cooldown check (admin rejudge/batch internal submissions). */
   skipCooldown?: boolean;
+  /**
+   * Bypass the practice read ACL. Only internal admin batch pipelines set this;
+   * user-facing submissions (contest or practice) must pass the ACL checks.
+   */
+  skipAccessCheck?: boolean;
   now?: number;
 }
 
@@ -79,8 +85,17 @@ export function submitSource(
   input: SubmitInput,
 ): { id: number } {
   const problem = getProblem(deps.db, input.problemId);
-  if (!problem || (problem.visibility === 'hidden' && !input.contestId)) {
+  if (!problem) {
     throw new Error('problem not found');
+  }
+  // Practice submissions (no contest) require problem read access. Contest
+  // submissions are gated by the contest ACL instead.
+  if (
+    !input.contestId &&
+    !input.skipAccessCheck &&
+    !canViewProblem(deps.db, problem, { userId: input.userId })
+  ) {
+    throw new ProblemAclError('PROBLEM_FORBIDDEN', 403, 'problem is not accessible');
   }
   if (!ALLOWED_LANGUAGES.has(input.language)) {
     throw new Error(`unsupported language: ${input.language}`);
