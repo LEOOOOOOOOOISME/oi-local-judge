@@ -19,7 +19,7 @@ import {
   readZipCentralDirectory,
   validateZip,
 } from './zip.mjs';
-import { makeTempWorktreePath } from './build-release.mjs';
+import { ensureSharedPackageBuilt, makeTempWorktreePath, resolveTscScript } from './build-release.mjs';
 import { portableRequiredEntries } from '../build-portable.mjs';
 
 const temporaryDirectories = [];
@@ -196,6 +196,62 @@ describe('temporary worktree path', () => {
     expect(first).toContain('1234');
     expect(first).not.toBe(second);
     expect(first.slice(base.length + 1)).not.toMatch(/[<>:"/\\|?*]/);
+  });
+});
+
+describe('ensureSharedPackageBuilt', () => {
+  const mainRoot = join(tmpdir(), 'oij-main-checkout');
+  const sharedRoot = join(mainRoot, 'packages', 'shared');
+  const tsconfig = join(sharedRoot, 'tsconfig.json');
+  const entry = join(sharedRoot, 'dist', 'index.js');
+
+  it('runs tsc for the shared package in the checkout and returns its entry point', () => {
+    const calls = [];
+    const built = new Set();
+    const result = ensureSharedPackageBuilt({
+      mainRoot,
+      exists: (path) => path === tsconfig || built.has(path),
+      runTsc: (options) => {
+        calls.push(options);
+        built.add(entry);
+      },
+      log: () => {},
+    });
+
+    expect(result).toBe(entry);
+    expect(calls).toEqual([{ mainRoot, tsconfig }]);
+  });
+
+  it('fails loudly when the build produces no dist/index.js', () => {
+    expect(() =>
+      ensureSharedPackageBuilt({
+        mainRoot,
+        exists: (path) => path === tsconfig,
+        runTsc: () => {},
+        log: () => {},
+      }),
+    ).toThrow(/did not produce[\s\S]*dist[\\/]index\.js/);
+  });
+
+  it('fails loudly when the shared tsconfig is missing', () => {
+    expect(() =>
+      ensureSharedPackageBuilt({
+        mainRoot,
+        exists: () => false,
+        runTsc: () => {
+          throw new Error('should not run');
+        },
+        log: () => {},
+      }),
+    ).toThrow(/cannot find the shared package tsconfig/);
+  });
+
+  it('resolves the TypeScript compiler from the checkout and rejects a missing install', () => {
+    const tsc = join(mainRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+    expect(resolveTscScript({ mainRoot, exists: (path) => path === tsc })).toBe(tsc);
+    expect(() => resolveTscScript({ mainRoot, exists: () => false })).toThrow(
+      /TypeScript is not installed/,
+    );
   });
 });
 

@@ -106,6 +106,68 @@ function removeJunction(path) {
 }
 
 /**
+ * The `node_modules` junction reused inside the temporary worktree contains a
+ * `@oij/shared` workspace link that resolves to *this* checkout's
+ * `packages/shared`, not to the worktree's copy. Any `tsc` run for the server
+ * therefore needs this checkout's `packages/shared/dist` to exist, even though
+ * the isolated build also compiles the worktree's own copy.
+ *
+ * Returns the compiler entry point shipped by the `typescript` dependency.
+ */
+export function resolveTscScript({ mainRoot = MAIN_ROOT, exists = existsSync } = {}) {
+  const script = join(mainRoot, 'node_modules', 'typescript', 'bin', 'tsc');
+  if (!exists(script)) {
+    throw new Error(`TypeScript is not installed in ${mainRoot}; run \`npm ci\` before building the release.`);
+  }
+  return script;
+}
+
+function runSharedTypeScript({ mainRoot = MAIN_ROOT, tsconfig }) {
+  const tsc = resolveTscScript({ mainRoot });
+  try {
+    execFileSync(process.execPath, [tsc, '-p', tsconfig], {
+      cwd: mainRoot,
+      stdio: 'inherit',
+      windowsHide: true,
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    throw new Error(`failed to build @oij/shared in ${mainRoot}: ${detail}`, { cause: error });
+  }
+}
+
+/**
+ * Builds the main checkout's `packages/shared` before the isolated worktree
+ * build starts. Only that gitignored `dist` directory is written; app `dist`
+ * directories stay untouched.
+ */
+export function ensureSharedPackageBuilt({
+  mainRoot = MAIN_ROOT,
+  exists = existsSync,
+  runTsc = runSharedTypeScript,
+  log: logFn = log,
+} = {}) {
+  const packageRoot = join(mainRoot, 'packages', 'shared');
+  const tsconfig = join(packageRoot, 'tsconfig.json');
+  const entry = join(packageRoot, 'dist', 'index.js');
+
+  if (!exists(tsconfig)) {
+    throw new Error(`cannot find the shared package tsconfig: ${tsconfig}`);
+  }
+
+  logFn(`building @oij/shared in the main checkout (${tsconfig}) ...`);
+  runTsc({ mainRoot, tsconfig });
+
+  if (!exists(entry)) {
+    throw new Error(
+      `building @oij/shared did not produce ${entry}; the isolated worktree resolves its ` +
+        'node_modules/@oij/shared link to this directory, so the server build would fail.',
+    );
+  }
+  return entry;
+}
+
+/**
  * Reuses the developer checkout's dependency tree and native/vendor artifacts
  * inside the temporary worktree. Nothing is copied back.
  */
@@ -301,6 +363,12 @@ export function main(argv = process.argv.slice(2)) {
       windowsHide: true,
     }).trim();
     log(`using ${gitVersion} (${git}).`);
+
+    // The temporary worktree shares this checkout's node_modules through a
+    // junction, and its `@oij/shared` workspace link resolves back here. Build
+    // this checkout's shared package first, otherwise the isolated server
+    // build cannot resolve `@oij/shared` on a clean (CI) checkout.
+    ensureSharedPackageBuilt({ mainRoot: MAIN_ROOT, log });
 
     if (options.worktree) {
       const status = execFileSync(git, ['status', '--porcelain'], {
