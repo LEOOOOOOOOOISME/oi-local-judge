@@ -69,3 +69,68 @@ node release/oi-local-judge-<version>-win-x64/resources/app/apps/server/dist/cli
 ```
 
 发布目录和 ZIP 位于 `release/`，该目录已被 `.gitignore` 忽略，不会污染提交。
+
+## GitHub Actions（云端发布）
+
+仓库内的 `.github/workflows/release.yml` 在 GitHub 托管的 `windows-latest`
+上完成同样的构建，并额外生成 NSIS 安装包；本机不需要安装 MinGW、Electron
+或 electron-builder。
+
+工作流步骤：
+
+1. `actions/setup-node@v4` 安装 Node.js 24，`npm ci` 安装依赖（带 npm 缓存）。
+2. `msys2/setup-msys2@v2` 安装 `mingw-w64-x86_64-gcc`，把 MSYS2 的
+   `mingw64\bin` 加入 `PATH` 并设置 `OIJ_GXX`，保证 `g++` 可用。
+3. `npm run build:native` 编译 `ojrunner.exe` / `ojinteract.exe`。
+4. `npm run build:release` 生成便携目录和 ZIP。
+5. 安装 `electron-builder@24.13.3`，以 `--prepackaged` 指向便携目录
+   （`release/oi-local-judge-<version>-win-x64/`，其中已含 `OiJudge.exe` 与
+   `resources/app/`）生成 NSIS 安装器；配置见仓库根目录
+   `electron-builder.yml`。
+
+### 触发方式
+
+**手动触发**（推荐在功能分支验证时使用）：
+
+```bash
+gh workflow run release.yml --ref feat/1.1-stability-authoring
+gh run list --workflow release.yml --limit 3    # 取 run URL
+# 或在 GitHub 页面：Actions → Release → Run workflow → 选择分支
+```
+
+**标签触发**：推送形如 `v*` 的标签自动构建，适合正式发版：
+
+```bash
+git tag v1.1.0
+git push origin v1.1.0
+```
+
+`workflow_dispatch` 需要工作流文件已存在于目标分支；如果 GitHub 提示工作流
+不在默认分支上，先把分支推送到远端再手动触发，或改用标签触发。
+
+### 产物与下载
+
+一次成功运行产出三个 artifact，均保留 14 天：
+
+| artifact | 内容 | 位置 |
+|---|---|---|
+| `oi-local-judge-portable` | 便携目录（解压即用） | `release/oi-local-judge-<version>-win-x64/` |
+| `oi-local-judge-zip` | 便携版 ZIP | `release/oi-local-judge-<version>-win-x64.zip` |
+| `OiJudge-Setup` | NSIS 安装器 | `release/installer/OiJudge-Setup-<version>.exe` |
+
+```bash
+# 列出最近的运行
+gh run list --workflow release.yml --limit 5
+
+# 下载指定运行的全部 artifact（run id 来自上一条命令）
+gh run download <run-id>
+
+# 只下载安装器
+gh run download <run-id> -n OiJudge-Setup
+```
+
+安装器支持自选安装目录，并创建桌面和开始菜单快捷方式；安装后的程序与便携
+版共用一个 `%APPDATA%\OiJudge` 数据目录。
+
+失败时工作流会打印 `release/` 内容、剩余磁盘空间和 `git status`，并直接以
+非零退出码失败，不会静默跳过缺失的产物。
