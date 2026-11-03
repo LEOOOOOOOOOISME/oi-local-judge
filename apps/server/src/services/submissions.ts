@@ -21,6 +21,7 @@ import {
 } from '../storage/repos/judge.js';
 import { transaction } from '../storage/db.js';
 import { resolveContestSubmission } from './contest-access.js';
+import { resolveSubmissionTeam } from './contest-teams.js';
 
 export const ALLOWED_LANGUAGES = new Set(['cpp17', 'c11', 'objective', 'answer']);
 export const MAX_SOURCE_BYTES = 256 * 1024;
@@ -63,6 +64,11 @@ export interface SubmitInput {
   contestId?: number | null;
   phase?: string;
   batchId?: number | null;
+  /**
+   * Explicit team attribution for team contests. Omit to let the server resolve
+   * the user's registered team; internal batch/answer submissions stay null.
+   */
+  teamId?: number | null;
   /** Bypass the cooldown check (admin rejudge/batch internal submissions). */
   skipCooldown?: boolean;
   now?: number;
@@ -96,6 +102,7 @@ export function submitSource(
   if (bytes > MAX_SOURCE_BYTES) throw new Error('source is too large');
 
   let phase = input.phase ?? 'contest';
+  let teamId: number | null = null;
   if (input.contestId && !input.phase) {
     const resolved = resolveContestSubmission({
       db: deps.db,
@@ -108,6 +115,15 @@ export function submitSource(
     if (phase === 'contest' && getLock(deps.db, input.contestId, input.userId, input.problemId)) {
       throw new Error('problem is locked; no further submissions are accepted');
     }
+    teamId = resolveSubmissionTeam(deps.db, {
+      contestId: input.contestId,
+      userId: input.userId,
+      requestedTeamId: input.teamId ?? undefined,
+    });
+  } else if (input.contestId) {
+    // Internal batch/answer submissions carry an explicit phase and default to
+    // no team attribution unless the caller passes one.
+    teamId = input.teamId ?? null;
   }
 
   const nowMs = input.now ?? Date.now();
@@ -154,6 +170,7 @@ export function submitSource(
     sourceHash,
     phase,
     batchId: input.batchId,
+    teamId,
     createdAt: nowMs,
   });
   createJudgeTask(deps.db, id, input.contestId ? 100 : 50);

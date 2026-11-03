@@ -1,7 +1,8 @@
-import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
+import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
-import { createContest } from '../storage/repos/contests.js';
+import { requireAuth } from '../security/auth.js';
+import { createContest, isTeamMode } from '../storage/repos/contests.js';
 import {
   addParticipant,
   countContestSubmissions,
@@ -26,11 +27,32 @@ import {
 } from '../services/contests.js';
 import { getOfficialRanking } from '../services/official-ranking.js';
 import { getCorrectionRanking } from '../services/correction-ranking.js';
+import {
+  ContestTeamError,
+  getRegisteredTeamForUser,
+  listContestTeams,
+  registerTeamForContest,
+  removeTeamFromContest,
+} from '../services/contest-teams.js';
 
 export interface ContestRouteOptions {
   db: DatabaseSync;
   config?: Config;
   adminGuard?: preHandlerHookHandler;
+  auth?: preHandlerHookHandler;
+}
+
+function sendContestTeamError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof ContestTeamError) {
+    return reply
+      .code(err.status)
+      .send({ ok: false, error: { code: err.code, message: err.message } });
+  }
+  throw err;
+}
+
+function parseTeamId(raw: unknown): number | null {
+  return typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : null;
 }
 
 export function registerContestRoutes(app: FastifyInstance, options: ContestRouteOptions): void {
@@ -82,11 +104,119 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
   );
 
   const guards = options.adminGuard ? [options.adminGuard] : [];
+  // Team registration routes need an authenticated user. A caller that only
+  // registered the public contest routes (tests) can omit it; the full app
+  // always passes an explicit auth guard.
+  const teamAuth =
+    options.auth ??
+    (options.config ? requireAuth({ db: options.db, config: options.config }) : undefined);
+  const teamGuards = teamAuth ? [teamAuth] : [];
+
+  if (teamAuth) {
+    app.post<{ Params: { id: string }; Body: { teamId?: unknown } }>(
+      '/api/contests/:id/teams',
+      { preHandler: teamGuards },
+      async (request, reply) => {
+        const contestId = Number(request.params.id);
+        const teamId = parseTeamId((request.body ?? {}).teamId);
+        if (teamId === null) {
+          return reply.code(400).send({
+            ok: false,
+            error: { code: 'BAD_REQUEST', message: 'teamId must be a positive integer' },
+          });
+        }
+        try {
+          const role = request.user!.role;
+          registerTeamForContest(options.db, {
+            contestId,
+            teamId,
+            actorId: request.user!.id,
+            isAdmin: role === 'admin' || role === 'contestmanager',
+          });
+          return reply.code(201).send({ ok: true, data: null });
+        } catch (err) {
+          return sendContestTeamError(reply, err);
+        }
+      },
+    );
+
+    app.get<{ Params: { id: string } }>(
+      '/api/contests/:id/teams',
+      { preHandler: teamGuards },
+      async (request, reply) => {
+        const contestId = Number(request.params.id);
+        const user = request.user!;
+        try {
+          const data = listContestTeams(options.db, contestId);
+          const isManager = user.role === 'admin' || user.role === 'contestmanager';
+          if (!isManager && getRegisteredTeamForUser(options.db, contestId, user.id) === null) {
+            return reply.code(403).send({
+              ok: false,
+              error: {
+                code: 'FORBIDDEN',
+                message: 'only registered team members and managers can view team registrations',
+              },
+            });
+          }
+          return { ok: true, data };
+        } catch (err) {
+          return sendContestTeamError(reply, err);
+        }
+      },
+    );
+  }
+
+  app.post<{ Params: { id: string }; Body: { teamId?: unknown } }>(
+    '/api/admin/contests/:id/teams',
+    { preHandler: guards },
+    async (request, reply) => {
+      const contestId = Number(request.params.id);
+      const teamId = parseTeamId((request.body ?? {}).teamId);
+      if (teamId === null) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'BAD_REQUEST', message: 'teamId must be a positive integer' },
+        });
+      }
+      try {
+        registerTeamForContest(options.db, {
+          contestId,
+          teamId,
+          actorId: request.user?.id ?? 0,
+          isAdmin: true,
+        });
+        return reply.code(201).send({ ok: true, data: null });
+      } catch (err) {
+        return sendContestTeamError(reply, err);
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string; teamId: string } }>(
+    '/api/admin/contests/:id/teams/:teamId',
+    { preHandler: guards },
+    async (request, reply) => {
+      const contestId = Number(request.params.id);
+      const teamId = Number(request.params.teamId);
+      try {
+        removeTeamFromContest(options.db, {
+          contestId,
+          teamId,
+          actorId: request.user?.id ?? 0,
+          isAdmin: true,
+        });
+        return { ok: true, data: null };
+      } catch (err) {
+        return sendContestTeamError(reply, err);
+      }
+    },
+  );
 
   app.post<{
     Body: {
       name?: string;
       mode?: string;
+      teamMode?: string;
       startAt?: number;
       endAt?: number;
       freezeAt?: number;
@@ -101,9 +231,13 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       if (!body.name) {
         return reply.code(400).send({ ok: false, error: { code: 'BAD_REQUEST' } });
       }
+      if (body.teamMode !== undefined && !isTeamMode(body.teamMode)) {
+        return reply.code(400).send({ ok: false, error: { code: 'INVALID_TEAM_MODE' } });
+      }
       const id = createContest(options.db, {
         name: body.name,
         mode: body.mode,
+        teamMode: body.teamMode,
         startAt: body.startAt,
         endAt: body.endAt,
         freezeAt: body.freezeAt,
@@ -249,6 +383,7 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     Body: {
       name?: string;
       mode?: string;
+      teamMode?: string;
       startAt?: number | null;
       endAt?: number | null;
       freezeAt?: number | null;
@@ -261,9 +396,13 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
     }
     const body = request.body ?? {};
+    if (body.teamMode !== undefined && !isTeamMode(body.teamMode)) {
+      return reply.code(400).send({ ok: false, error: { code: 'INVALID_TEAM_MODE' } });
+    }
     updateContest(options.db, contestId, {
       name: body.name,
       mode: body.mode,
+      teamMode: body.teamMode,
       startAt: body.startAt,
       endAt: body.endAt,
       freezeAt: body.freezeAt,
