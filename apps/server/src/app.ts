@@ -22,6 +22,7 @@ import { registerAdminRankingRoutes } from './http/admin-ranking.js';
 import { registerAdminJudgeRoutes } from './http/admin-judge.js';
 import { registerHackRoutes } from './http/hacks.js';
 import { registerTeamRoutes } from './http/teams.js';
+import { registerProblemSetRoutes } from './http/problem-sets.js';
 import { recordAudit } from './storage/repos/audit.js';
 import { createHub, type Hub } from './realtime/hub.js';
 import { authenticateRequest, requireAuth, requireRole } from './security/auth.js';
@@ -131,6 +132,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   });
   registerSubmissionRoutes(app, { db, config });
   registerTeamRoutes(app, { db, config, auth });
+  registerProblemSetRoutes(app, { db, config, auth });
 
   const webDist = join(process.cwd(), 'apps/web/dist');
   if (existsSync(webDist)) {
