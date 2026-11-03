@@ -161,6 +161,7 @@ export function updateTeamOwner(db: DatabaseSync, teamId: number, ownerId: numbe
 }
 
 export function deleteTeamWithMembers(db: DatabaseSync, teamId: number): void {
+  db.prepare('DELETE FROM contest_teams WHERE team_id = ?').run(teamId);
   db.prepare('DELETE FROM team_members WHERE team_id = ?').run(teamId);
   db.prepare('DELETE FROM teams WHERE id = ?').run(teamId);
 }

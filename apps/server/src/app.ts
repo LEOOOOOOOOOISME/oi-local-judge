@@ -122,13 +122,15 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     auth: requireAuth({ db, config }),
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
   });
+  const auth = requireAuth({ db, config });
   registerContestRoutes(app, {
     db,
     config,
+    auth,
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
   });
   registerSubmissionRoutes(app, { db, config });
-  registerTeamRoutes(app, { db, config, auth: requireAuth({ db, config }) });
+  registerTeamRoutes(app, { db, config, auth });
 
   const webDist = join(process.cwd(), 'apps/web/dist');
   if (existsSync(webDist)) {

@@ -1,9 +1,17 @@
 import type { DatabaseSync } from 'node:sqlite';
 
+export const TEAM_MODES = ['individual', 'team', 'both'] as const;
+export type TeamMode = (typeof TEAM_MODES)[number];
+
+export function isTeamMode(value: unknown): value is TeamMode {
+  return typeof value === 'string' && (TEAM_MODES as readonly string[]).includes(value);
+}
+
 export interface ContestRow {
   id: number;
   name: string;
   mode: string;
+  team_mode: TeamMode;
   start_at: number | null;
   end_at: number | null;
   freeze_at: number | null;
@@ -18,6 +26,7 @@ export interface ContestRow {
 export interface CreateContestInput {
   name: string;
   mode?: string;
+  teamMode?: TeamMode;
   startAt?: number | null;
   endAt?: number | null;
   freezeAt?: number | null;
@@ -27,12 +36,13 @@ export interface CreateContestInput {
 export function createContest(db: DatabaseSync, input: CreateContestInput): number {
   const result = db
     .prepare(
-      `INSERT INTO contests(name, mode, start_at, end_at, freeze_at, status)
-       VALUES (?, ?, ?, ?, ?, 'draft')`,
+      `INSERT INTO contests(name, mode, team_mode, start_at, end_at, freeze_at, status)
+       VALUES (?, ?, ?, ?, ?, ?, 'draft')`,
     )
     .run(
       input.name,
       input.mode ?? 'oi',
+      input.teamMode ?? 'individual',
       input.startAt ?? null,
       input.endAt ?? null,
       input.freezeAt ?? null,
@@ -62,6 +72,7 @@ export function setContestStatus(db: DatabaseSync, id: number, status: string): 
 export interface UpdateContestPatch {
   name?: string;
   mode?: string;
+  teamMode?: TeamMode;
   startAt?: number | null;
   endAt?: number | null;
   freezeAt?: number | null;
@@ -79,6 +90,7 @@ export function updateContest(db: DatabaseSync, id: number, patch: UpdateContest
   };
   add('name', patch.name);
   add('mode', patch.mode);
+  add('team_mode', patch.teamMode);
   add('start_at', patch.startAt);
   add('end_at', patch.endAt);
   add('freeze_at', patch.freezeAt);
@@ -175,6 +187,7 @@ export function archiveContest(db: DatabaseSync, contestId: number): void {
 export function deleteContest(db: DatabaseSync, contestId: number): void {
   db.prepare('DELETE FROM contest_problems WHERE contest_id = ?').run(contestId);
   db.prepare('DELETE FROM contest_participants WHERE contest_id = ?').run(contestId);
+  db.prepare('DELETE FROM contest_teams WHERE contest_id = ?').run(contestId);
   db.prepare('DELETE FROM contests WHERE id = ?').run(contestId);
 }
 

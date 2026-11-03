@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS problem_assets(
 );
 CREATE TABLE IF NOT EXISTS submissions(
   id INTEGER PRIMARY KEY, contest_id INTEGER, problem_id INTEGER NOT NULL,
-  user_id INTEGER NOT NULL, language TEXT NOT NULL, source_path TEXT NOT NULL,
+  user_id INTEGER NOT NULL, team_id INTEGER, language TEXT NOT NULL, source_path TEXT NOT NULL,
   source_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
   verdict TEXT, score INTEGER NOT NULL DEFAULT 0, time_ms INTEGER NOT NULL DEFAULT 0,
   memory_kb INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS judge_tasks(
 CREATE INDEX IF NOT EXISTS idx_judge_tasks_claim ON judge_tasks(status, priority DESC, id);
 CREATE TABLE IF NOT EXISTS contests(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'oi',
+  team_mode TEXT NOT NULL DEFAULT 'individual',
   start_at INTEGER, end_at INTEGER, freeze_at INTEGER, unfreeze_at INTEGER,
   status TEXT NOT NULL DEFAULT 'draft', rules_json TEXT NOT NULL DEFAULT '{}'
 );
@@ -186,6 +187,14 @@ CREATE TABLE IF NOT EXISTS team_members(
   FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+CREATE TABLE IF NOT EXISTS contest_teams(
+  contest_id INTEGER NOT NULL,
+  team_id INTEGER NOT NULL,
+  registered_by INTEGER,
+  registered_at INTEGER NOT NULL,
+  PRIMARY KEY(contest_id, team_id)
+);
+CREATE INDEX IF NOT EXISTS idx_contest_teams_team ON contest_teams(team_id);
 `;
 
 export function migrate(db: DatabaseSync): void {
@@ -222,6 +231,8 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'contest_official_scores', 'batch_score', 'INTEGER');
   ensureColumn(db, 'contest_official_scores', 'batch_verdict', 'TEXT');
   ensureColumn(db, 'submissions', 'message', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'contests', 'team_mode', "TEXT NOT NULL DEFAULT 'individual'");
+  ensureColumn(db, 'submissions', 'team_id', 'INTEGER');
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
     db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)').run(Date.now());

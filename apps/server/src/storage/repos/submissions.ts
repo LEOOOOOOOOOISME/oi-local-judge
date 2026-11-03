@@ -5,6 +5,7 @@ export interface SubmissionRow {
   contest_id: number | null;
   problem_id: number;
   user_id: number;
+  team_id: number | null;
   language: string;
   source_path: string;
   source_hash: string;
@@ -27,6 +28,8 @@ export interface CreateSubmissionInput {
   contestId?: number | null;
   problemId: number;
   userId: number;
+  /** Team the submission is attributed to (team contests); null for individual/practice. */
+  teamId?: number | null;
   language: string;
   sourcePath: string;
   sourceHash: string;
@@ -39,13 +42,14 @@ export interface CreateSubmissionInput {
 export function createSubmission(db: DatabaseSync, input: CreateSubmissionInput): number {
   const result = db
     .prepare(
-      `INSERT INTO submissions(contest_id, problem_id, user_id, language, source_path,
-         source_hash, created_at, phase, batch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO submissions(contest_id, problem_id, user_id, team_id, language, source_path,
+         source_hash, created_at, phase, batch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.contestId ?? null,
       input.problemId,
       input.userId,
+      input.teamId ?? null,
       input.language,
       input.sourcePath,
       input.sourceHash,
