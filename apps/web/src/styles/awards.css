@@ -1,0 +1,235 @@
+/* Awards + certificates：奖项页、统计卡片与打印专用证书版式。 */
+
+.award-page {
+  display: flex;
+  flex-direction: column;
+}
+
+.award-alert {
+  margin-bottom: 12px;
+}
+
+.award-stats {
+  margin-bottom: 12px;
+}
+
+.award-stat-card {
+  height: 100%;
+}
+
+.award-stat-card .ant-statistic-title {
+  color: var(--text-2);
+  font-size: 13px;
+}
+
+.award-stat-gold .ant-statistic-content {
+  color: #b8860b;
+}
+
+.award-stat-silver .ant-statistic-content {
+  color: #64748b;
+}
+
+.award-stat-bronze .ant-statistic-content {
+  color: #b45309;
+}
+
+.award-stat-hint {
+  display: block;
+  margin-top: 4px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.award-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.award-toolbar-spacer {
+  flex: 1 1 auto;
+}
+
+.award-table-legend {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+.award-empty {
+  margin: 48px auto;
+}
+
+/* ---------- 证书（屏幕隐藏，仅打印媒体展示） ---------- */
+
+.award-print-area {
+  display: none;
+}
+
+.award-certificate {
+  --cert-accent: #b8860b;
+  --cert-ink: #1f2328;
+  --cert-muted: #5c6672;
+  box-sizing: border-box;
+  background: #ffffff;
+  color: var(--cert-ink);
+  font-family: "Songti SC", "Noto Serif CJK SC", "STSong", "SimSun", serif;
+}
+
+.award-certificate-silver {
+  --cert-accent: #8a94a0;
+}
+
+.award-certificate-bronze {
+  --cert-accent: #b45309;
+}
+
+.award-certificate-none {
+  --cert-accent: #8a94a0;
+}
+
+.award-certificate-frame {
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  min-height: 100%;
+  padding: 18mm 16mm 24mm;
+  border: 2px solid var(--cert-accent);
+  outline: 1px solid var(--cert-accent);
+  outline-offset: 5px;
+  background: #fffdf7;
+  text-align: center;
+}
+
+.award-certificate-brand {
+  color: var(--cert-accent);
+  font-family: var(--mono);
+  font-size: 11pt;
+  letter-spacing: 6px;
+}
+
+.award-certificate-title {
+  margin: 8mm 0 6mm;
+  color: var(--cert-accent);
+  font-size: 34pt;
+  font-weight: 700;
+  letter-spacing: 12px;
+  line-height: 1.1;
+}
+
+.award-certificate-prefix {
+  margin: 0 0 2mm;
+  color: var(--cert-muted);
+  font-size: 13pt;
+  letter-spacing: 4px;
+}
+
+.award-certificate-name {
+  min-width: 56mm;
+  margin: 0 0 1mm;
+  padding: 0 8mm 2mm;
+  border-bottom: 1px solid var(--cert-accent);
+  font-size: 26pt;
+  font-weight: 700;
+  letter-spacing: 4px;
+}
+
+.award-certificate-class {
+  margin: 1mm 0 0;
+  color: var(--cert-muted);
+  font-size: 11pt;
+}
+
+.award-certificate-text {
+  margin: 6mm 0 3mm;
+  font-size: 13pt;
+  line-height: 1.9;
+}
+
+.award-certificate-text strong {
+  color: var(--cert-ink);
+}
+
+.award-certificate-award {
+  margin: 0;
+  color: var(--cert-accent);
+  font-size: 30pt;
+  font-weight: 700;
+  letter-spacing: 8px;
+  line-height: 1.2;
+}
+
+.award-certificate-meta {
+  margin: 4mm 0 0;
+  color: var(--cert-muted);
+  font-size: 11pt;
+  letter-spacing: 1px;
+}
+
+.award-certificate-footer {
+  position: absolute;
+  right: 16mm;
+  bottom: 14mm;
+  left: 16mm;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 4mm;
+  color: var(--cert-muted);
+  font-size: 10pt;
+}
+
+/* ---------- 打印：只输出证书区域 ---------- */
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 0;
+  }
+
+  html,
+  body {
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+  }
+
+  body > #root,
+  body > .ant-app {
+    display: none !important;
+  }
+
+  .award-print-area {
+    position: fixed;
+    inset: 0;
+    display: block !important;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+  }
+
+  .award-print-area .award-certificate {
+    width: 100%;
+    height: 100%;
+    padding: 12mm;
+  }
+
+  .award-print-area .award-certificate-frame {
+    height: 100%;
+    min-height: 0;
+    padding: 16mm 18mm 22mm;
+    outline-offset: 4px;
+    background: #ffffff;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

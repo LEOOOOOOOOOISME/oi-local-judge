@@ -28,6 +28,11 @@ const ContestRankingPage = lazy(() =>
     default: module.ContestRankingPage,
   })),
 );
+const ContestAwardsPage = lazy(() =>
+  import('./pages/ContestAwardsPage').then((module) => ({
+    default: module.ContestAwardsPage,
+  })),
+);
 const SubmissionDetailPage = lazy(() =>
   import('./pages/SubmissionDetailPage').then((module) => ({
     default: module.SubmissionDetailPage,
@@ -127,6 +132,7 @@ export function AppRoutes() {
         <Route path="/problem/:problemId" element={<ProblemPage />} />
         <Route path="/contest/:contestId" element={<ContestOverviewPage />} />
         <Route path="/contest/:contestId/ranking" element={<ContestRankingPage />} />
+        <Route path="/contest/:contestId/awards" element={<ContestAwardsPage />} />
         <Route path="/contest/:contestId/correction" element={<ContestCorrectionPage />} />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/contest/:contestId/problem/:problemId" element={<ProblemPage />} />
