@@ -17,8 +17,14 @@
  *       node_modules/                        (production dependencies only)
  *
  * Usage:
- *   node tools/build-portable.mjs          # directory only
- *   node tools/build-portable.mjs --zip    # directory + .zip
+ *   node tools/build-portable.mjs
+ *   node tools/build-portable.mjs --zip
+ *   node tools/build-portable.mjs --source <dir> --release-dir <dir> --version <version>
+ *
+ * By default the build source is the repository that contains this script and
+ * the output goes to `<source>/release`. `build:release` runs this script from
+ * the developer checkout with `--source <temporary-worktree>`, so the build
+ * artifacts never touch the development worktree.
  *
  * The script never runs the project build itself; run `npm run build` and
  * `npm run build:native` first. It is safe to run repeatedly: the previous
@@ -37,21 +43,24 @@ import {
 } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parsePortableArgs } from './release/args.mjs';
+import { createZipFromDirectory, validateZip } from './release/zip.mjs';
 
-const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const ROOT_PKG = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf8'));
-const VERSION = ROOT_PKG.version ?? '0.0.0';
-const WANT_ZIP = process.argv.includes('--zip');
+const SCRIPT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
-const RELEASE_DIR = join(ROOT, 'release');
-const OUT_NAME = `oi-local-judge-${VERSION}-win-x64`;
-const OUT_DIR = join(RELEASE_DIR, OUT_NAME);
-const OUT_ZIP = join(RELEASE_DIR, `${OUT_NAME}.zip`);
-
-const ELECTRON_DIST = join(ROOT, 'node_modules', 'electron', 'dist');
-const APP_DIR = join(OUT_DIR, 'resources', 'app');
-const APP_PACKAGE = join(APP_DIR, 'package.json');
-const LAUNCHER = join(OUT_DIR, '启动 OiJudge.cmd');
+// Populated by `configure()`. Keeping these mutable (instead of module-level
+// constants) is what allows one script to package a temporary worktree.
+let SOURCE_ROOT = SCRIPT_ROOT;
+let VERSION = '0.0.0';
+let WANT_ZIP = false;
+let RELEASE_DIR = join(SCRIPT_ROOT, 'release');
+let OUT_NAME = 'oi-local-judge-0.0.0-win-x64';
+let OUT_DIR = join(RELEASE_DIR, OUT_NAME);
+let OUT_ZIP = join(RELEASE_DIR, `${OUT_NAME}.zip`);
+let ELECTRON_DIST = join(SCRIPT_ROOT, 'node_modules', 'electron', 'dist');
+let APP_DIR = join(OUT_DIR, 'resources', 'app');
+let APP_PACKAGE = join(APP_DIR, 'package.json');
+let LAUNCHER = join(OUT_DIR, '启动 OiJudge.cmd');
 
 const REQUIRED = [
   'apps/desktop/dist/main.js',
@@ -63,7 +72,6 @@ const REQUIRED = [
   'packages/shared/package.json',
   'native/runner/out/ojrunner.exe',
   'native/interact/out/ojinteract.exe',
-  'node_modules/electron/dist/electron.exe',
   'package-lock.json',
 ];
 
@@ -88,6 +96,59 @@ function log(message) {
 function fail(message) {
   console.error(`\n[build-portable] ERROR: ${message}`);
   process.exit(1);
+}
+
+/** Resolves every path from the parsed CLI options. */
+function configure(options) {
+  SOURCE_ROOT = options.source ? resolve(options.source) : SCRIPT_ROOT;
+  const packageJsonPath = join(SOURCE_ROOT, 'package.json');
+  if (!existsSync(packageJsonPath)) {
+    fail(`no package.json in build source: ${SOURCE_ROOT}`);
+  }
+  const sourcePackage = JSON.parse(readFileSync(packageJsonPath, 'utf8'));
+  VERSION = options.version ?? sourcePackage.version ?? '0.0.0';
+  WANT_ZIP = options.zip;
+  RELEASE_DIR = options.releaseDir ? resolve(options.releaseDir) : join(SOURCE_ROOT, 'release');
+  OUT_NAME = `oi-local-judge-${VERSION}-win-x64`;
+  OUT_DIR = join(RELEASE_DIR, OUT_NAME);
+  OUT_ZIP = join(RELEASE_DIR, `${OUT_NAME}.zip`);
+  APP_DIR = join(OUT_DIR, 'resources', 'app');
+  APP_PACKAGE = join(APP_DIR, 'package.json');
+  LAUNCHER = join(OUT_DIR, '启动 OiJudge.cmd');
+
+  // A temporary worktree gets node_modules through a junction to the developer
+  // checkout, but fall back to the checkout that contains this script so a
+  // direct invocation still works if the source has no node_modules.
+  const electronCandidates = [
+    process.env.OIJ_ELECTRON_DIST,
+    join(SOURCE_ROOT, 'node_modules', 'electron', 'dist'),
+    join(SCRIPT_ROOT, 'node_modules', 'electron', 'dist'),
+  ].filter((candidate) => Boolean(candidate));
+  ELECTRON_DIST =
+    electronCandidates.find((candidate) => existsSync(join(candidate, 'electron.exe'))) ??
+    electronCandidates[0];
+}
+
+/** Entries that must exist in the published ZIP for a given portable build. */
+export function portableRequiredEntries(outName = OUT_NAME) {
+  const app = `${outName}/resources/app`;
+  return [
+    `${outName}/OiJudge.exe`,
+    `${outName}/启动 OiJudge.cmd`,
+    `${app}/package.json`,
+    `${app}/apps/desktop/dist/main.js`,
+    `${app}/apps/desktop/dist/preload.js`,
+    `${app}/apps/server/dist/cli.js`,
+    `${app}/apps/server/package.json`,
+    `${app}/apps/web/dist/index.html`,
+    `${app}/packages/shared/dist/index.js`,
+    `${app}/packages/shared/package.json`,
+    `${app}/native/runner/out/ojrunner.exe`,
+    `${app}/native/interact/out/ojinteract.exe`,
+    `${app}/node_modules/fastify/package.json`,
+    `${app}/node_modules/@oij/shared/package.json`,
+    `${app}/vendor/testlib.h`,
+  ];
 }
 
 /** Recursively copies a directory, replacing `dest` when it already exists. */
@@ -124,15 +185,18 @@ function formatSize(bytes) {
 }
 
 function validateInputs() {
-  const missing = REQUIRED.filter((rel) => !existsSync(join(ROOT, rel)));
+  const missing = REQUIRED.filter((rel) => !existsSync(join(SOURCE_ROOT, rel)));
+  if (!existsSync(join(ELECTRON_DIST, 'electron.exe'))) {
+    missing.push('node_modules/electron/dist/electron.exe');
+  }
   if (missing.length > 0) {
     fail(
-      'missing build artifacts:\n' +
+      `missing build artifacts in ${SOURCE_ROOT}:\n` +
         missing.map((rel) => `  - ${rel}`).join('\n') +
         '\nRun `npm run build` and `npm run build:native` first (the portable build never runs them).',
     );
   }
-  if (!existsSync(join(ROOT, 'vendor', 'testlib.h'))) {
+  if (!existsSync(join(SOURCE_ROOT, 'vendor', 'testlib.h'))) {
     log('WARNING: vendor/testlib.h is missing; testlib-based authoring will not work.');
   }
 }
@@ -148,7 +212,7 @@ function productionDependencies() {
   let stdout = '';
   try {
     stdout = execSync('npm ls --omit=dev --parseable --all', {
-      cwd: ROOT,
+      cwd: SOURCE_ROOT,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
@@ -163,7 +227,7 @@ function productionDependencies() {
     log('npm ls reported missing optional peer dependencies; using its parseable output.');
   }
 
-  const lock = JSON.parse(readFileSync(join(ROOT, 'package-lock.json'), 'utf8')).packages ?? {};
+  const lock = JSON.parse(readFileSync(join(SOURCE_ROOT, 'package-lock.json'), 'utf8')).packages ?? {};
   const seen = new Set();
   const available = [];
   let filtered = 0;
@@ -190,7 +254,7 @@ function productionDependencies() {
       filtered += 1;
       continue;
     }
-    if (!existsSync(join(ROOT, ...rel.split('/')))) {
+    if (!existsSync(join(SOURCE_ROOT, ...rel.split('/')))) {
       log(`WARNING: npm ls listed ${rel} but it does not exist; skipping.`);
       continue;
     }
@@ -217,7 +281,7 @@ function copyProductionDependencies() {
   for (const rel of included) {
     const dest = join(APP_DIR, ...rel.split('/'));
     if (existsSync(dest)) rmSync(dest, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-    copyDir(join(ROOT, ...rel.split('/')), dest);
+    copyDir(join(SOURCE_ROOT, ...rel.split('/')), dest);
   }
   log(
     `production dependencies: ${included.length} package(s) copied` +
@@ -312,74 +376,49 @@ function checkRuntimePackages() {
   }
 }
 
-/** Returns the first executable that answers `--version`, or null. */
-function findExecutable(candidates, args = ['--version']) {
-  for (const exe of candidates) {
-    try {
-      execFileSync(exe, args, { stdio: 'ignore', windowsHide: true });
-      return exe;
-    } catch {
-      // try the next candidate
-    }
-  }
-  return null;
-}
-
+/**
+ * Creates the release ZIP with fflate's streaming writer. Only the central
+ * directory is read back for validation, so a ~700 MB tree never has to be
+ * buffered in memory.
+ */
 function compressArchive() {
-  rmSync(OUT_ZIP, { force: true });
-
-  // Prefer the bsdtar that ships with Windows 10 1803+ (tar.exe): it streams
-  // the archive straight to disk. Compress-Archive on Windows PowerShell 5.1
-  // buffers the whole ~700 MB tree in memory and fails on this build, so it is
-  // only used as a fallback (and through the streaming .NET ZipFile API).
-  const tar = findExecutable(['tar.exe', 'tar']);
-  if (tar) {
-    log(`creating ${OUT_ZIP} with ${tar} ...`);
-    try {
-      execFileSync(tar, ['-a', '-c', '-f', OUT_ZIP, '-C', RELEASE_DIR, OUT_NAME], {
-        stdio: 'inherit',
-        windowsHide: true,
-      });
-      if (existsSync(OUT_ZIP) && statSync(OUT_ZIP).size > 0) return;
-      log(`${tar} produced an empty zip; falling back to PowerShell.`);
-    } catch (error) {
-      log(
-        `${tar} failed (${error instanceof Error ? error.message : String(error)}); ` +
-          'falling back to PowerShell.',
-      );
-    }
-    rmSync(OUT_ZIP, { force: true });
-  }
-
-  const ps = findExecutable(
-    ['pwsh', 'powershell'],
-    ['-NoProfile', '-NonInteractive', '-Command', 'exit 0'],
+  log(`creating ${OUT_ZIP} with fflate (level 1, streaming) ...`);
+  createZipFromDirectory(OUT_DIR, OUT_ZIP, { prefix: OUT_NAME, level: 1, log });
+  const validation = validateZip(OUT_ZIP, portableRequiredEntries(OUT_NAME));
+  log(
+    `zip ready: ${OUT_ZIP} (${formatSize(statSync(OUT_ZIP).size)}, ` +
+      `${validation.entryCount} entries validated)`,
   );
-  if (!ps) fail('Neither tar nor PowerShell is available; cannot create the zip.');
-
-  // .NET ZipFile streams the archive on both Windows PowerShell 5.1 and
-  // PowerShell 7, so memory use stays flat regardless of the input size.
-  const quote = (value) => value.replace(/'/g, "''");
-  const command =
-    'Add-Type -AssemblyName System.IO.Compression.FileSystem; ' +
-    `[System.IO.Compression.ZipFile]::CreateFromDirectory('${quote(OUT_DIR)}', ` +
-    `'${quote(OUT_ZIP)}', [System.IO.Compression.CompressionLevel]::Optimal, $true)`;
-  log(`creating ${OUT_ZIP} with ${ps} ...`);
-  execFileSync(ps, ['-NoProfile', '-NonInteractive', '-Command', command], {
-    stdio: 'inherit',
-    windowsHide: true,
-  });
-  if (!existsSync(OUT_ZIP) || statSync(OUT_ZIP).size === 0) {
-    fail('PowerShell did not create the zip file.');
-  }
 }
 
-function main() {
+function printUsage() {
+  console.log(
+    [
+      'Usage: node tools/build-portable.mjs [options]',
+      '',
+      'Options:',
+      '  --source <dir>        build source root (default: this repository)',
+      '  --release-dir <dir>   output directory (default: <source>/release)',
+      '  --version <version>   override the version read from <source>/package.json',
+      '  --zip                 also create the streaming ZIP',
+      '  --help                show this help',
+    ].join('\n'),
+  );
+}
+
+function main(argv = process.argv.slice(2)) {
+  const options = parsePortableArgs(argv);
+  if (options.help) {
+    printUsage();
+    return;
+  }
+  configure(options);
   validateInputs();
 
-  log(`building ${OUT_NAME} ...`);
+  log(`building ${OUT_NAME} from ${SOURCE_ROOT} ...`);
   rmSync(OUT_DIR, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
-  rmSync(OUT_ZIP, { force: true });
+  // The previous ZIP is replaced atomically by createZipFromDirectory; keep it
+  // in place until the new archive was written and validated.
   mkdirSync(RELEASE_DIR, { recursive: true });
 
   // Electron runtime (electron.exe, DLLs, locales, resources/).
@@ -400,7 +439,7 @@ function main() {
     ['vendor', 'vendor'],
   ];
   for (const [srcRel, destRel] of copies) {
-    const src = join(ROOT, ...srcRel.split('/'));
+    const src = join(SOURCE_ROOT, ...srcRel.split('/'));
     const dest = join(APP_DIR, ...destRel.split('/'));
     const isDir = statSync(src).isDirectory();
     if (isDir) copyDir(src, dest);
@@ -410,9 +449,9 @@ function main() {
 
   // The server imports the workspace package by name, so provide the same
   // `node_modules/@oij/shared` resolution a normal install has.
-  copyDir(join(ROOT, 'packages', 'shared', 'dist'), join(APP_DIR, 'node_modules', '@oij', 'shared', 'dist'));
+  copyDir(join(SOURCE_ROOT, 'packages', 'shared', 'dist'), join(APP_DIR, 'node_modules', '@oij', 'shared', 'dist'));
   copyFile(
-    join(ROOT, 'packages', 'shared', 'package.json'),
+    join(SOURCE_ROOT, 'packages', 'shared', 'package.json'),
     join(APP_DIR, 'node_modules', '@oij', 'shared', 'package.json'),
   );
 
@@ -423,14 +462,19 @@ function main() {
   const dirBytes = dirSize(OUT_DIR);
   log(`portable directory ready: ${OUT_DIR} (${formatSize(dirBytes)})`);
 
-  if (WANT_ZIP) {
-    compressArchive();
-    log(`zip ready: ${OUT_ZIP} (${formatSize(statSync(OUT_ZIP).size)})`);
-  }
+  if (WANT_ZIP) compressArchive();
 }
 
-try {
-  main();
-} catch (error) {
-  fail(error instanceof Error ? (error.stack ?? error.message) : String(error));
+function isDirectRun() {
+  const invoked = process.argv[1];
+  if (!invoked) return false;
+  return resolve(invoked).toLowerCase() === fileURLToPath(import.meta.url).toLowerCase();
+}
+
+if (isDirectRun()) {
+  try {
+    main();
+  } catch (error) {
+    fail(error instanceof Error ? (error.stack ?? error.message) : String(error));
+  }
 }
