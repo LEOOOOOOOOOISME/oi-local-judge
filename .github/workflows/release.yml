@@ -86,6 +86,15 @@ jobs:
       - name: Build native runners
         run: npm run build:native
 
+      # build:release builds inside a temporary git worktree whose node_modules
+      # is a junction to this checkout. The workspace link
+      # node_modules/@oij/shared therefore resolves to this checkout, not to the
+      # worktree, so the shared package must already be compiled here. Without
+      # this step a fresh clone fails with
+      # `TS2307: Cannot find module '@oij/shared'` while compiling apps/server.
+      - name: Prime @oij/shared for the isolated build
+        run: npx tsc -p packages/shared/tsconfig.json
+
       # Produces release/oi-local-judge-<version>-win-x64/ and its ZIP.
       - name: Build portable release and ZIP
         run: npm run build:release
