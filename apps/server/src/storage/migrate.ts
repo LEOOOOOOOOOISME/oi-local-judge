@@ -82,6 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_judge_tasks_claim ON judge_tasks(status, priority
 CREATE TABLE IF NOT EXISTS contests(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'oi',
   team_mode TEXT NOT NULL DEFAULT 'individual',
+  registration_mode TEXT NOT NULL DEFAULT 'manual',
   start_at INTEGER, end_at INTEGER, freeze_at INTEGER, unfreeze_at INTEGER,
   status TEXT NOT NULL DEFAULT 'draft', rules_json TEXT NOT NULL DEFAULT '{}'
 );
@@ -92,6 +93,7 @@ CREATE TABLE IF NOT EXISTS contest_problems(
 CREATE TABLE IF NOT EXISTS contest_participants(
   contest_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'accepted', extra_time INTEGER NOT NULL DEFAULT 0,
+  registered_at INTEGER, checked_in_at INTEGER, reviewed_at INTEGER, reviewed_by INTEGER,
   PRIMARY KEY(contest_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS contest_official_scores(
@@ -269,6 +271,11 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'batch_jobs', 'meta_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'batch_jobs', 'created_by', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'hidden_at', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'registered_at', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'checked_in_at', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'reviewed_at', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'reviewed_by', 'INTEGER');
+  ensureColumn(db, 'contests', 'registration_mode', "TEXT NOT NULL DEFAULT 'manual'");
   ensureColumn(db, 'submissions', 'phase', "TEXT NOT NULL DEFAULT 'contest'");
   ensureColumn(db, 'submissions', 'batch_id', 'INTEGER');
   ensureColumn(db, 'contests', 'ranking_rule_json', "TEXT NOT NULL DEFAULT '{}'");

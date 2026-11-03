@@ -2,7 +2,7 @@ import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fasti
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { requireAuth } from '../security/auth.js';
-import { createContest, isTeamMode } from '../storage/repos/contests.js';
+import { createContest, isRegistrationMode, isTeamMode } from '../storage/repos/contests.js';
 import {
   addParticipant,
   countContestSubmissions,
@@ -35,6 +35,12 @@ import {
   registerTeamForContest,
   removeTeamFromContest,
 } from '../services/contest-teams.js';
+import {
+  cancelRegistration,
+  ContestRegistrationError,
+  getMyRegistration,
+  registerForContest,
+} from '../services/contest-registrations.js';
 
 export interface ContestRouteOptions {
   db: DatabaseSync;
@@ -45,6 +51,15 @@ export interface ContestRouteOptions {
 
 function sendContestTeamError(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof ContestTeamError) {
+    return reply
+      .code(err.status)
+      .send({ ok: false, error: { code: err.code, message: err.message } });
+  }
+  throw err;
+}
+
+function sendContestRegistrationError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof ContestRegistrationError) {
     return reply
       .code(err.status)
       .send({ ok: false, error: { code: err.code, message: err.message } });
@@ -178,6 +193,59 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     );
   }
 
+  if (teamAuth) {
+    app.get<{ Params: { id: string } }>(
+      '/api/contests/:id/registration',
+      { preHandler: teamGuards },
+      async (request, reply) => {
+        const contestId = Number(request.params.id);
+        const contest = getContest(options.db, contestId);
+        if (!contest) {
+          return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+        }
+        return {
+          ok: true,
+          data: {
+            mode: contest.registration_mode,
+            registration: getMyRegistration(options.db, contestId, request.user!.id),
+          },
+        };
+      },
+    );
+
+    app.post<{ Params: { id: string } }>(
+      '/api/contests/:id/register',
+      { preHandler: teamGuards },
+      async (request, reply) => {
+        try {
+          const status = registerForContest(options.db, {
+            contestId: Number(request.params.id),
+            userId: request.user!.id,
+          });
+          return { ok: true, data: { status } };
+        } catch (err) {
+          return sendContestRegistrationError(reply, err);
+        }
+      },
+    );
+
+    app.delete<{ Params: { id: string } }>(
+      '/api/contests/:id/register',
+      { preHandler: teamGuards },
+      async (request, reply) => {
+        try {
+          cancelRegistration(options.db, {
+            contestId: Number(request.params.id),
+            userId: request.user!.id,
+          });
+          return { ok: true, data: null };
+        } catch (err) {
+          return sendContestRegistrationError(reply, err);
+        }
+      },
+    );
+  }
+
   app.post<{ Params: { id: string }; Body: { teamId?: unknown } }>(
     '/api/admin/contests/:id/teams',
     { preHandler: guards },
@@ -229,6 +297,7 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       name?: string;
       mode?: string;
       teamMode?: string;
+      registrationMode?: string;
       startAt?: number;
       endAt?: number;
       freezeAt?: number;
@@ -246,21 +315,26 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       if (body.teamMode !== undefined && !isTeamMode(body.teamMode)) {
         return reply.code(400).send({ ok: false, error: { code: 'INVALID_TEAM_MODE' } });
       }
+      if (
+        body.registrationMode !== undefined &&
+        !isRegistrationMode(body.registrationMode)
+      ) {
+        return reply
+          .code(400)
+          .send({ ok: false, error: { code: 'INVALID_REGISTRATION_MODE' } });
+      }
       const id = createContest(options.db, {
         name: body.name,
         mode: body.mode,
         teamMode: body.teamMode,
+        registrationMode: body.registrationMode,
         startAt: body.startAt,
         endAt: body.endAt,
         freezeAt: body.freezeAt,
         problemIds: body.problemIds,
       });
       for (const userId of body.participantIds ?? []) {
-        options.db
-          .prepare(
-            "INSERT OR IGNORE INTO contest_participants(contest_id, user_id) VALUES (?, ?)",
-          )
-          .run(id, userId);
+        addParticipant(options.db, id, userId);
       }
       return reply.code(201).send({ ok: true, data: { id } });
     },
@@ -396,6 +470,7 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       name?: string;
       mode?: string;
       teamMode?: string;
+      registrationMode?: string;
       startAt?: number | null;
       endAt?: number | null;
       freezeAt?: number | null;
@@ -411,10 +486,19 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     if (body.teamMode !== undefined && !isTeamMode(body.teamMode)) {
       return reply.code(400).send({ ok: false, error: { code: 'INVALID_TEAM_MODE' } });
     }
+    if (
+      body.registrationMode !== undefined &&
+      !isRegistrationMode(body.registrationMode)
+    ) {
+      return reply
+        .code(400)
+        .send({ ok: false, error: { code: 'INVALID_REGISTRATION_MODE' } });
+    }
     updateContest(options.db, contestId, {
       name: body.name,
       mode: body.mode,
       teamMode: body.teamMode,
+      registrationMode: body.registrationMode,
       startAt: body.startAt,
       endAt: body.endAt,
       freezeAt: body.freezeAt,
