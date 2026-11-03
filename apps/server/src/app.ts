@@ -8,6 +8,7 @@ import { loadConfig, type Config } from './config.js';
 import { healthRoutes } from './http/health.js';
 import { registerAuthRoutes } from './http/auth.js';
 import { registerProblemRoutes } from './http/problems.js';
+import { registerProblemShareRoutes } from './http/problem-shares.js';
 import { registerAdminProblemRoutes } from './http/admin-problems.js';
 import { registerAdminToolRoutes } from './http/admin-tools.js';
 import { registerAdminAuthoringRoutes } from './http/admin-authoring.js';
@@ -71,6 +72,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     config,
     adminGuard: requireRole(['admin', 'setter'], { db, config }),
   });
+  registerProblemShareRoutes(app, { db, config });
   registerAdminProblemRoutes(app, {
     db,
     config,

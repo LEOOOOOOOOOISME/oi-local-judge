@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize } from 'node:path';
 import { zipSync, unzipSync } from 'fflate';
-import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
+import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { ensureChecker } from '../judge/checker-cache.js';
@@ -18,15 +18,20 @@ import {
   type AssetKind,
 } from '../storage/repos/assets.js';
 import {
-  createProblem,
   getProblem,
   listAllProblems,
   listAllTestcases,
   replaceTestcases,
-  updateProblem,
   updateTestcasePoints,
 } from '../storage/repos/problems.js';
-import { getProblemDetail, importProblemDirectory, problemToSummary } from '../services/problems.js';
+import {
+  createProblemWithOwner,
+  getProblemDetail,
+  importProblemDirectory,
+  ProblemOwnerError,
+  problemToSummary,
+  updateProblemWithOwner,
+} from '../services/problems.js';
 import { importCenaProblem } from '../services/cena.js';
 import { buildCdf, importLemonProblem } from '../services/lemon.js';
 
@@ -48,6 +53,16 @@ export interface AdminProblemRouteOptions {
   db: DatabaseSync;
   config: Config;
   adminGuard: preHandlerHookHandler;
+}
+
+/** Maps ownership validation failures to a 400 with code `PROBLEM_OWNER_INVALID`. */
+function sendOwnerError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof ProblemOwnerError) {
+    return reply
+      .code(err.status)
+      .send({ ok: false, error: { code: err.code, message: err.message } });
+  }
+  throw err;
 }
 
 export function registerAdminProblemRoutes(
@@ -300,6 +315,8 @@ export function registerAdminProblemRoutes(
     data: listAllProblems(options.db).map((row) => ({
       ...problemToSummary(row),
       visibility: row.visibility,
+      ownerType: row.owner_type,
+      ownerId: row.owner_id,
     })),
   }));
 
@@ -307,9 +324,16 @@ export function registerAdminProblemRoutes(
     '/api/admin/problems/:id',
     { preHandler: guard },
     async (request, reply) => {
-      const detail = getProblemDetail(options.db, Number(request.params.id));
-      if (!detail) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
-      return { ok: true, data: detail };
+      const problemId = Number(request.params.id);
+      const detail = Number.isInteger(problemId)
+        ? getProblemDetail(options.db, problemId)
+        : null;
+      const row = detail ? getProblem(options.db, problemId) : null;
+      if (!detail || !row) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      return {
+        ok: true,
+        data: { ...detail, ownerType: row.owner_type, ownerId: row.owner_id },
+      };
     },
   );
 
@@ -326,6 +350,8 @@ export function registerAdminProblemRoutes(
       outputFile?: string;
       statement?: string;
       objective?: unknown;
+      ownerType?: string;
+      ownerId?: number | null;
     };
   }>('/api/admin/problems', { preHandler: guard }, async (request, reply) => {
     const body = request.body ?? {};
@@ -335,21 +361,32 @@ export function registerAdminProblemRoutes(
         error: { code: 'BAD_REQUEST', message: 'title, timeMs and memoryMb are required' },
       });
     }
-    const id = createProblem(options.db, {
-      title: body.title,
-      type: body.type ?? 'standard',
-      difficulty: body.difficulty ?? null,
-      tags: body.tags ?? [],
-      timeMs: Number(body.timeMs),
-      memoryMb: Number(body.memoryMb),
-      ioMode: body.ioMode === 'file' ? 'file' : 'stdio',
-      inputFile: body.inputFile ?? null,
-      outputFile: body.outputFile ?? null,
-      statementHtml: body.statement ?? '',
-      objective: body.objective,
-      testcases: [],
-    });
-    return reply.code(201).send({ ok: true, data: { id } });
+    // Admin-created problems belong to their creator by default; only explicit
+    // imports/seeds are system-owned. The UI may send an explicit user/team owner.
+    const ownerType = body.ownerType ?? 'user';
+    const ownerId =
+      body.ownerId ?? (ownerType === 'user' ? request.user!.id : undefined);
+    try {
+      const id = createProblemWithOwner(options.db, {
+        title: body.title,
+        type: body.type ?? 'standard',
+        difficulty: body.difficulty ?? null,
+        tags: body.tags ?? [],
+        timeMs: Number(body.timeMs),
+        memoryMb: Number(body.memoryMb),
+        ioMode: body.ioMode === 'file' ? 'file' : 'stdio',
+        inputFile: body.inputFile ?? null,
+        outputFile: body.outputFile ?? null,
+        statementHtml: body.statement ?? '',
+        objective: body.objective,
+        ownerType,
+        ownerId,
+        testcases: [],
+      });
+      return reply.code(201).send({ ok: true, data: { id } });
+    } catch (err) {
+      return sendOwnerError(reply, err);
+    }
   });
 
   app.get<{ Params: { id: string } }>(
@@ -366,51 +403,57 @@ export function registerAdminProblemRoutes(
     Body: Record<string, unknown>;
   }>('/api/admin/problems/:id', { preHandler: guard }, async (request, reply) => {
     const problemId = Number(request.params.id);
-    if (!getProblem(options.db, problemId)) {
+    if (!Number.isInteger(problemId) || !getProblem(options.db, problemId)) {
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
     }
     const body = request.body ?? {};
-    const updated = updateProblem(options.db, problemId, {
-      title: typeof body.title === 'string' ? body.title : undefined,
-      type: typeof body.type === 'string' ? body.type : undefined,
-      difficulty:
-        typeof body.difficulty === 'number'
-          ? body.difficulty
-          : body.difficulty === null
-            ? null
+    try {
+      const updated = updateProblemWithOwner(options.db, problemId, {
+        title: typeof body.title === 'string' ? body.title : undefined,
+        type: typeof body.type === 'string' ? body.type : undefined,
+        difficulty:
+          typeof body.difficulty === 'number'
+            ? body.difficulty
+            : body.difficulty === null
+              ? null
+              : undefined,
+        tags: Array.isArray(body.tags) ? (body.tags as string[]) : undefined,
+        timeMs: typeof body.timeMs === 'number' ? body.timeMs : undefined,
+        memoryMb: typeof body.memoryMb === 'number' ? body.memoryMb : undefined,
+        ioMode: body.ioMode === 'file' ? 'file' : body.ioMode === 'stdio' ? 'stdio' : undefined,
+        inputFile:
+          typeof body.inputFile === 'string'
+            ? body.inputFile
+            : body.inputFile === null
+              ? null
+              : undefined,
+        outputFile:
+          typeof body.outputFile === 'string'
+            ? body.outputFile
+            : body.outputFile === null
+              ? null
+              : undefined,
+        statementHtml: typeof body.statementHtml === 'string' ? body.statementHtml : undefined,
+        visibility: typeof body.visibility === 'string' ? body.visibility : undefined,
+        checkerMode:
+          body.checkerMode === 'builtin' || body.checkerMode === 'testlib' || body.checkerMode === 'lemon'
+            ? body.checkerMode
             : undefined,
-      tags: Array.isArray(body.tags) ? (body.tags as string[]) : undefined,
-      timeMs: typeof body.timeMs === 'number' ? body.timeMs : undefined,
-      memoryMb: typeof body.memoryMb === 'number' ? body.memoryMb : undefined,
-      ioMode: body.ioMode === 'file' ? 'file' : body.ioMode === 'stdio' ? 'stdio' : undefined,
-      inputFile:
-        typeof body.inputFile === 'string'
-          ? body.inputFile
-          : body.inputFile === null
-            ? null
+        compareMode: typeof body.compareMode === 'string' ? body.compareMode : undefined,
+        objectiveJson:
+          body.objective && typeof body.objective === 'object'
+            ? JSON.stringify(body.objective)
             : undefined,
-      outputFile:
-        typeof body.outputFile === 'string'
-          ? body.outputFile
-          : body.outputFile === null
-            ? null
-            : undefined,
-      statementHtml: typeof body.statementHtml === 'string' ? body.statementHtml : undefined,
-      visibility: typeof body.visibility === 'string' ? body.visibility : undefined,
-      checkerMode:
-        body.checkerMode === 'builtin' || body.checkerMode === 'testlib' || body.checkerMode === 'lemon'
-          ? body.checkerMode
-          : undefined,
-      compareMode: typeof body.compareMode === 'string' ? body.compareMode : undefined,
-      objectiveJson:
-        body.objective && typeof body.objective === 'object'
-          ? JSON.stringify(body.objective)
-          : undefined,
-    });
-    if (!updated) {
-      return reply.code(400).send({ ok: false, error: { code: 'NO_FIELDS' } });
+        ownerType: body.ownerType,
+        ownerId: body.ownerId,
+      });
+      if (!updated) {
+        return reply.code(400).send({ ok: false, error: { code: 'NO_FIELDS' } });
+      }
+      return { ok: true, data: { id: problemId } };
+    } catch (err) {
+      return sendOwnerError(reply, err);
     }
-    return { ok: true, data: { id: problemId } };
   });
 
   app.get<{ Params: { id: string; kind: string } }>(
