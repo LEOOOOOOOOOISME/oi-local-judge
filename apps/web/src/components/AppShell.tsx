@@ -73,6 +73,9 @@ export function AppShell() {
             </NavLink>
             {user ? (
               <>
+                <NavLink to="/problem-sets" className={navClass}>
+                  题单
+                </NavLink>
                 <NavLink to="/teams" className={navClass}>
                   团队
                 </NavLink>
