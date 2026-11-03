@@ -108,9 +108,41 @@ export interface ProblemDetail extends ProblemSummary {
   objective?: ObjectiveConfig;
 }
 
-/** Phase 1F 管理端列表项（包含隐藏题与可见性）。 */
+/** Problem ACL：题目归属类型（系统 / 个人 / 团队）。 */
+export type ProblemOwnerType = 'system' | 'user' | 'team';
+
+/** Problem ACL：分享目标类型。 */
+export type ProblemGranteeType = 'user' | 'team';
+
+/** Problem ACL：分享权限。 */
+export type ProblemSharePermission = 'read' | 'edit';
+
+/** GET /api/problems/:id/shares 返回的分享项。 */
+export interface ProblemShare {
+  granteeType: ProblemGranteeType;
+  granteeId: number;
+  permission: ProblemSharePermission;
+  createdBy: number;
+  createdAt: number;
+}
+
+export interface AddProblemShareRequest {
+  granteeType: ProblemGranteeType;
+  granteeId: number;
+  permission: ProblemSharePermission;
+}
+
+/** 管理端题目详情：在 ProblemDetail 基础上返回归属信息。 */
+export interface AdminProblemDetail extends ProblemDetail {
+  ownerType: ProblemOwnerType;
+  ownerId: number | null;
+}
+
+/** Phase 1F 管理端列表项（包含隐藏题、可见性与归属）。 */
 export interface AdminProblemSummary extends ProblemSummary {
   visibility: 'public' | 'hidden';
+  ownerType: ProblemOwnerType;
+  ownerId: number | null;
 }
 
 /** Phase 1E 管理端：题目基础信息更新（所有字段可选）。 */
@@ -129,6 +161,8 @@ export interface UpdateProblemRequest {
   checkerMode?: 'builtin' | 'testlib' | 'lemon';
   compareMode?: string;
   objective?: ObjectiveConfig;
+  ownerType?: ProblemOwnerType;
+  ownerId?: number | null;
 }
 
 export interface ValidateTestcaseResult {
@@ -543,6 +577,8 @@ export interface CreateProblemRequest {
   outputFile?: string | null;
   statement?: string;
   objective?: ObjectiveConfig;
+  ownerType?: ProblemOwnerType;
+  ownerId?: number | null;
 }
 
 export interface CreateProblemResult {

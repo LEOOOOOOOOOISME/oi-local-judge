@@ -1,0 +1,70 @@
+/* Problem ACL：题目归属与分享卡片 */
+
+.problem-owner-editor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.problem-owner-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.problem-share-toolbar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.problem-share-toolbar .ant-select,
+.problem-share-toolbar .ant-input-number {
+  width: 100%;
+}
+
+.problem-share-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.problem-share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.problem-share-main {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.problem-share-name {
+  overflow: hidden;
+  font-size: 12.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-share-side {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.problem-share-empty {
+  padding: 8px 0;
+  font-size: 12.5px;
+}
