@@ -27,6 +27,7 @@ import {
 } from '../services/contests.js';
 import { getOfficialRanking } from '../services/official-ranking.js';
 import { getCorrectionRanking } from '../services/correction-ranking.js';
+import { getTeamRanking } from '../services/team-ranking.js';
 import {
   ContestTeamError,
   getRegisteredTeamForUser,
@@ -89,6 +90,17 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       }
       return { ok: true, data: ranking };
+    },
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/api/contests/:id/team-ranking',
+    async (request, reply) => {
+      const ranking = getTeamRanking(options.db, Number(request.params.id));
+      if (!ranking) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      return { ok: true, data: ranking.rows };
     },
   );
 
