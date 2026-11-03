@@ -302,14 +302,44 @@ export interface ClassStatRow {
   bestRank: number;
 }
 
-/** 报名模式：个人 / 团队 / 个人与团队均可。默认 individual。 */
+/** 团队报名模式：个人 / 团队 / 个人与团队均可。默认 individual。 */
 export type TeamMode = 'individual' | 'team' | 'both';
+
+/** 个人报名方式：管理员导入 / 自由报名 / 报名审核。默认 manual。 */
+export type RegistrationMode = 'manual' | 'open' | 'approval';
+
+/** 报名审核状态。 */
+export type RegistrationStatus = 'pending' | 'accepted' | 'rejected';
+
+/** 单条报名/参赛记录；管理端报名表与“我的报名”共用。 */
+export interface ContestRegistration {
+  contestId: number;
+  userId: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  status: RegistrationStatus;
+  registeredAt: number | null;
+  checkedInAt: number | null;
+  reviewedAt: number | null;
+  reviewedBy: number | null;
+  submissionCount: number;
+  lastSubmissionAt: number | null;
+}
+
+/** GET /api/contests/:id/registration 返回的报名方式与我的报名。 */
+export interface MyContestRegistration {
+  mode: RegistrationMode;
+  registration: ContestRegistration | null;
+}
 
 export interface CreateContestRequest {
   name: string;
   mode?: string;
-  /** 报名模式，省略时后端默认 individual。 */
+  /** 团队报名模式，省略时后端默认 individual。 */
   teamMode?: TeamMode;
+  /** 个人报名方式，省略时后端默认 manual（管理员导入）。 */
+  registrationMode?: RegistrationMode;
   startAt?: number;
   endAt?: number;
   freezeAt?: number;
@@ -321,6 +351,7 @@ export interface UpdateContestRequest {
   name?: string;
   mode?: string;
   teamMode?: TeamMode;
+  registrationMode?: RegistrationMode;
   startAt?: number | null;
   endAt?: number | null;
   freezeAt?: number | null;
@@ -375,10 +406,14 @@ export interface Contest {
   id: number;
   name: string;
   mode: string;
-  /** 报名模式；旧后端/旧比赛可能没有该字段，前端按 individual 处理。 */
+  /** 团队报名模式；旧后端/旧比赛可能没有该字段，前端按 individual 处理。 */
   team_mode?: TeamMode;
   /** 兼容已映射为 camelCase 的接口返回。 */
   teamMode?: TeamMode;
+  /** 个人报名方式；旧后端/旧比赛可能没有该字段，前端按 manual 处理。 */
+  registration_mode?: RegistrationMode;
+  /** 兼容已映射为 camelCase 的接口返回。 */
+  registrationMode?: RegistrationMode;
   start_at: number | null;
   end_at: number | null;
   freeze_at: number | null;

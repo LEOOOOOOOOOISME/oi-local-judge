@@ -31,8 +31,11 @@ import type {
   ContestParticipantImportResult,
   ContestRankingRuleConfig,
   ContestLockRecord,
+  ContestRegistration,
   HackAuditItem,
   RankingPlugin,
+  RegistrationMode,
+  RegistrationStatus,
   TeamMode,
   TeamRegistration,
   TeamSummary,
@@ -51,6 +54,14 @@ import {
   teamModeLabel,
 } from '../utils/teamContest';
 import {
+  describeRegistrationError,
+  REGISTRATION_MODE_OPTIONS,
+  registrationModeLabel,
+  registrationStatusColor,
+  registrationStatusLabel,
+  resolveRegistrationMode,
+} from '../utils/registration';
+import {
   contestModeLabel,
   contestStatusLabel,
 } from '../utils/status';
@@ -65,6 +76,7 @@ interface ContestFormValues {
   name: string;
   mode: string;
   teamMode: TeamMode;
+  registrationMode: RegistrationMode;
   startAt: string;
   endAt: string;
   freezeAt?: string;
@@ -155,6 +167,13 @@ export function AdminContestConsolePage() {
   const [savingRanking, setSavingRanking] = useState(false);
   const [rankingError, setRankingError] = useState<string | null>(null);
   const [unlockingLock, setUnlockingLock] = useState<string | null>(null);
+  const [registrationFilter, setRegistrationFilter] = useState<'all' | RegistrationStatus>(
+    'all',
+  );
+  const [reviewingRegistrationKey, setReviewingRegistrationKey] = useState<string | null>(null);
+  const [checkingInRegistrationUserId, setCheckingInRegistrationUserId] = useState<number | null>(
+    null,
+  );
 
   const detailQuery = useQuery({
     queryKey: ['contest-detail', contestId],
@@ -166,6 +185,13 @@ export function AdminContestConsolePage() {
     queryKey: ['admin-participants', contestId],
     queryFn: () => apiGet<ContestParticipant[]>(`/api/admin/contests/${contestId}/participants`),
     enabled: validId,
+  });
+  const registrationsQuery = useQuery({
+    queryKey: ['admin-registrations', contestId],
+    queryFn: () =>
+      apiGet<ContestRegistration[]>(`/api/admin/contests/${contestId}/registrations`),
+    enabled: validId,
+    refetchInterval: 10_000,
   });
   const contestTeamsQuery = useQuery({
     queryKey: ['admin-contest-teams', contestId],
@@ -224,6 +250,25 @@ export function AdminContestConsolePage() {
   const problems = detail?.problems ?? [];
   const participants = participantsQuery.data ?? [];
   const teamRegistrations = contestTeamsQuery.data ?? [];
+  const registrations = registrationsQuery.data ?? [];
+  const registrationStats = useMemo(() => {
+    const pending = registrations.filter((row) => row.status === 'pending').length;
+    const accepted = registrations.filter((row) => row.status === 'accepted');
+    const rejected = registrations.filter((row) => row.status === 'rejected').length;
+    const checkedIn = accepted.filter((row) => row.checkedInAt !== null).length;
+    return {
+      total: registrations.length,
+      pending,
+      accepted: accepted.length,
+      rejected,
+      checkedIn,
+      notCheckedIn: accepted.length - checkedIn,
+    };
+  }, [registrations]);
+  const filteredRegistrations =
+    registrationFilter === 'all'
+      ? registrations
+      : registrations.filter((row) => row.status === registrationFilter);
   // 后端没有“列出全部团队”的接口：名称解析只在当前管理员可见团队 + 已报名团队内进行，
   // 其余情况由管理员直接输入团队 ID（提交后后端校验）。
   const knownTeams = useMemo(() => {
@@ -311,6 +356,7 @@ export function AdminContestConsolePage() {
       name: contest.name,
       mode: contest.mode,
       teamMode: resolveTeamMode(contest),
+      registrationMode: resolveRegistrationMode(contest),
       startAt: toLocalDateTimeInput(contest.start_at),
       endAt: toLocalDateTimeInput(contest.end_at),
       freezeAt: toLocalDateTimeInput(contest.freeze_at),
@@ -350,6 +396,8 @@ export function AdminContestConsolePage() {
     void queryClient.invalidateQueries({ queryKey: ['admin-class-stats', contestId] });
     void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
     void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+    void queryClient.invalidateQueries({ queryKey: ['admin-registrations', contestId] });
+    void queryClient.invalidateQueries({ queryKey: ['my-registration', contestId] });
   };
 
   const saveBasic = async (values: ContestFormValues) => {
@@ -366,6 +414,7 @@ export function AdminContestConsolePage() {
         name: values.name.trim(),
         mode: values.mode,
         teamMode: values.teamMode,
+        registrationMode: values.registrationMode,
         startAt,
         endAt,
         freezeAt: fromLocalDateTimeInput(values.freezeAt ?? ''),
@@ -460,6 +509,44 @@ export function AdminContestConsolePage() {
       message.error(error instanceof Error ? error.message : '移除参赛者失败');
     } finally {
       setRemovingUserId(null);
+    }
+  };
+
+  const reviewRegistration = async (
+    registration: ContestRegistration,
+    action: 'approve' | 'reject',
+  ) => {
+    const key = `${registration.userId}:${action}`;
+    setReviewingRegistrationKey(key);
+    try {
+      await apiPost<null>(
+        `/api/admin/contests/${contestId}/registrations/${registration.userId}/${action}`,
+      );
+      message.success(
+        action === 'approve'
+          ? `已通过 ${registration.username} 的报名`
+          : `已拒绝 ${registration.username} 的报名`,
+      );
+      invalidateContest();
+    } catch (error) {
+      message.error(describeRegistrationError(error));
+    } finally {
+      setReviewingRegistrationKey(null);
+    }
+  };
+
+  const checkInRegistration = async (registration: ContestRegistration) => {
+    setCheckingInRegistrationUserId(registration.userId);
+    try {
+      await apiPost<null>(
+        `/api/admin/contests/${contestId}/registrations/${registration.userId}/check-in`,
+      );
+      message.success(`已为 ${registration.username} 签到`);
+      invalidateContest();
+    } catch (error) {
+      message.error(describeRegistrationError(error));
+    } finally {
+      setCheckingInRegistrationUserId(null);
     }
   };
 
@@ -863,6 +950,115 @@ export function AdminContestConsolePage() {
     },
   ];
 
+  const registrationColumns: TableColumnsType<ContestRegistration> = [
+    { title: '用户名', dataIndex: 'username', width: 150 },
+    {
+      title: '姓名',
+      dataIndex: 'realName',
+      width: 120,
+      render: (value: string | null) => value ?? <span className="muted">—</span>,
+    },
+    {
+      title: '班级',
+      dataIndex: 'className',
+      width: 140,
+      render: (value: string | null) => value ?? <span className="muted">—</span>,
+    },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 90,
+      render: (value: ContestRegistration['status']) => (
+        <Tag color={registrationStatusColor(value)}>{registrationStatusLabel(value)}</Tag>
+      ),
+    },
+    {
+      title: '报名时间',
+      dataIndex: 'registeredAt',
+      width: 158,
+      render: (value: number | null) =>
+        value === null ? <span className="muted">—</span> : <span className="mono">{formatDateTime(value)}</span>,
+    },
+    {
+      title: '签到',
+      width: 190,
+      render: (_value, row) => {
+        if (row.checkedInAt !== null) {
+          return (
+            <Space size={4} wrap>
+              <Tag color="green">已签到</Tag>
+              <span className="muted mono">{formatDateTime(row.checkedInAt)}</span>
+            </Space>
+          );
+        }
+        return row.status === 'accepted' ? (
+          <Tag>未签到</Tag>
+        ) : (
+          <span className="muted">—</span>
+        );
+      },
+    },
+    {
+      title: '提交数',
+      dataIndex: 'submissionCount',
+      width: 80,
+      align: 'right',
+    },
+    {
+      title: '最后提交',
+      dataIndex: 'lastSubmissionAt',
+      width: 158,
+      render: (value: number | null) =>
+        value === null ? <span className="muted">—</span> : <span className="mono">{formatDateTime(value)}</span>,
+    },
+    {
+      title: '操作',
+      width: 180,
+      render: (_value, row) => {
+        if (row.status === 'pending') {
+          return (
+            <Space size={4} wrap>
+              <Button
+                size="small"
+                type="primary"
+                loading={reviewingRegistrationKey === `${row.userId}:approve`}
+                onClick={() => void reviewRegistration(row, 'approve')}
+              >
+                通过
+              </Button>
+              <Popconfirm
+                title={`拒绝 ${row.username} 的报名？`}
+                okText="拒绝"
+                cancelText="取消"
+                onConfirm={() => void reviewRegistration(row, 'reject')}
+              >
+                <Button
+                  size="small"
+                  danger
+                  loading={reviewingRegistrationKey === `${row.userId}:reject`}
+                >
+                  拒绝
+                </Button>
+              </Popconfirm>
+            </Space>
+          );
+        }
+        if (row.status === 'accepted' && row.checkedInAt === null) {
+          return (
+            <Button
+              size="small"
+              loading={checkingInRegistrationUserId === row.userId}
+              onClick={() => void checkInRegistration(row)}
+            >
+              签到
+            </Button>
+          );
+        }
+        return null;
+      },
+    },
+  ];
+
   const teamRegistrationColumns: TableColumnsType<TeamRegistration> = [
     {
       title: '团队',
@@ -1145,6 +1341,7 @@ export function AdminContestConsolePage() {
   const statusColor = STATUS_COLOR[status] ?? 'default';
   const currentTeamMode = resolveTeamMode(contest);
   const teamRegistrationEnabled = currentTeamMode !== 'individual';
+  const currentRegistrationMode = resolveRegistrationMode(contest);
 
   return (
     <div>
@@ -1162,6 +1359,9 @@ export function AdminContestConsolePage() {
             <Tag color="blue">{contestModeLabel(contest.mode)}</Tag>
             <Tag color={teamRegistrationEnabled ? 'purple' : 'default'}>
               {teamModeLabel(currentTeamMode)}
+            </Tag>
+            <Tag color={currentRegistrationMode === 'manual' ? 'default' : 'geekblue'}>
+              {registrationModeLabel(currentRegistrationMode)}
             </Tag>
             {archived ? <Tag color="red">已归档 · 只读</Tag> : null}
             {officialFrozen ? (
@@ -1291,8 +1491,13 @@ export function AdminContestConsolePage() {
             </Row>
             <Row gutter={12}>
               <Col span={8}>
-                <Form.Item label="报名模式" name="teamMode" rules={[{ required: true }]}>
+                <Form.Item label="团队报名" name="teamMode" rules={[{ required: true }]}>
                   <Select<TeamMode> options={TEAM_MODE_OPTIONS} />
+                </Form.Item>
+              </Col>
+              <Col span={8}>
+                <Form.Item label="报名方式" name="registrationMode" rules={[{ required: true }]}>
+                  <Select<RegistrationMode> options={REGISTRATION_MODE_OPTIONS} />
                 </Form.Item>
               </Col>
               <Col span={8}>
@@ -1558,6 +1763,83 @@ export function AdminContestConsolePage() {
               ))}
             </div>
           )}
+        </Card>
+
+        <Card
+          className="oij-card"
+          title="报名管理"
+          extra={<span className="muted">共 {registrationStats.total} 人 · 每 10s 刷新</span>}
+        >
+          <div className="stack">
+            {currentRegistrationMode === 'manual' ? (
+              <Alert
+                type="info"
+                showIcon
+                message="当前为管理员导入模式，选手不能自助报名。"
+                description="在“基本信息”中把报名方式改为“自由报名”或“报名审核”后，选手即可在比赛页报名；管理员手动添加的参赛者仍直接通过。"
+              />
+            ) : (
+              <Alert
+                type={currentRegistrationMode === 'approval' ? 'warning' : 'success'}
+                showIcon
+                message={
+                  currentRegistrationMode === 'approval'
+                    ? '报名审核：选手报名后需管理员通过才能参赛。'
+                    : '自由报名：选手报名后立即通过。'
+                }
+              />
+            )}
+            <Space wrap size={[8, 8]}>
+              <Tag>全部 {registrationStats.total}</Tag>
+              <Tag color="green">已通过 {registrationStats.accepted}</Tag>
+              <Tag color="gold">待审核 {registrationStats.pending}</Tag>
+              <Tag color="red">已拒绝 {registrationStats.rejected}</Tag>
+              <Tag color="blue">已签到 {registrationStats.checkedIn}</Tag>
+              <Tag>未签到 {registrationStats.notCheckedIn}</Tag>
+              <Select<'all' | RegistrationStatus>
+                size="small"
+                value={registrationFilter}
+                options={[
+                  { value: 'all', label: '全部状态' },
+                  { value: 'pending', label: '只看待审核' },
+                  { value: 'accepted', label: '已通过' },
+                  { value: 'rejected', label: '已拒绝' },
+                ]}
+                onChange={(value) => setRegistrationFilter(value)}
+                style={{ width: 140 }}
+              />
+            </Space>
+            {registrationsQuery.isPending ? (
+              <div className="inline-loading">
+                <Spin />
+              </div>
+            ) : registrationsQuery.isError ? (
+              <ErrorResult
+                error={registrationsQuery.error}
+                onRetry={() => void registrationsQuery.refetch()}
+              />
+            ) : (
+              <Table<ContestRegistration>
+                className="oij-table"
+                rowKey="userId"
+                size="small"
+                columns={registrationColumns}
+                dataSource={filteredRegistrations}
+                pagination={
+                  filteredRegistrations.length > 20
+                    ? { pageSize: 20, size: 'small', showSizeChanger: false }
+                    : false
+                }
+                scroll={{ x: 1180 }}
+                locale={{
+                  emptyText:
+                    registrationFilter === 'pending'
+                      ? '没有待审核的报名'
+                      : '还没有报名记录',
+                }}
+              />
+            )}
+          </div>
         </Card>
 
         <Card

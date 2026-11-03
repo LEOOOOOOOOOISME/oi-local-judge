@@ -22,12 +22,18 @@ import type {
   AdminUser,
   Contest,
   CreateContestRequest,
+  RegistrationMode,
   TeamMode,
 } from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { formatDateTime } from '../utils/format';
 import { resolveTeamMode, TEAM_MODE_OPTIONS, teamModeLabel } from '../utils/teamContest';
+import {
+  REGISTRATION_MODE_OPTIONS,
+  registrationModeLabel,
+  resolveRegistrationMode,
+} from '../utils/registration';
 import {
   contestModeLabel,
   contestStatusLabel,
@@ -44,6 +50,7 @@ interface CreateContestFormValues {
   name: string;
   mode: string;
   teamMode: TeamMode;
+  registrationMode: RegistrationMode;
   startAt: string;
   endAt: string;
   freezeAt?: string;
@@ -99,6 +106,7 @@ export function AdminContestsPage() {
         name: values.name.trim(),
         mode: values.mode,
         teamMode: values.teamMode,
+        registrationMode: values.registrationMode,
         startAt,
         endAt,
         ...(freezeAt !== null ? { freezeAt } : {}),
@@ -125,6 +133,7 @@ export function AdminContestsPage() {
       name: '',
       mode: 'oi',
       teamMode: 'individual',
+      registrationMode: 'manual',
       startAt: toLocalDateTimeInput(times.startAt),
       endAt: toLocalDateTimeInput(times.endAt),
       freezeAt: '',
@@ -166,13 +175,25 @@ export function AdminContestsPage() {
       render: (value: string) => contestModeLabel(value),
     },
     {
-      title: '报名模式',
+      title: '团队报名',
       width: 130,
       render: (_value, record) => (
         <Tag color={resolveTeamMode(record) === 'individual' ? 'default' : 'purple'}>
           {teamModeLabel(resolveTeamMode(record))}
         </Tag>
       ),
+    },
+    {
+      title: '报名方式',
+      width: 110,
+      render: (_value, record) => {
+        const mode = resolveRegistrationMode(record);
+        return (
+          <Tag color={mode === 'manual' ? 'default' : mode === 'open' ? 'green' : 'gold'}>
+            {registrationModeLabel(mode)}
+          </Tag>
+        );
+      },
     },
     {
       title: '状态',
@@ -294,8 +315,13 @@ export function AdminContestsPage() {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="报名模式" name="teamMode" rules={[{ required: true }]}>
+              <Form.Item label="团队报名" name="teamMode" rules={[{ required: true }]}>
                 <Select<TeamMode> options={TEAM_MODE_OPTIONS} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="报名方式" name="registrationMode" rules={[{ required: true }]}>
+                <Select<RegistrationMode> options={REGISTRATION_MODE_OPTIONS} />
               </Form.Item>
             </Col>
           </Row>
