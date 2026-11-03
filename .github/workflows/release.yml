@@ -83,6 +83,14 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
+      # Electron 45 ships no postinstall script (its package.json has no
+      # `scripts`), so `npm ci` does not populate node_modules/electron/dist.
+      # The portable build copies that directory as the app runtime, so fetch it
+      # explicitly with the package's own install script. This fails loudly if
+      # the download or checksum verification fails.
+      - name: Download Electron runtime
+        run: node node_modules/electron/install.js
+
       - name: Build native runners
         run: npm run build:native
 
