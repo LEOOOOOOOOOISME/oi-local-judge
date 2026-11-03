@@ -16,6 +16,7 @@ import { registerAdminBatchRoutes } from './http/admin-batch.js';
 import { registerAdminUserRoutes } from './http/admin-users.js';
 import { registerCommunityRoutes } from './http/community.js';
 import { registerContestRoutes } from './http/contests.js';
+import { registerAdminRegistrationRoutes } from './http/admin-registrations.js';
 import { registerSubmissionRoutes } from './http/submissions.js';
 import { registerAdminSystemRoutes } from './http/admin-system.js';
 import { registerContestBatchRoutes } from './http/admin-contest-batch.js';
@@ -130,6 +131,10 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     db,
     config,
     auth,
+    adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
+  });
+  registerAdminRegistrationRoutes(app, {
+    db,
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
   });
   registerSubmissionRoutes(app, { db, config });
