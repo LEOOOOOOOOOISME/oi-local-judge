@@ -1208,3 +1208,85 @@ export interface TeamRegistration {
   registeredAt: number;
   members: TeamRegistrationMember[];
 }
+
+/** Problem Sets：题单与分享（owner 可为个人或团队）。 */
+export type ProblemSetOwnerType = 'user' | 'team';
+export type ProblemSetVisibility = 'private' | 'public';
+export type ProblemSetGranteeType = 'user' | 'team';
+export type ProblemSetSharePermission = 'read' | 'edit';
+
+/** GET /api/problem-sets 列表项；canEdit/canManage 由服务端按 ACL 计算。 */
+export interface ProblemSetSummary {
+  id: number;
+  title: string;
+  description: string;
+  ownerType: ProblemSetOwnerType;
+  ownerId: number;
+  visibility: ProblemSetVisibility;
+  createdBy: number;
+  createdAt: number;
+  updatedAt: number;
+  itemCount: number;
+  /** 可修改标题/描述/题目与顺序。 */
+  canEdit: boolean;
+  /** 可修改可见性、删除题单、管理分享。 */
+  canManage: boolean;
+}
+
+export interface ProblemSetItem {
+  problemId: number;
+  ordinal: number;
+  addedAt: number;
+  title: string;
+  type: ProblemType;
+  difficulty: number | null;
+  tags: string[];
+  timeMs: number;
+  memoryMb: number;
+}
+
+export interface ProblemSetShare {
+  granteeType: ProblemSetGranteeType;
+  granteeId: number;
+  permission: ProblemSetSharePermission;
+  createdBy: number;
+  createdAt: number;
+}
+
+/** GET /api/problem-sets/:id；shares 仅 canManage 时返回。 */
+export interface ProblemSetDetail extends ProblemSetSummary {
+  items: ProblemSetItem[];
+  shares: ProblemSetShare[];
+}
+
+export interface CreateProblemSetRequest {
+  title: string;
+  description?: string;
+  ownerType: ProblemSetOwnerType;
+  ownerId?: number;
+  visibility: ProblemSetVisibility;
+}
+
+export interface CreateProblemSetResult {
+  id: number;
+}
+
+export interface UpdateProblemSetRequest {
+  title?: string;
+  description?: string;
+  visibility?: ProblemSetVisibility;
+}
+
+export interface AddProblemSetItemRequest {
+  problemId: number;
+}
+
+export interface ReorderProblemSetItemsRequest {
+  problemIds: number[];
+}
+
+export interface AddProblemSetShareRequest {
+  granteeType: ProblemSetGranteeType;
+  granteeId: number;
+  permission: ProblemSetSharePermission;
+}

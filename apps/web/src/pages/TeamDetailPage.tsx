@@ -12,6 +12,7 @@ import {
   Result,
   Space,
   Table,
+  Tabs,
   Tag,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
@@ -23,6 +24,7 @@ import type { TeamDetail, TeamMember, TeamRole } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
+import { TeamProblemSetsPanel } from '../components/TeamProblemSetsPanel';
 import { formatDateTime } from '../utils/format';
 import '../styles/teams.css';
 
@@ -340,66 +342,93 @@ export function TeamDetailPage() {
         }
       />
 
-      <Space direction="vertical" size={16} style={{ width: '100%' }}>
-        <Card className="oij-card" title="基本信息">
-          <Descriptions
-            className="team-detail-descriptions"
-            size="small"
-            column={{ xs: 1, sm: 2, lg: 3 }}
-            items={[
-              {
-                key: 'id',
-                label: '团队编号',
-                children: <span className="mono">#{detail.id}</span>,
-              },
-              { key: 'captain', label: '队长', children: captainLabel },
-              {
-                key: 'createdAt',
-                label: '创建时间',
-                children: <span className="mono">{formatDateTime(detail.createdAt)}</span>,
-              },
-              {
-                key: 'memberCount',
-                label: '成员数',
-                children: detail.members ? (
-                  <span className="mono">{detail.members.length}</span>
-                ) : (
-                  <span className="muted">仅成员可见</span>
-                ),
-              },
-              {
-                key: 'viewerRole',
-                label: '我的身份',
-                children: viewerRole ? <RoleTag role={viewerRole} /> : <span className="muted">非成员</span>,
-              },
-            ]}
-          />
-        </Card>
+      <Tabs
+        className="team-tabs"
+        items={[
+          {
+            key: 'overview',
+            label: '概览',
+            children: (
+              <Space direction="vertical" size={16} style={{ width: '100%' }}>
+                <Card className="oij-card" title="基本信息">
+                  <Descriptions
+                    className="team-detail-descriptions"
+                    size="small"
+                    column={{ xs: 1, sm: 2, lg: 3 }}
+                    items={[
+                      {
+                        key: 'id',
+                        label: '团队编号',
+                        children: <span className="mono">#{detail.id}</span>,
+                      },
+                      { key: 'captain', label: '队长', children: captainLabel },
+                      {
+                        key: 'createdAt',
+                        label: '创建时间',
+                        children: <span className="mono">{formatDateTime(detail.createdAt)}</span>,
+                      },
+                      {
+                        key: 'memberCount',
+                        label: '成员数',
+                        children: detail.members ? (
+                          <span className="mono">{detail.members.length}</span>
+                        ) : (
+                          <span className="muted">仅成员可见</span>
+                        ),
+                      },
+                      {
+                        key: 'viewerRole',
+                        label: '我的身份',
+                        children: viewerRole ? (
+                          <RoleTag role={viewerRole} />
+                        ) : (
+                          <span className="muted">非成员</span>
+                        ),
+                      },
+                    ]}
+                  />
+                </Card>
 
-        <Card
-          className="oij-card"
-          title={detail.members ? `成员（${detail.members.length}）` : '成员'}
-        >
-          {detail.members ? (
-            <Table<TeamMember>
-              className="oij-table"
-              rowKey="userId"
-              size="small"
-              columns={memberColumns}
-              dataSource={detail.members}
-              pagination={false}
-              locale={{ emptyText: '团队还没有成员' }}
-            />
-          ) : (
-            <Alert
-              type="info"
-              showIcon
-              message="成员列表仅对团队成员与管理员可见。"
-              description="你是该团队的访客，可以查看团队基础信息；如需加入，请联系队长添加你的用户名。"
-            />
-          )}
-        </Card>
-      </Space>
+                <Card
+                  className="oij-card"
+                  title={detail.members ? `成员（${detail.members.length}）` : '成员'}
+                >
+                  {detail.members ? (
+                    <Table<TeamMember>
+                      className="oij-table"
+                      rowKey="userId"
+                      size="small"
+                      columns={memberColumns}
+                      dataSource={detail.members}
+                      pagination={false}
+                      locale={{ emptyText: '团队还没有成员' }}
+                    />
+                  ) : (
+                    <Alert
+                      type="info"
+                      showIcon
+                      message="成员列表仅对团队成员与管理员可见。"
+                      description="你是该团队的访客，可以查看团队基础信息；如需加入，请联系队长添加你的用户名。"
+                    />
+                  )}
+                </Card>
+              </Space>
+            ),
+          },
+          {
+            key: 'problem-sets',
+            label: '题单',
+            children: (
+              <TeamProblemSetsPanel
+                teamId={teamId}
+                teamName={detail.name}
+                canCreate={viewerRole === 'captain'}
+                currentUserId={user?.id}
+              />
+            ),
+          },
+        ]}
+      />
 
       <Modal
         title="添加成员"

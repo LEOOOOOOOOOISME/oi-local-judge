@@ -69,6 +69,14 @@ const TeamsPage = lazy(() =>
 const TeamDetailPage = lazy(() =>
   import('./pages/TeamDetailPage').then((module) => ({ default: module.TeamDetailPage })),
 );
+const ProblemSetsPage = lazy(() =>
+  import('./pages/ProblemSetsPage').then((module) => ({ default: module.ProblemSetsPage })),
+);
+const ProblemSetDetailPage = lazy(() =>
+  import('./pages/ProblemSetDetailPage').then((module) => ({
+    default: module.ProblemSetDetailPage,
+  })),
+);
 const DiscussPage = lazy(() =>
   import('./pages/DiscussPage').then((module) => ({ default: module.DiscussPage })),
 );
@@ -232,6 +240,22 @@ export function AppRoutes() {
           element={
             <ProtectedRoute>
               <TeamDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/problem-sets"
+          element={
+            <ProtectedRoute>
+              <ProblemSetsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/problem-sets/:id"
+          element={
+            <ProtectedRoute>
+              <ProblemSetDetailPage />
             </ProtectedRoute>
           }
         />
