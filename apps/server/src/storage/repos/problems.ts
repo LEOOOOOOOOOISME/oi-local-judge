@@ -1,5 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
+export type ProblemOwnerType = 'system' | 'user' | 'team';
+
 export interface TestcaseRow {
   id: number;
   problem_id: number;
@@ -40,6 +42,8 @@ export interface ProblemRow {
   compare_mode: string;
   objective_json: string;
   visibility: string;
+  owner_type: ProblemOwnerType;
+  owner_id: number | null;
   version: number;
   created_at: number;
 }
@@ -63,6 +67,9 @@ export interface CreateProblemInput {
   compareMode?: string;
   objective?: unknown;
   visibility?: string;
+  /** Ownership of the problem; imported/seed problems stay `system`. */
+  ownerType?: ProblemOwnerType;
+  ownerId?: number | null;
   testcases: Array<{
     inputPath: string;
     outputPath: string;
@@ -79,8 +86,9 @@ export function createProblem(db: DatabaseSync, input: CreateProblemInput): numb
     .prepare(
       `INSERT INTO problems(title, type, difficulty, tags_json, time_ms, memory_mb, output_mb,
          io_mode, input_file, output_file, statement_html, samples_json, checker_mode,
-         checker_path, compare_mode, objective_json, visibility, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         checker_path, compare_mode, objective_json, visibility, owner_type, owner_id,
+         created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.title,
@@ -100,6 +108,8 @@ export function createProblem(db: DatabaseSync, input: CreateProblemInput): numb
       input.compareMode ?? 'ignore-trailing',
       JSON.stringify(input.objective ?? {}),
       input.visibility ?? 'public',
+      input.ownerType ?? 'system',
+      input.ownerId ?? null,
       Date.now(),
     );
   const problemId = Number(result.lastInsertRowid);
@@ -149,6 +159,9 @@ export interface UpdateProblemPatch {
   checkerMode?: 'builtin' | 'testlib' | 'lemon';
   compareMode?: string;
   objectiveJson?: string;
+  /** Changing ownership; `system` clears `owner_id`. */
+  ownerType?: ProblemOwnerType;
+  ownerId?: number | null;
 }
 
 export function updateProblem(db: DatabaseSync, id: number, patch: UpdateProblemPatch): boolean {
@@ -173,6 +186,14 @@ export function updateProblem(db: DatabaseSync, id: number, patch: UpdateProblem
   add('checker_mode', patch.checkerMode);
   add('compare_mode', patch.compareMode);
   add('objective_json', patch.objectiveJson);
+  if (patch.ownerType !== undefined) {
+    add('owner_type', patch.ownerType);
+    // A system-owned problem never carries an owner id.
+    if (patch.ownerType === 'system' && patch.ownerId === undefined) {
+      sets.push('owner_id = NULL');
+    }
+  }
+  add('owner_id', patch.ownerId);
   if (sets.length === 0) return false;
   sets.push('version = version + 1');
   const result = db
