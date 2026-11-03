@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   App,
@@ -33,6 +33,9 @@ import type {
   ContestLockRecord,
   HackAuditItem,
   RankingPlugin,
+  TeamMode,
+  TeamRegistration,
+  TeamSummary,
   UpdateContestRequest,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
@@ -41,6 +44,12 @@ import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { formatDateTime } from '../utils/format';
 import { fetchOfficialRanking, presetLabel } from '../utils/officialRanking';
+import {
+  findTeamByIdOrName,
+  resolveTeamMode,
+  TEAM_MODE_OPTIONS,
+  teamModeLabel,
+} from '../utils/teamContest';
 import {
   contestModeLabel,
   contestStatusLabel,
@@ -55,6 +64,7 @@ import '../styles/contest-admin.css';
 interface ContestFormValues {
   name: string;
   mode: string;
+  teamMode: TeamMode;
   startAt: string;
   endAt: string;
   freezeAt?: string;
@@ -71,6 +81,28 @@ function userLabel(user: AdminUser): string {
   return `${user.realName ?? user.username} (${user.username}${
     user.className ? ` · ${user.className}` : ''
   })`;
+}
+
+function describeTeamRegistrationError(error: unknown): string {
+  if (error instanceof ApiError) {
+    switch (error.code) {
+      case 'TEAM_NOT_FOUND':
+        return '团队不存在，请检查团队 ID';
+      case 'TEAM_ALREADY_REGISTERED':
+        return '该团队已经报名本场比赛';
+      case 'TEAM_MEMBER_CONFLICT':
+        return error.message || '团队成员已代表其他团队报名本场比赛';
+      case 'TEAM_MODE_DISABLED':
+        return '该比赛尚未开启团队报名，请先把报名模式改为团队赛或个人/团队均可';
+      case 'CONTEST_ARCHIVED':
+        return '比赛已归档，不能修改团队报名';
+      case 'TEAM_FORBIDDEN':
+        return '没有权限修改该团队报名';
+      default:
+        return error.message;
+    }
+  }
+  return error instanceof Error ? error.message : '团队报名操作失败';
 }
 
 export function AdminContestConsolePage() {
@@ -90,6 +122,9 @@ export function AdminContestConsolePage() {
   const [selectedUserIds, setSelectedUserIds] = useState<number[]>([]);
   const [addingParticipants, setAddingParticipants] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<number | null>(null);
+  const [teamIdentifier, setTeamIdentifier] = useState('');
+  const [addingTeam, setAddingTeam] = useState(false);
+  const [removingTeamId, setRemovingTeamId] = useState<number | null>(null);
   const [extraDraft, setExtraDraft] = useState<Record<number, number>>({});
   const [savingExtraUserId, setSavingExtraUserId] = useState<number | null>(null);
   const [announcementTitle, setAnnouncementTitle] = useState('');
@@ -131,6 +166,17 @@ export function AdminContestConsolePage() {
     queryKey: ['admin-participants', contestId],
     queryFn: () => apiGet<ContestParticipant[]>(`/api/admin/contests/${contestId}/participants`),
     enabled: validId,
+  });
+  const contestTeamsQuery = useQuery({
+    queryKey: ['admin-contest-teams', contestId],
+    queryFn: () => apiGet<TeamRegistration[]>(`/api/contests/${contestId}/teams`),
+    enabled: validId,
+    staleTime: 10_000,
+  });
+  const myTeamsQuery = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => apiGet<TeamSummary[]>('/api/teams'),
+    staleTime: 30_000,
   });
   const classStatsQuery = useQuery({
     queryKey: ['admin-class-stats', contestId],
@@ -177,6 +223,25 @@ export function AdminContestConsolePage() {
   const contest = detail?.contest ?? null;
   const problems = detail?.problems ?? [];
   const participants = participantsQuery.data ?? [];
+  const teamRegistrations = contestTeamsQuery.data ?? [];
+  // 后端没有“列出全部团队”的接口：名称解析只在当前管理员可见团队 + 已报名团队内进行，
+  // 其余情况由管理员直接输入团队 ID（提交后后端校验）。
+  const knownTeams = useMemo(() => {
+    const byId = new Map<number, TeamSummary>();
+    for (const team of myTeamsQuery.data ?? []) byId.set(team.id, team);
+    for (const registration of contestTeamsQuery.data ?? []) {
+      if (byId.has(registration.teamId)) continue;
+      byId.set(registration.teamId, {
+        id: registration.teamId,
+        name: registration.name,
+        ownerId: registration.ownerId,
+        createdAt: registration.registeredAt,
+        memberCount: registration.members.length,
+        role: 'member',
+      });
+    }
+    return [...byId.values()];
+  }, [myTeamsQuery.data, contestTeamsQuery.data]);
   const archived = Boolean(contest?.archived_at) || contest?.status === 'archived';
   const officialFrozenUntil =
     contest?.official_frozen_until ?? officialQuery.data?.officialFrozenUntil ?? null;
@@ -245,6 +310,7 @@ export function AdminContestConsolePage() {
     form.setFieldsValue({
       name: contest.name,
       mode: contest.mode,
+      teamMode: resolveTeamMode(contest),
       startAt: toLocalDateTimeInput(contest.start_at),
       endAt: toLocalDateTimeInput(contest.end_at),
       freezeAt: toLocalDateTimeInput(contest.freeze_at),
@@ -299,6 +365,7 @@ export function AdminContestConsolePage() {
       const payload: UpdateContestRequest = {
         name: values.name.trim(),
         mode: values.mode,
+        teamMode: values.teamMode,
         startAt,
         endAt,
         freezeAt: fromLocalDateTimeInput(values.freezeAt ?? ''),
@@ -393,6 +460,49 @@ export function AdminContestConsolePage() {
       message.error(error instanceof Error ? error.message : '移除参赛者失败');
     } finally {
       setRemovingUserId(null);
+    }
+  };
+
+  const addTeamRegistration = async () => {
+    const raw = teamIdentifier.trim();
+    if (raw === '') {
+      message.error('请输入团队 ID 或团队名称');
+      return;
+    }
+    const known = findTeamByIdOrName(knownTeams, raw);
+    // 未知的纯数字直接交给后端校验；未知名称无法解析（后端没有全量团队搜索接口）。
+    const teamId = known?.id ?? (/^\d+$/.test(raw) ? Number(raw) : null);
+    if (teamId === null) {
+      message.error('未找到该团队；请检查团队名称，或直接输入团队 ID');
+      return;
+    }
+    setAddingTeam(true);
+    try {
+      await apiPost<null>(`/api/admin/contests/${contestId}/teams`, { teamId });
+      message.success('团队已报名');
+      setTeamIdentifier('');
+      void queryClient.invalidateQueries({ queryKey: ['admin-contest-teams', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['contest-teams', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['team-ranking', contestId] });
+    } catch (error) {
+      message.error(describeTeamRegistrationError(error));
+    } finally {
+      setAddingTeam(false);
+    }
+  };
+
+  const removeTeamRegistration = async (teamId: number) => {
+    setRemovingTeamId(teamId);
+    try {
+      await apiDelete<null>(`/api/admin/contests/${contestId}/teams/${teamId}`);
+      message.success('团队报名已移除');
+      void queryClient.invalidateQueries({ queryKey: ['admin-contest-teams', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['contest-teams', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['team-ranking', contestId] });
+    } catch (error) {
+      message.error(describeTeamRegistrationError(error));
+    } finally {
+      setRemovingTeamId(null);
     }
   };
 
@@ -753,6 +863,54 @@ export function AdminContestConsolePage() {
     },
   ];
 
+  const teamRegistrationColumns: TableColumnsType<TeamRegistration> = [
+    {
+      title: '团队',
+      dataIndex: 'name',
+      width: 220,
+      render: (value: string, row) => (
+        <span>
+          {value}
+          <span className="muted mono"> #{row.teamId}</span>
+        </span>
+      ),
+    },
+    {
+      title: '成员',
+      width: 320,
+      render: (_value, row) =>
+        row.members.length === 0 ? (
+          <span className="muted">暂无成员</span>
+        ) : (
+          <span>{row.members.map((member) => member.realName ?? member.username).join('、')}</span>
+        ),
+    },
+    {
+      title: '报名时间',
+      dataIndex: 'registeredAt',
+      width: 170,
+      render: (value: number) => <span className="mono">{formatDateTime(value)}</span>,
+    },
+    {
+      title: '',
+      width: 90,
+      align: 'center',
+      render: (_value, row) => (
+        <Popconfirm
+          title={`移除团队 ${row.name} 的报名？`}
+          description="已提交的代码仍保留原团队归属，但该团队不再参与团队榜。"
+          okText="移除"
+          cancelText="取消"
+          onConfirm={() => void removeTeamRegistration(row.teamId)}
+        >
+          <Button size="small" danger loading={removingTeamId === row.teamId}>
+            移除
+          </Button>
+        </Popconfirm>
+      ),
+    },
+  ];
+
   const lockColumns: TableColumnsType<ContestLockRecord> = [
     {
       title: '选手',
@@ -985,6 +1143,8 @@ export function AdminContestConsolePage() {
 
   const status = contest.status;
   const statusColor = STATUS_COLOR[status] ?? 'default';
+  const currentTeamMode = resolveTeamMode(contest);
+  const teamRegistrationEnabled = currentTeamMode !== 'individual';
 
   return (
     <div>
@@ -1000,6 +1160,9 @@ export function AdminContestConsolePage() {
             <Tag className="mono">#{contest.id}</Tag>
             <Tag color={statusColor}>{contestStatusLabel(status)}</Tag>
             <Tag color="blue">{contestModeLabel(contest.mode)}</Tag>
+            <Tag color={teamRegistrationEnabled ? 'purple' : 'default'}>
+              {teamModeLabel(currentTeamMode)}
+            </Tag>
             {archived ? <Tag color="red">已归档 · 只读</Tag> : null}
             {officialFrozen ? (
               <Tag color="gold">官方分冻结至 {officialFrozenText}</Tag>
@@ -1127,6 +1290,11 @@ export function AdminContestConsolePage() {
               </Col>
             </Row>
             <Row gutter={12}>
+              <Col span={8}>
+                <Form.Item label="报名模式" name="teamMode" rules={[{ required: true }]}>
+                  <Select<TeamMode> options={TEAM_MODE_OPTIONS} />
+                </Form.Item>
+              </Col>
               <Col span={8}>
                 <Form.Item label="封榜时间（可空）" name="freezeAt">
                   <Input type="datetime-local" />
@@ -1441,6 +1609,64 @@ export function AdminContestConsolePage() {
             pagination={false}
             locale={{ emptyText: '还没有参赛者' }}
           />
+        </Card>
+
+        <Card
+          className="oij-card"
+          title="团队报名"
+          extra={<span className="muted">共 {teamRegistrations.length} 支</span>}
+        >
+          <div className="stack">
+            {!teamRegistrationEnabled ? (
+              <Alert
+                type="info"
+                showIcon
+                message="当前比赛为个人赛，未开放团队报名。"
+                description="在“基本信息”中把报名模式改为“团队赛”或“个人/团队均可”后即可添加团队。"
+              />
+            ) : null}
+            <Space wrap>
+              <Input
+                placeholder="团队 ID 或团队名称"
+                value={teamIdentifier}
+                disabled={!teamRegistrationEnabled}
+                onChange={(event) => setTeamIdentifier(event.target.value)}
+                onPressEnter={() => void addTeamRegistration()}
+                style={{ width: 280 }}
+              />
+              <Button
+                type="primary"
+                loading={addingTeam}
+                disabled={!teamRegistrationEnabled || teamIdentifier.trim() === ''}
+                onClick={() => void addTeamRegistration()}
+              >
+                添加团队
+              </Button>
+              <span className="muted">
+                支持精确团队名；不在当前可见团队列表中的团队请直接输入团队 ID。
+              </span>
+            </Space>
+            {contestTeamsQuery.isPending ? (
+              <div className="inline-loading">
+                <Spin />
+              </div>
+            ) : contestTeamsQuery.isError ? (
+              <ErrorResult
+                error={contestTeamsQuery.error}
+                onRetry={() => void contestTeamsQuery.refetch()}
+              />
+            ) : (
+              <Table<TeamRegistration>
+                className="oij-table"
+                rowKey="teamId"
+                size="small"
+                columns={teamRegistrationColumns}
+                dataSource={teamRegistrations}
+                pagination={false}
+                locale={{ emptyText: '还没有团队报名' }}
+              />
+            )}
+          </div>
         </Card>
 
         <Card

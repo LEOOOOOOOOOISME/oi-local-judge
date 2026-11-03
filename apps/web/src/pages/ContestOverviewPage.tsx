@@ -1,13 +1,25 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Empty, Result, Space, Spin, Tabs, Tag } from 'antd';
+import {
+  App,
+  Button,
+  Card,
+  Empty,
+  Result,
+  Space,
+  Spin,
+  Tabs,
+  Tag,
+} from 'antd';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { apiGet } from '../api/client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, apiGet, apiPost } from '../api/client';
 import type {
   Contest,
   ContestDetail,
   ProblemSummary,
   Submission,
+  TeamRegistration,
+  TeamSummary,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ContestAnnouncements } from '../components/ContestAnnouncements';
@@ -21,6 +33,11 @@ import { SubmissionTable } from '../components/SubmissionTable';
 import { useNow } from '../hooks/useNow';
 import { formatDateTime } from '../utils/format';
 import { fetchOfficialRanking } from '../utils/officialRanking';
+import {
+  captainTeams,
+  resolveTeamMode,
+  teamModeLabel,
+} from '../utils/teamContest';
 import {
   CONTEST_PHASE_LABEL,
   contestModeLabel,
@@ -42,7 +59,10 @@ export function ContestOverviewPage() {
   const validId = Number.isInteger(contestId) && contestId > 0;
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
   const now = useNow(1000);
+  const [registeringTeamId, setRegisteringTeamId] = useState<number | null>(null);
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(
     searchParams.get('tab') === 'clarifications' ? 'clarifications' : 'overview',
@@ -97,8 +117,59 @@ export function ContestOverviewPage() {
     enabled: validId && Boolean(user),
   });
 
-  const contest =
-    detail?.contest ?? contestsQuery.data?.find((item) => item.id === contestId) ?? null;
+  const contestSource =
+    detail?.contest ??
+    contestsQuery.data?.find((item) => item.id === contestId) ??
+    null;
+  const teamMode = resolveTeamMode(contestSource);
+  const teamEnabled = teamMode !== 'individual';
+  const isManager = user?.role === 'admin' || user?.role === 'contestmanager';
+
+  const myTeamsQuery = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => apiGet<TeamSummary[]>('/api/teams'),
+    enabled: validId && Boolean(user) && teamEnabled,
+    staleTime: 15_000,
+  });
+  const contestTeamsQuery = useQuery({
+    queryKey: ['contest-teams', contestId],
+    queryFn: () => apiGet<TeamRegistration[]>(`/api/contests/${contestId}/teams`),
+    enabled: validId && Boolean(user) && teamEnabled,
+    staleTime: 10_000,
+    retry: false,
+  });
+
+  const myCaptainTeams = useMemo(
+    () => captainTeams(myTeamsQuery.data ?? []),
+    [myTeamsQuery.data],
+  );
+  const registeredTeamIds = useMemo(
+    () => new Set((contestTeamsQuery.data ?? []).map((team) => team.teamId)),
+    [contestTeamsQuery.data],
+  );
+
+  const registerTeam = async (teamId: number) => {
+    setRegisteringTeamId(teamId);
+    try {
+      await apiPost<null>(`/api/contests/${contestId}/teams`, { teamId });
+      message.success('团队报名成功');
+      void queryClient.invalidateQueries({ queryKey: ['contest-teams', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['team-ranking', contestId] });
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'TEAM_ALREADY_REGISTERED') {
+        message.warning('该团队已经报名本场比赛');
+        void queryClient.invalidateQueries({ queryKey: ['contest-teams', contestId] });
+      } else if (error instanceof ApiError && error.code === 'TEAM_MEMBER_CONFLICT') {
+        message.error(error.message);
+      } else {
+        message.error(error instanceof Error ? error.message : '团队报名失败');
+      }
+    } finally {
+      setRegisteringTeamId(null);
+    }
+  };
+
+  const contest = contestSource;
   // 正式榜：rows 用于 top3 / 我的排名，problems 用于题目顺序与题号。
   const official = rankingQuery.data;
   const rows = official?.rows ?? [];
@@ -232,6 +303,7 @@ export function ContestOverviewPage() {
         tags={
           <>
             <Tag color="blue">{contestModeLabel(contest.mode)}</Tag>
+            {teamEnabled ? <Tag color="purple">{teamModeLabel(teamMode)}</Tag> : null}
             <Tag color={PHASE_COLOR[phase]}>{CONTEST_PHASE_LABEL[phase]}</Tag>
             {contest.freeze_at !== null ? <Tag>已设置封榜</Tag> : null}
           </>
@@ -243,7 +315,12 @@ export function ContestOverviewPage() {
           </span>
         }
         extra={
-          <Space>
+          <Space wrap>
+            {teamEnabled ? (
+              <Link to={`${contestPath}/ranking?view=team`}>
+                <Button>团队榜</Button>
+              </Link>
+            ) : null}
             <Link to={`${contestPath}/screen`} target="_blank" rel="noreferrer">
               <Button>大屏</Button>
             </Link>
@@ -334,6 +411,9 @@ export function ContestOverviewPage() {
             <MetaList
               items={[
                 { label: '赛制', value: contestModeLabel(contest.mode) },
+                ...(teamEnabled
+                  ? [{ label: '报名模式', value: teamModeLabel(teamMode) }]
+                  : []),
                 { label: '开始', value: formatDateTime(contest.start_at) },
                 { label: '结束', value: formatDateTime(contest.end_at) },
                 {
@@ -345,6 +425,104 @@ export function ContestOverviewPage() {
               ]}
             />
           </Card>
+
+          {teamEnabled ? (
+            <Card
+              className="oij-card"
+              title="团队报名"
+              size="small"
+              extra={<Link to={`${contestPath}/ranking?view=team`}>团队榜</Link>}
+            >
+              {!user ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={<Link to={loginHref}>登录后报名团队</Link>}
+                />
+              ) : (
+                <div className="stack">
+                  {myTeamsQuery.isPending ? (
+                    <div className="inline-loading">
+                      <Spin />
+                    </div>
+                  ) : myCaptainTeams.length === 0 ? (
+                    <div className="muted">
+                      只有队长可以为本团队报名；管理员可以在管理控制台代报名。
+                    </div>
+                  ) : (
+                    <div className="stack">
+                      {myCaptainTeams.map((team) => {
+                        const registered = registeredTeamIds.has(team.id);
+                        return (
+                          <Space key={team.id} wrap>
+                            <span>{team.name}</span>
+                            <span className="muted">{team.memberCount} 人</span>
+                            {registered ? (
+                              <Tag color="green">已报名</Tag>
+                            ) : (
+                              <Button
+                                size="small"
+                                type="primary"
+                                loading={registeringTeamId === team.id}
+                                onClick={() => void registerTeam(team.id)}
+                              >
+                                报名
+                              </Button>
+                            )}
+                          </Space>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {isManager ? (
+                    <Link to={`/admin/contests/${contest.id}`}>
+                      <Button size="small" block>
+                        管理员代报名 / 移除团队
+                      </Button>
+                    </Link>
+                  ) : null}
+
+                  <div className="muted">已报名团队</div>
+                  {contestTeamsQuery.isPending ? (
+                    <div className="inline-loading">
+                      <Spin />
+                    </div>
+                  ) : contestTeamsQuery.isError ? (
+                    contestTeamsQuery.error instanceof ApiError &&
+                    contestTeamsQuery.error.status === 403 ? (
+                      <div className="muted">
+                        仅已报名团队成员与管理员可查看已报名团队。
+                      </div>
+                    ) : (
+                      <div className="side-error">
+                        <span className="muted">团队报名列表加载失败</span>
+                        <Button
+                          size="small"
+                          onClick={() => void contestTeamsQuery.refetch()}
+                        >
+                          重试
+                        </Button>
+                      </div>
+                    )
+                  ) : (contestTeamsQuery.data ?? []).length === 0 ? (
+                    <div className="muted">还没有团队报名</div>
+                  ) : (
+                    <div className="stack">
+                      {(contestTeamsQuery.data ?? []).map((team) => (
+                        <Space key={team.teamId} wrap>
+                          <span>{team.name}</span>
+                          <span className="muted">{team.members.length} 人</span>
+                          <span className="muted">
+                            {formatDateTime(team.registeredAt)}
+                          </span>
+                        </Space>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          ) : null}
 
           <Card
             className="oij-card"

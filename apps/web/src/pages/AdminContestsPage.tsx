@@ -22,10 +22,12 @@ import type {
   AdminUser,
   Contest,
   CreateContestRequest,
+  TeamMode,
 } from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { formatDateTime } from '../utils/format';
+import { resolveTeamMode, TEAM_MODE_OPTIONS, teamModeLabel } from '../utils/teamContest';
 import {
   contestModeLabel,
   contestStatusLabel,
@@ -41,6 +43,7 @@ import '../styles/contest-admin.css';
 interface CreateContestFormValues {
   name: string;
   mode: string;
+  teamMode: TeamMode;
   startAt: string;
   endAt: string;
   freezeAt?: string;
@@ -95,6 +98,7 @@ export function AdminContestsPage() {
       const payload: CreateContestRequest = {
         name: values.name.trim(),
         mode: values.mode,
+        teamMode: values.teamMode,
         startAt,
         endAt,
         ...(freezeAt !== null ? { freezeAt } : {}),
@@ -120,6 +124,7 @@ export function AdminContestsPage() {
     form.setFieldsValue({
       name: '',
       mode: 'oi',
+      teamMode: 'individual',
       startAt: toLocalDateTimeInput(times.startAt),
       endAt: toLocalDateTimeInput(times.endAt),
       freezeAt: '',
@@ -159,6 +164,15 @@ export function AdminContestsPage() {
       dataIndex: 'mode',
       width: 80,
       render: (value: string) => contestModeLabel(value),
+    },
+    {
+      title: '报名模式',
+      width: 130,
+      render: (_value, record) => (
+        <Tag color={resolveTeamMode(record) === 'individual' ? 'default' : 'purple'}>
+          {teamModeLabel(resolveTeamMode(record))}
+        </Tag>
+      ),
     },
     {
       title: '状态',
@@ -280,6 +294,13 @@ export function AdminContestsPage() {
               </Form.Item>
             </Col>
             <Col span={8}>
+              <Form.Item label="报名模式" name="teamMode" rules={[{ required: true }]}>
+                <Select<TeamMode> options={TEAM_MODE_OPTIONS} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
               <Form.Item
                 label="开始时间"
                 name="startAt"
@@ -288,7 +309,7 @@ export function AdminContestsPage() {
                 <Input type="datetime-local" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item
                 label="结束时间"
                 name="endAt"
