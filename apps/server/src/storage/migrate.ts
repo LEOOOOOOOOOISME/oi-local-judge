@@ -171,6 +171,21 @@ CREATE TABLE IF NOT EXISTS audit_logs(
   ip TEXT, created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(id DESC);
+CREATE TABLE IF NOT EXISTS teams(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  owner_id INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS team_members(
+  team_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  joined_at INTEGER NOT NULL,
+  PRIMARY KEY(team_id, user_id),
+  FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
 `;
 
 export function migrate(db: DatabaseSync): void {
