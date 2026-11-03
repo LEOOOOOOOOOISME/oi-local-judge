@@ -82,11 +82,14 @@ node release/oi-local-judge-<version>-win-x64/resources/app/apps/server/dist/cli
 2. `msys2/setup-msys2@v2` 安装 `mingw-w64-x86_64-gcc`，把 MSYS2 的
    `mingw64\bin` 加入 `PATH` 并设置 `OIJ_GXX`，保证 `g++` 可用。
 3. `npm run build:native` 编译 `ojrunner.exe` / `ojinteract.exe`。
-4. 先执行一次 `npx tsc -p packages/shared/tsconfig.json`：隔离构建的临时
+4. 执行 `node node_modules/electron/install.js` 下载 Electron 运行时：Electron
+   45 的 npm 包不再提供 `postinstall`，`npm ci` 不会生成
+   `node_modules/electron/dist`，而便携构建需要复制它。
+5. 先执行一次 `npx tsc -p packages/shared/tsconfig.json`：隔离构建的临时
    worktree 通过 junction 复用 checkout 的 `node_modules`，工作区链接
    `node_modules/@oij/shared` 指向 checkout，需要它已有 `dist`。
-5. `npm run build:release` 生成便携目录和 ZIP。
-6. 安装 `electron-builder@24.13.3`，以 `--prepackaged` 指向便携目录
+6. `npm run build:release` 生成便携目录和 ZIP。
+7. 安装 `electron-builder@24.13.3`，以 `--prepackaged` 指向便携目录
    （`release/oi-local-judge-<version>-win-x64/`，其中已含 `OiJudge.exe` 与
    `resources/app/`）生成 NSIS 安装器；配置见仓库根目录
    `electron-builder.yml`。
