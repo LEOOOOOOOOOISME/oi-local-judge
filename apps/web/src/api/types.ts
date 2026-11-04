@@ -1578,3 +1578,129 @@ export interface TeamContestAwards {
   counts: AwardCounts;
   scope: 'team';
 }
+
+/** Training Plans：训练计划（班级/团队共用的 group）。 */
+export type TrainingPlanGroupKind = 'team' | 'class';
+
+/** 单个训练题目的完成状态（由后端按提交与目标分计算）。 */
+export type TrainingPlanItemStatus = 'completed' | 'pending' | 'overdue';
+
+export interface TrainingPlanProgressSummary {
+  itemCount: number;
+  completedCount: number;
+  lateCount: number;
+  overdueCount: number;
+  allCompleted: boolean;
+}
+
+/** GET /api/training-plans/:id 返回的题目。 */
+export interface TrainingPlanItem {
+  id: number;
+  problemId: number;
+  ordinal: number;
+  targetScore: number;
+  dueAt: number | null;
+  createdAt: number;
+  title: string;
+  type: ProblemType;
+  difficulty: number | null;
+  tags: string[];
+  timeMs: number;
+  memoryMb: number;
+}
+
+/** 当前用户（或成员）在某道训练题上的进度。 */
+export interface TrainingPlanItemProgress {
+  itemId: number;
+  problemId: number;
+  ordinal: number;
+  targetScore: number;
+  dueAt: number | null;
+  bestScore: number | null;
+  accepted: boolean;
+  completed: boolean;
+  completedAt: number | null;
+  late: boolean;
+  status: TrainingPlanItemStatus;
+}
+
+/** GET /api/training-plans 列表项。 */
+export interface TrainingPlanSummary {
+  id: number;
+  groupId: number;
+  groupName: string;
+  groupKind: TrainingPlanGroupKind;
+  title: string;
+  description: string;
+  startsAt: number | null;
+  endsAt: number | null;
+  createdBy: number;
+  createdAt: number;
+  updatedAt: number;
+  itemCount: number;
+  canManage: boolean;
+  myProgress: TrainingPlanProgressSummary;
+}
+
+/** 管理者可见的成员进度；items 与计划题目一一对应。 */
+export interface TrainingPlanMemberProgress extends TrainingPlanProgressSummary {
+  userId: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  role: string;
+  items: TrainingPlanItemProgress[];
+}
+
+/** GET /api/training-plans/:id；memberProgress 仅管理者可见。 */
+export interface TrainingPlanDetail extends TrainingPlanSummary {
+  items: TrainingPlanItem[];
+  myItems: TrainingPlanItemProgress[];
+  memberProgress?: TrainingPlanMemberProgress[];
+}
+
+/** GET /api/training-plans/:id/progress（管理者）。 */
+export interface TrainingPlanProgress {
+  planId: number;
+  title: string;
+  items: TrainingPlanItem[];
+  members: TrainingPlanMemberProgress[];
+}
+
+export interface CreateTrainingPlanItemRequest {
+  problemId: number;
+  /** 省略时后端取题目满分。 */
+  targetScore?: number;
+  dueAt?: number | null;
+}
+
+export interface CreateTrainingPlanRequest {
+  groupId: number;
+  title: string;
+  description?: string;
+  startsAt?: number | null;
+  endsAt?: number | null;
+  items?: CreateTrainingPlanItemRequest[];
+}
+
+export interface CreateTrainingPlanResult {
+  id: number;
+}
+
+export interface UpdateTrainingPlanRequest {
+  title?: string;
+  description?: string;
+  startsAt?: number | null;
+  endsAt?: number | null;
+}
+
+export interface AddTrainingPlanItemRequest {
+  problemId: number;
+  /** 省略时后端取题目满分。 */
+  targetScore?: number;
+  dueAt?: number | null;
+}
+
+export interface ReorderTrainingPlanItemsRequest {
+  itemIds: number[];
+}
