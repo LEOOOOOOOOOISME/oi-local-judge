@@ -6,6 +6,7 @@ import {
   type ContestRow,
 } from '../storage/repos/contests.js';
 import { getOfficialRanking } from './official-ranking.js';
+import { getTeamRanking } from './team-ranking.js';
 
 export interface AwardConfig {
   goldPercent: number;
@@ -15,12 +16,27 @@ export interface AwardConfig {
 
 export type AwardLevel = 'gold' | 'silver' | 'bronze';
 
+/** 奖项口径：个人奖按正式榜，团队奖按团队榜。 */
+export type AwardScope = 'individual' | 'team';
+
 export interface AwardRow {
   rank: number;
   userId: number;
   username: string;
   realName: string | null;
   className: string | null;
+  totalScore: number;
+  solved: number;
+  award: AwardLevel | null;
+  certificateNo: string;
+}
+
+/** 团队奖一行：团队榜中的名次与团队信息。 */
+export interface TeamAwardRow {
+  rank: number;
+  teamId: number;
+  teamName: string;
+  memberCount: number;
   totalScore: number;
   solved: number;
   award: AwardLevel | null;
@@ -39,6 +55,15 @@ export interface ContestAwards {
   config: AwardConfig;
   rows: AwardRow[];
   counts: AwardCounts;
+  scope: 'individual';
+}
+
+export interface TeamContestAwards {
+  contest: ContestRow;
+  config: AwardConfig;
+  rows: TeamAwardRow[];
+  counts: AwardCounts;
+  scope: 'team';
 }
 
 export const DEFAULT_AWARD_CONFIG: AwardConfig = {
@@ -59,6 +84,19 @@ export class AwardConfigError extends Error {
     this.name = 'AwardConfigError';
   }
 }
+
+/** 请求了比赛不支持的口径（例如个人赛请求团队奖）。 */
+export class AwardScopeError extends Error {
+  constructor(
+    public readonly code: string,
+    public readonly status: number,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AwardScopeError';
+  }
+}
+
 
 function isPercent(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
@@ -136,6 +174,21 @@ export function certificateNo(contestId: number, userId: number): string {
   return `C${contestId}-${userId}`;
 }
 
+/** Team certificates use their own prefix so personal and team numbers never collide. */
+export function teamCertificateNo(contestId: number, teamId: number): string {
+  return `T${contestId}-${teamId}`;
+}
+
+function assignAward(
+  rank: number,
+  limits: { gold: number; silver: number; bronze: number },
+): AwardLevel | null {
+  if (rank <= limits.gold) return 'gold';
+  if (rank <= limits.silver) return 'silver';
+  if (rank <= limits.bronze) return 'bronze';
+  return null;
+}
+
 /**
  * Builds the awards table from the official (visible) ranking. Hidden
  * participants are already excluded by getOfficialRanking. Rows keep their
@@ -152,20 +205,15 @@ export async function getContestAwards(
 
   const config = getAwardConfig(ranking.contest);
   const thresholds = computeAwardCounts(ranking.rows.length, config);
-  const goldLimit = thresholds.gold;
-  const silverLimit = thresholds.gold + thresholds.silver;
-  const bronzeLimit = thresholds.gold + thresholds.silver + thresholds.bronze;
+  const limits = {
+    gold: thresholds.gold,
+    silver: thresholds.gold + thresholds.silver,
+    bronze: thresholds.gold + thresholds.silver + thresholds.bronze,
+  };
 
   const counts: AwardCounts = { gold: 0, silver: 0, bronze: 0, total: 0 };
   const rows: AwardRow[] = ranking.rows.map((row) => {
-    let award: AwardLevel | null = null;
-    if (row.rank <= goldLimit) {
-      award = 'gold';
-    } else if (row.rank <= silverLimit) {
-      award = 'silver';
-    } else if (row.rank <= bronzeLimit) {
-      award = 'bronze';
-    }
+    const award = assignAward(row.rank, limits);
     if (award) {
       counts[award] += 1;
       counts.total += 1;
@@ -183,7 +231,57 @@ export async function getContestAwards(
     };
   });
 
-  return { contest: ranking.contest, config, rows, counts };
+  return { contest: ranking.contest, config, rows, counts, scope: 'individual' };
+}
+
+/**
+ * Builds team awards from the team ranking. Only teams registered for the
+ * contest appear (that is all `getTeamRanking` returns). Awards use the same
+ * percentage config as individual awards, and team certificates are prefixed
+ * with `T` to stay distinct from personal certificate numbers.
+ */
+export function getTeamContestAwards(
+  db: DatabaseSync,
+  contestId: number,
+): TeamContestAwards | null {
+  const ranking = getTeamRanking(db, contestId);
+  if (!ranking) return null;
+  if (ranking.contest.team_mode === 'individual') {
+    throw new AwardScopeError(
+      'SCOPE_NOT_TEAM',
+      400,
+      'this contest does not accept teams, so it has no team awards',
+    );
+  }
+
+  const config = getAwardConfig(ranking.contest);
+  const thresholds = computeAwardCounts(ranking.rows.length, config);
+  const limits = {
+    gold: thresholds.gold,
+    silver: thresholds.gold + thresholds.silver,
+    bronze: thresholds.gold + thresholds.silver + thresholds.bronze,
+  };
+
+  const counts: AwardCounts = { gold: 0, silver: 0, bronze: 0, total: 0 };
+  const rows: TeamAwardRow[] = ranking.rows.map((row) => {
+    const award = assignAward(row.rank, limits);
+    if (award) {
+      counts[award] += 1;
+      counts.total += 1;
+    }
+    return {
+      rank: row.rank,
+      teamId: row.teamId,
+      teamName: row.teamName,
+      memberCount: row.memberCount,
+      totalScore: row.totalScore,
+      solved: row.solved,
+      award,
+      certificateNo: teamCertificateNo(contestId, row.teamId),
+    };
+  });
+
+  return { contest: ranking.contest, config, rows, counts, scope: 'team' };
 }
 
 export interface SetAwardConfigOptions {

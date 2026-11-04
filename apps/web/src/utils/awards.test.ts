@@ -1,12 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import type { AwardConfig, AwardRow } from '../api/types';
+import type { AwardConfig, AwardRow, TeamAwardRow } from '../api/types';
 import {
   awardColor,
   awardLabel,
   buildAwardsCsv,
+  buildTeamAwardsCsv,
   computeAwardCounts,
   filterAwardRows,
+  filterTeamAwardRows,
   formatCertificateDate,
+  isTeamAwardRow,
   isValidAwardConfig,
   sanitizeFileName,
 } from './awards';
@@ -220,5 +223,95 @@ describe('formatCertificateDate', () => {
     expect(formatCertificateDate(timestamp)).toBe('2026 年 11 月 3 日');
     expect(formatCertificateDate(null, timestamp)).toBe('2026 年 11 月 3 日');
     expect(formatCertificateDate(Number.NaN)).toBe('—');
+  });
+});
+
+function teamRow(overrides: Partial<TeamAwardRow>): TeamAwardRow {
+  return {
+    rank: 1,
+    teamId: 3,
+    teamName: 'Alpha',
+    memberCount: 2,
+    totalScore: 200,
+    solved: 1,
+    award: 'gold',
+    certificateNo: 'T7-3',
+    ...overrides,
+  };
+}
+
+describe('isTeamAwardRow', () => {
+  it('区分团队奖行与个人奖行', () => {
+    expect(isTeamAwardRow(teamRow({}))).toBe(true);
+    expect(isTeamAwardRow(row({}))).toBe(false);
+  });
+});
+
+describe('filterTeamAwardRows', () => {
+  const rows = [
+    teamRow({ rank: 1, teamId: 3, teamName: 'Alpha', award: 'gold' }),
+    teamRow({
+      rank: 2,
+      teamId: 4,
+      teamName: 'Beta 战队',
+      award: 'silver',
+      certificateNo: 'T7-4',
+    }),
+    teamRow({
+      rank: 3,
+      teamId: 5,
+      teamName: 'Gamma',
+      award: null,
+      certificateNo: 'T7-5',
+    }),
+  ];
+
+  it('默认返回全部行且不修改原数组', () => {
+    const snapshot = [...rows];
+    expect(filterTeamAwardRows(rows, {})).toHaveLength(3);
+    expect(rows).toEqual(snapshot);
+  });
+
+  it('按奖项筛选，none 表示未获奖', () => {
+    expect(filterTeamAwardRows(rows, { award: 'gold' }).map((item) => item.teamId)).toEqual([3]);
+    expect(filterTeamAwardRows(rows, { award: 'none' }).map((item) => item.teamId)).toEqual([5]);
+    expect(filterTeamAwardRows(rows, { award: 'all' })).toHaveLength(3);
+  });
+
+  it('按关键字匹配团队名与证书编号', () => {
+    expect(filterTeamAwardRows(rows, { keyword: 'beta' }).map((item) => item.teamId)).toEqual([4]);
+    expect(filterTeamAwardRows(rows, { keyword: 'T7-5' }).map((item) => item.teamId)).toEqual([5]);
+    expect(filterTeamAwardRows(rows, { keyword: '   ' })).toHaveLength(3);
+  });
+});
+
+describe('buildTeamAwardsCsv', () => {
+  it('包含团队列、成员数、AC 与证书编号，并带 UTF-8 BOM', () => {
+    const csv = buildTeamAwardsCsv([
+      teamRow({ teamName: 'Alpha', memberCount: 3, totalScore: 260, solved: 2 }),
+    ]);
+    expect(csv.startsWith('\uFEFF')).toBe(true);
+    const lines = csv.replace('\uFEFF', '').trimEnd().split('\r\n');
+    expect(lines[0]).toBe('名次,团队,成员数,总分,AC,奖项,证书编号');
+    expect(lines[1]).toBe('1,Alpha,3,260,2,金牌,T7-3');
+  });
+
+  it('转义逗号、引号与换行，null 奖项输出空字段', () => {
+    const csv = buildTeamAwardsCsv([
+      teamRow({
+        teamName: 'A,B',
+        memberCount: 2,
+        award: null,
+        certificateNo: 'T7-9',
+      }),
+    ]);
+    const body = csv.replace('\uFEFF', '');
+    expect(body).toContain('"A,B"');
+    expect(body).toContain(',未获奖,T7-9');
+  });
+
+  it('空列表只输出表头', () => {
+    const csv = buildTeamAwardsCsv([]).replace('\uFEFF', '').trimEnd();
+    expect(csv).toBe('名次,团队,成员数,总分,AC,奖项,证书编号');
   });
 });

@@ -10,9 +10,12 @@ import {
   computeAwardCounts,
   getAwardConfig,
   getContestAwards,
+  getTeamContestAwards,
   normalizeAwardConfig,
   setAwardConfig,
+  teamCertificateNo,
 } from '../src/services/awards.js';
+import { insertContestTeamRegistration } from '../src/storage/repos/contest-teams.js';
 import {
   addParticipant,
   createContest,
@@ -21,6 +24,8 @@ import {
 } from '../src/storage/repos/contests.js';
 import { upsertOfficialScore } from '../src/storage/repos/official-scores.js';
 import { createProblem } from '../src/storage/repos/problems.js';
+import { createSubmission } from '../src/storage/repos/submissions.js';
+import { insertTeam, insertTeamMember } from '../src/storage/repos/teams.js';
 import { createUser } from '../src/storage/repos/users.js';
 import { invalidateOfficialRanking } from '../src/services/official-ranking.js';
 import { migrate } from '../src/storage/migrate.js';
@@ -108,6 +113,101 @@ function makeScoredContest(
     db.prepare("UPDATE contests SET status = 'ended' WHERE id = ?").run(contestId);
   }
   return contestId;
+}
+
+interface TeamSpec {
+  name: string;
+  /** 队长在 `users` 中的下标。 */
+  ownerIndex: number;
+  /** 普通成员在 `users` 中的下标。 */
+  memberIndexes?: number[];
+  score: number;
+}
+
+interface ScoredTeamContest {
+  contestId: number;
+  teamIds: number[];
+}
+
+/** 写入一条已完成的团队赛提交。 */
+function addTeamSubmission(
+  contestId: number,
+  teamId: number,
+  userId: number,
+  score: number,
+  createdAt = 100,
+): void {
+  const submissionId = createSubmission(db, {
+    contestId,
+    problemId,
+    userId,
+    teamId,
+    language: 'cpp17',
+    sourcePath: 'x.cpp',
+    sourceHash: 'h',
+    createdAt,
+  });
+  db.prepare(
+    `UPDATE submissions
+       SET verdict = ?, score = ?, status = 'finished', phase = 'contest'
+     WHERE id = ?`,
+  ).run(score >= 100 ? 'AC' : 'WA', score, submissionId);
+}
+
+/**
+ * 创建一个团队赛比赛，按名次写入团队提交并登记团队。
+ * 只有登记过的团队会进入团队榜；提交通过 `submissions.team_id` 归属。
+ */
+function makeScoredTeamContest(
+  name: string,
+  teams: TeamSpec[],
+  options: { ended?: boolean } = {},
+): ScoredTeamContest {
+  const contestId = createContest(db, {
+    name,
+    mode: 'oi',
+    teamMode: 'team',
+    startAt: 1000,
+    endAt: 2000,
+    problemIds: [problemId],
+  });
+  const teamIds: number[] = [];
+  teams.forEach((team, index) => {
+    const teamName = `${name} ${team.name}`;
+    const teamId = insertTeam(db, {
+      name: teamName,
+      ownerId: users[team.ownerIndex],
+      createdAt: 1,
+    });
+    insertTeamMember(db, {
+      teamId,
+      userId: users[team.ownerIndex],
+      role: 'captain',
+      joinedAt: 1,
+    });
+    addParticipant(db, contestId, users[team.ownerIndex]);
+    for (const memberIndex of team.memberIndexes ?? []) {
+      insertTeamMember(db, {
+        teamId,
+        userId: users[memberIndex],
+        role: 'member',
+        joinedAt: 1,
+      });
+      addParticipant(db, contestId, users[memberIndex]);
+    }
+    insertContestTeamRegistration(db, {
+      contestId,
+      teamId,
+      registeredBy: null,
+      registeredAt: 1,
+    });
+    addTeamSubmission(contestId, teamId, users[team.ownerIndex], team.score, 100 + index);
+    teamIds.push(teamId);
+  });
+  if (options.ended !== false) {
+    db.prepare("UPDATE contests SET status = 'ended' WHERE id = ?").run(contestId);
+  }
+  return { contestId, teamIds };
 }
 
 describe('award config', () => {
@@ -320,6 +420,164 @@ describe('contest awards service', () => {
   });
 });
 
+describe('team contest awards service', () => {
+  it('awards team bands by team rank and attaches team certificate numbers', async () => {
+    const specs: TeamSpec[] = Array.from({ length: 10 }, (_, index) => ({
+      name: `Team ${index}`,
+      ownerIndex: index,
+      memberIndexes: index === 0 ? [10] : [],
+      score: 100 - index * 10,
+    }));
+    const { contestId, teamIds } = makeScoredTeamContest('Team default bands', specs);
+
+    const awards = (await getTeamContestAwards(db, contestId))!;
+    expect(awards.scope).toBe('team');
+    expect(awards.config).toEqual(DEFAULT_AWARD_CONFIG);
+    expect(awards.rows.map((row) => row.rank)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+    expect(awards.rows.map((row) => row.award)).toEqual([
+      'gold',
+      'silver',
+      'silver',
+      'bronze',
+      'bronze',
+      'bronze',
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(awards.counts).toEqual({ gold: 1, silver: 2, bronze: 3, total: 6 });
+    expect(awards.rows[0]).toMatchObject({
+      teamId: teamIds[0],
+      teamName: 'Team default bands Team 0',
+      memberCount: 2,
+      totalScore: 100,
+      solved: 1,
+    });
+    expect(awards.rows[0].certificateNo).toBe(teamCertificateNo(contestId, teamIds[0]!));
+    expect(awards.rows[0].certificateNo).toBe(`T${contestId}-${teamIds[0]}`);
+    expect(awards.rows.every((row) => row.certificateNo.startsWith(`T${contestId}-`))).toBe(true);
+  });
+
+  it('keeps the same award for tied team ranks', async () => {
+    const { contestId } = makeScoredTeamContest('Team ties', [
+      { name: 'Alpha', ownerIndex: 0, score: 100 },
+      { name: 'Beta', ownerIndex: 1, score: 90 },
+      { name: 'Gamma', ownerIndex: 2, score: 90 },
+      { name: 'Delta', ownerIndex: 3, score: 80 },
+      { name: 'Epsilon', ownerIndex: 4, score: 70 },
+    ]);
+
+    const awards = (await getTeamContestAwards(db, contestId))!;
+    expect(awards.rows.map((row) => row.rank)).toEqual([1, 2, 2, 4, 5]);
+    expect(awards.rows.map((row) => row.award)).toEqual([
+      'gold',
+      'silver',
+      'silver',
+      'bronze',
+      null,
+    ]);
+    expect(awards.counts).toEqual({ gold: 1, silver: 2, bronze: 1, total: 4 });
+  });
+
+  it('returns an empty team awards table when no team is registered', async () => {
+    const { contestId } = makeScoredTeamContest('Team empty', []);
+    const awards = (await getTeamContestAwards(db, contestId))!;
+    expect(awards.scope).toBe('team');
+    expect(awards.rows).toEqual([]);
+    expect(awards.counts).toEqual({ gold: 0, silver: 0, bronze: 0, total: 0 });
+  });
+
+  it('does not include teams that are not registered for the contest', async () => {
+    const contestId = createContest(db, {
+      name: 'Team unregistered',
+      mode: 'oi',
+      teamMode: 'team',
+      startAt: 1000,
+      endAt: 2000,
+      problemIds: [problemId],
+    });
+    const registered = insertTeam(db, { name: 'Team registered', ownerId: users[0], createdAt: 1 });
+    insertTeamMember(db, {
+      teamId: registered,
+      userId: users[0],
+      role: 'captain',
+      joinedAt: 1,
+    });
+    const unregistered = insertTeam(db, {
+      name: 'Team unregistered',
+      ownerId: users[1],
+      createdAt: 1,
+    });
+    insertTeamMember(db, {
+      teamId: unregistered,
+      userId: users[1],
+      role: 'captain',
+      joinedAt: 1,
+    });
+    insertContestTeamRegistration(db, {
+      contestId,
+      teamId: registered,
+      registeredBy: null,
+      registeredAt: 1,
+    });
+    addTeamSubmission(contestId, registered, users[0], 60);
+    addTeamSubmission(contestId, unregistered, users[1], 100, 200);
+
+    const awards = (await getTeamContestAwards(db, contestId))!;
+    expect(awards.rows.map((row) => row.teamId)).toEqual([registered]);
+    expect(awards.rows[0]).toMatchObject({ teamName: 'Team registered', totalScore: 60 });
+  });
+
+  it('keeps individual and team scopes isolated', async () => {
+    const { contestId, teamIds } = makeScoredTeamContest('Team scope isolation', [
+      { name: 'Alpha', ownerIndex: 0, score: 100 },
+      { name: 'Beta', ownerIndex: 1, score: 80 },
+    ]);
+    upsertOfficialScore(db, {
+      contestId,
+      userId: users[0],
+      problemId,
+      score: 100,
+      verdict: 'AC',
+      source: 'batch',
+      batchId: 1,
+    });
+    upsertOfficialScore(db, {
+      contestId,
+      userId: users[1],
+      problemId,
+      score: 80,
+      verdict: 'WA',
+      source: 'batch',
+      batchId: 1,
+    });
+    invalidateOfficialRanking(db, contestId);
+
+    const individual = (await getContestAwards(db, contestId, root))!;
+    expect(individual.scope).toBe('individual');
+    expect(individual.rows.map((row) => row.userId)).toEqual([users[0], users[1]]);
+    expect(individual.rows.some((row) => 'teamId' in row)).toBe(false);
+
+    const team = (await getTeamContestAwards(db, contestId))!;
+    expect(team.scope).toBe('team');
+    expect(team.rows.map((row) => row.teamId)).toEqual(teamIds);
+    expect(team.rows.some((row) => 'userId' in row)).toBe(false);
+  });
+
+  it('rejects the team scope for contests that do not accept teams', async () => {
+    const contestId = makeScoredContest('Team scope individual only', [100, 90]);
+    let error: unknown;
+    try {
+      getTeamContestAwards(db, contestId);
+    } catch (err) {
+      error = err;
+    }
+    expect(error).toMatchObject({ code: 'SCOPE_NOT_TEAM', status: 400 });
+    expect(await getTeamContestAwards(db, 999999)).toBeNull();
+  });
+});
+
 describe('awards HTTP routes', () => {
   it('gates public awards until the contest ends but lets managers preview', async () => {
     const contestId = makeScoredContest('Running gate', [100, 90], { ended: false });
@@ -437,5 +695,138 @@ describe('awards HTTP routes', () => {
       headers: { cookie: cookieFor(adminId) },
     });
     expect(res.statusCode).toBe(404);
+  });
+});
+
+describe('team awards HTTP routes', () => {
+  it('serves team awards for ended team contests and gates unfinished ones', async () => {
+    const { contestId, teamIds } = makeScoredTeamContest(
+      'Team HTTP running',
+      [
+        { name: 'Alpha', ownerIndex: 0, score: 100 },
+        { name: 'Beta', ownerIndex: 1, score: 80 },
+      ],
+      { ended: false },
+    );
+
+    const anonymous = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards?scope=team`,
+    });
+    expect(anonymous.statusCode).toBe(401);
+
+    const denied = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards?scope=team`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(denied.statusCode).toBe(403);
+    expect(denied.json()).toMatchObject({ error: { code: 'AWARDS_NOT_READY' } });
+
+    const preview = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards?scope=team`,
+      headers: { cookie: cookieFor(managerId) },
+    });
+    expect(preview.statusCode).toBe(200);
+    expect(preview.json()).toMatchObject({ data: { scope: 'team' } });
+
+    db.prepare("UPDATE contests SET status = 'ended' WHERE id = ?").run(contestId);
+    const visible = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards?scope=team`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(visible.statusCode).toBe(200);
+    const data = (
+      visible.json() as {
+        data: {
+          scope: string;
+          rows: Array<{ teamId: number; teamName: string; certificateNo: string }>;
+          counts: { total: number };
+        };
+      }
+    ).data;
+    expect(data.scope).toBe('team');
+    expect(data.rows.map((row) => row.teamId)).toEqual(teamIds);
+    expect(data.rows.map((row) => row.teamName)).toEqual([
+      'Team HTTP running Alpha',
+      'Team HTTP running Beta',
+    ]);
+    expect(data.rows[0]?.certificateNo).toBe(`T${contestId}-${teamIds[0]}`);
+    expect(data.counts.total).toBe(2);
+  });
+
+  it('defaults to individual scope and validates the scope parameter', async () => {
+    const { contestId } = makeScoredTeamContest('Team HTTP scope', [
+      { name: 'Alpha', ownerIndex: 0, score: 100 },
+    ]);
+
+    const byDefault = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(byDefault.statusCode).toBe(200);
+    expect(byDefault.json()).toMatchObject({ data: { scope: 'individual' } });
+
+    const explicitIndividual = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards?scope=individual`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(explicitIndividual.statusCode).toBe(200);
+    expect(explicitIndividual.json()).toMatchObject({ data: { scope: 'individual' } });
+
+    const team = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards?scope=team`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(team.statusCode).toBe(200);
+    expect(team.json()).toMatchObject({ data: { scope: 'team' } });
+
+    const adminTeam = await app.inject({
+      method: 'GET',
+      url: `/api/admin/contests/${contestId}/awards?scope=team`,
+      headers: { cookie: cookieFor(adminId) },
+    });
+    expect(adminTeam.statusCode).toBe(200);
+    expect(adminTeam.json()).toMatchObject({ data: { scope: 'team' } });
+
+    const invalid = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards?scope=squad`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toMatchObject({ error: { code: 'INVALID_SCOPE' } });
+  });
+
+  it('rejects team scope for a non-team contest', async () => {
+    const contestId = makeScoredContest('Team HTTP individual only', [100, 90]);
+
+    const publicRes = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards?scope=team`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(publicRes.statusCode).toBe(400);
+    expect(publicRes.json()).toMatchObject({ error: { code: 'SCOPE_NOT_TEAM' } });
+
+    const individualRes = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(individualRes.statusCode).toBe(200);
+
+    const adminRes = await app.inject({
+      method: 'GET',
+      url: `/api/admin/contests/${contestId}/awards?scope=team`,
+      headers: { cookie: cookieFor(adminId) },
+    });
+    expect(adminRes.statusCode).toBe(400);
+    expect(adminRes.json()).toMatchObject({ error: { code: 'SCOPE_NOT_TEAM' } });
   });
 });
