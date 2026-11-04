@@ -10,7 +10,7 @@ import {
   type ProblemSharePermission,
 } from '../storage/repos/problem-shares.js';
 import { getProblem, listAllProblems, type ProblemRow } from '../storage/repos/problems.js';
-import { getTeamMember, getTeamRow } from '../storage/repos/teams.js';
+import { getTeamMember, getTeamRow, type TeamRole } from '../storage/repos/teams.js';
 import { getUserById } from '../storage/repos/users.js';
 
 export type { ProblemGranteeType, ProblemSharePermission };
@@ -53,7 +53,7 @@ function ownershipTeamRole(
   db: DatabaseSync,
   problem: ProblemRow,
   userId: number,
-): 'captain' | 'member' | null {
+): TeamRole | null {
   if (problem.owner_type !== 'team' || problem.owner_id === null) return null;
   return getTeamMember(db, problem.owner_id, userId)?.role ?? null;
 }

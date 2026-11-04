@@ -196,6 +196,8 @@ CREATE TABLE IF NOT EXISTS teams(
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   owner_id INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'team',
+  allow_contest INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS team_members(
@@ -298,6 +300,8 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'contests', 'team_mode', "TEXT NOT NULL DEFAULT 'individual'");
   ensureColumn(db, 'submissions', 'team_id', 'INTEGER');
   ensureColumn(db, 'contest_hacks', 'team_id', 'INTEGER');
+  ensureColumn(db, 'teams', 'kind', "TEXT NOT NULL DEFAULT 'team'");
+  ensureColumn(db, 'teams', 'allow_contest', 'INTEGER NOT NULL DEFAULT 1');
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
     db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)').run(Date.now());

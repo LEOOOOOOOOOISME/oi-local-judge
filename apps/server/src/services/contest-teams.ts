@@ -95,13 +95,23 @@ export function registerTeamForContest(
   if (!team) {
     throw new ContestTeamError('TEAM_NOT_FOUND', 404, 'team not found');
   }
+  if (team.kind === 'class' && team.allow_contest !== 1) {
+    throw new ContestTeamError(
+      'CLASS_NOT_ALLOWED_IN_CONTEST',
+      409,
+      'this class is not allowed to participate in contests',
+    );
+  }
   if (!input.isAdmin) {
     const member = getTeamMember(db, input.teamId, input.actorId);
-    if (!member || member.role !== 'captain') {
+    const requiredRole = team.kind === 'class' ? 'coach' : 'captain';
+    if (!member || member.role !== requiredRole) {
       throw new ContestTeamError(
         'TEAM_FORBIDDEN',
         403,
-        'only the team captain or an admin can register the team',
+        team.kind === 'class'
+          ? 'only a class coach or an admin can register the class'
+          : 'only the team captain or an admin can register the team',
       );
     }
   }
@@ -148,7 +158,10 @@ export function registerTeamForContest(
     // same transaction. An existing participant row (individual import, pending
     // or rejected registration) is preserved untouched. New rows are tagged
     // `source = 'team'` so membership changes can revoke exactly those rows.
+    // A class only enrolls its students: coaches and assistants are staff, not
+    // contestants.
     for (const member of listTeamMembers(db, input.teamId)) {
+      if (team.kind === 'class' && member.role !== 'member') continue;
       addParticipantIfAbsent(db, input.contestId, member.userId, registeredAt, 'team');
     }
   });
