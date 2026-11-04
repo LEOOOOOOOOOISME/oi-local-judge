@@ -304,6 +304,8 @@ export function ContestRankingPage() {
   ];
 
   // ACM/CF-like 团队榜按过题数与罚时排序；OI/IOI 仍看每题最高分求和。
+  // CF-like 的 totalScore 含 Hack 分，额外展示；ACM 的 totalScore 等于过题数，
+  // 为避免重复不再展示。
   const teamScoreColumns: TableColumnsType<TeamRankingRow> = isAcm
     ? [
         {
@@ -320,6 +322,22 @@ export function ContestRankingPage() {
           align: 'right',
           render: (value: number) => <span className="mono">{value}</span>,
         },
+        ...(preset === 'cf-like'
+          ? [
+              {
+                title: '总分',
+                dataIndex: 'totalScore' as const,
+                width: 84,
+                align: 'right' as const,
+                render: (value: number | undefined) =>
+                  typeof value === 'number' ? (
+                    <strong className="rank-total">{value}</strong>
+                  ) : (
+                    <span className="muted">—</span>
+                  ),
+              },
+            ]
+          : []),
       ]
     : [
         {
@@ -395,7 +413,7 @@ export function ContestRankingPage() {
       }
       downloadCsv(
         `contest-${contestId}-team-ranking.csv`,
-        buildTeamRankingCsv(problems, teamRows, isAcm),
+        buildTeamRankingCsv(problems, teamRows, isAcm, preset === 'cf-like'),
       );
       message.success('团队榜 CSV 已导出');
       return;

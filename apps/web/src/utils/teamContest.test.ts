@@ -130,16 +130,16 @@ describe('buildTeamRankingCsv', () => {
     ];
     const csv = buildTeamRankingCsv(problems, rankingRows);
     const lines = csv.split('\r\n');
-    expect(lines[0]).toBe('排名,团队,成员数,总分,AC 数,A,B');
-    expect(lines[1]).toBe('1,Alpha,3,180,2,100,80');
-    expect(lines[2]).toBe('2,Gamma,1,100,1,100,0');
+    expect(lines[0]).toBe('排名,团队,成员数,总分,AC 数,Hack 分,A,B');
+    expect(lines[1]).toBe('1,Alpha,3,180,2,0,100,80');
+    expect(lines[2]).toBe('2,Gamma,1,100,1,0,100,0');
   });
 
   it('quotes team names containing commas', () => {
     const csv = buildTeamRankingCsv([], [
       { ...rankingRows[0], teamName: 'Alpha, Team' },
     ]);
-    expect(csv.split('\r\n')[1]).toBe('1,"Alpha, Team",3,180,2');
+    expect(csv.split('\r\n')[1]).toBe('1,"Alpha, Team",3,180,2,0');
   });
 
   it('exports ACM teams with solved count and penalty instead of total score', () => {
@@ -150,7 +150,28 @@ describe('buildTeamRankingCsv', () => {
       { ...rankingRows[0], totalScore: 2, solved: 2, penalty: 43 },
     ], true);
     const lines = csv.split('\r\n');
-    expect(lines[0]).toBe('排名,团队,成员数,AC 数,罚时,A');
-    expect(lines[1]).toBe('1,Alpha,3,2,43,100');
+    expect(lines[0]).toBe('排名,团队,成员数,AC 数,罚时,Hack 分,A');
+    expect(lines[1]).toBe('1,Alpha,3,2,43,0,100');
+  });
+
+  it('exports the CF-like team hack score', () => {
+    const problems: TeamRankingProblem[] = [
+      { id: 11, ordinal: 1, points: 100, title: 'A 题' },
+    ];
+    const csv = buildTeamRankingCsv(
+      problems,
+      [{ ...rankingRows[0], totalScore: 230, solved: 2, penalty: 43, hackScore: 50 }],
+      true,
+      true,
+    );
+    const lines = csv.split('\r\n');
+    expect(lines[0]).toBe('排名,团队,成员数,AC 数,罚时,Hack 分,A');
+    expect(lines[1]).toBe('1,Alpha,3,2,43,50,100');
+  });
+
+  it('keeps the hack column stable but zero for OI and ACM teams', () => {
+    const rows = [{ ...rankingRows[0], hackScore: 50 }];
+    expect(buildTeamRankingCsv([], rows).split('\r\n')[1]).toBe('1,Alpha,3,180,2,0');
+    expect(buildTeamRankingCsv([], rows, true).split('\r\n')[1]).toBe('1,Alpha,3,2,0,0');
   });
 });
