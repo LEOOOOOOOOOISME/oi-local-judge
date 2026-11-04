@@ -146,6 +146,19 @@ export function listRegisteredTeamIdsForUser(
   ).map((row) => row.team_id);
 }
 
+/** Contests the team is currently registered for, oldest registration first. */
+export function listContestIdsForTeam(db: DatabaseSync, teamId: number): number[] {
+  return (
+    db
+      .prepare(
+        `SELECT contest_id FROM contest_teams
+         WHERE team_id = ?
+         ORDER BY registered_at, contest_id`,
+      )
+      .all(teamId) as unknown as Array<{ contest_id: number }>
+  ).map((row) => row.contest_id);
+}
+
 /**
  * Returns the first member of `teamId` who is already registered for the same
  * contest with a different team, or null when the roster is conflict-free.

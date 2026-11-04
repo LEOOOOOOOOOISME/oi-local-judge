@@ -16,6 +16,25 @@ export function isRegistrationMode(value: unknown): value is RegistrationMode {
   );
 }
 
+/**
+ * Provenance of a contest participant row.
+ *
+ * - `manual`: added by an administrator/contest manager (import, batch publish).
+ * - `self`: self-registration through an open/approval contest.
+ * - `team`: granted automatically because the user belongs to a registered team.
+ *
+ * Team membership changes only ever revoke `team` rows, so administrator
+ * imports and self-registrations survive leaving or being removed from a team.
+ */
+export const PARTICIPANT_SOURCES = ['manual', 'self', 'team'] as const;
+export type ParticipantSource = (typeof PARTICIPANT_SOURCES)[number];
+
+export function isParticipantSource(value: unknown): value is ParticipantSource {
+  return (
+    typeof value === 'string' && (PARTICIPANT_SOURCES as readonly string[]).includes(value)
+  );
+}
+
 export interface ContestRow {
   id: number;
   name: string;
@@ -255,14 +274,16 @@ export function addParticipant(
   contestId: number,
   userId: number,
   now = Date.now(),
+  source: ParticipantSource = 'manual',
 ): void {
   db.prepare(
-    `INSERT INTO contest_participants(contest_id, user_id, status, registered_at)
-     VALUES (?, ?, 'accepted', ?)
+    `INSERT INTO contest_participants(contest_id, user_id, status, registered_at, source)
+     VALUES (?, ?, 'accepted', ?, ?)
      ON CONFLICT(contest_id, user_id) DO UPDATE SET
        status = 'accepted',
-       registered_at = COALESCE(contest_participants.registered_at, excluded.registered_at)`,
-  ).run(contestId, userId, now);
+       registered_at = COALESCE(contest_participants.registered_at, excluded.registered_at),
+       source = excluded.source`,
+  ).run(contestId, userId, now, source);
 }
 
 /**
@@ -271,18 +292,21 @@ export function addParticipant(
  * Used by team registration: an existing row (including an administrator's
  * individual import, or a pending/rejected registration) is never overwritten,
  * so a team registration cannot silently change a person's registration state.
+ * Rows created here are tagged `source = 'team'` by default, so they can be
+ * revoked when the membership that granted them goes away.
  */
 export function addParticipantIfAbsent(
   db: DatabaseSync,
   contestId: number,
   userId: number,
   now = Date.now(),
+  source: ParticipantSource = 'team',
 ): void {
   db.prepare(
-    `INSERT INTO contest_participants(contest_id, user_id, status, registered_at)
-     VALUES (?, ?, 'accepted', ?)
+    `INSERT INTO contest_participants(contest_id, user_id, status, registered_at, source)
+     VALUES (?, ?, 'accepted', ?, ?)
      ON CONFLICT(contest_id, user_id) DO NOTHING`,
-  ).run(contestId, userId, now);
+  ).run(contestId, userId, now, source);
 }
 
 export function getParticipants(db: DatabaseSync, contestId: number): number[] {

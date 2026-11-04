@@ -49,6 +49,31 @@ describe('migrations and repositories', () => {
     db.close();
   });
 
+  it('adds the participant source column defaulting to manual', () => {
+    const db = freshDb();
+    const columns = db.prepare('PRAGMA table_info(contest_participants)').all() as Array<{
+      name: string;
+      dflt_value: string | null;
+    }>;
+    expect(columns.find((column) => column.name === 'source')).toMatchObject({
+      dflt_value: "'manual'",
+    });
+
+    db.prepare("INSERT INTO contests(name) VALUES ('Legacy')").run();
+    const contest = db.prepare("SELECT id FROM contests WHERE name = 'Legacy'").get() as {
+      id: number;
+    };
+    db.prepare('INSERT INTO contest_participants(contest_id, user_id) VALUES (?, ?)').run(
+      contest.id,
+      1,
+    );
+    const row = db
+      .prepare('SELECT source FROM contest_participants WHERE contest_id = ? AND user_id = 1')
+      .get(contest.id) as { source: string };
+    expect(row.source).toBe('manual');
+    db.close();
+  });
+
   it('round-trips user, problem, submission and judge task', () => {
     const db = freshDb();
     const userId = createUser(db, {

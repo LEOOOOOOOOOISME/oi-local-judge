@@ -18,6 +18,11 @@ import {
   type TeamRow,
 } from '../storage/repos/teams.js';
 import { getUserById, getUserByUsername } from '../storage/repos/users.js';
+import {
+  syncMemberJoinedTeam,
+  syncMemberLeftTeam,
+  type TeamMemberContestSync,
+} from './contest-teams.js';
 
 export type { TeamDetail, TeamDto, TeamMemberDto, TeamRole } from '../storage/repos/teams.js';
 
@@ -154,10 +159,20 @@ export function getTeam(db: DatabaseSync, teamId: number): TeamDetail | null {
   };
 }
 
+/**
+ * Adds a user to a team.
+ *
+ * Membership is also propagated to contest participation: for every contest the
+ * team is already registered for, the new member becomes an accepted
+ * participant tagged `source = 'team'`. The membership insert and the
+ * participation sync run in one transaction. If the user already represents
+ * another registered team in one of those contests, that contest is skipped
+ * and reported instead of creating a conflicting affiliation.
+ */
 export function addTeamMember(
   db: DatabaseSync,
   input: { teamId: number; actorId: number; username: string; now?: number; isAdmin?: boolean },
-): void {
+): TeamMemberContestSync {
   requireTeam(db, input.teamId);
   requireCaptainOrAdmin(db, input.teamId, input.actorId, input.isAdmin ?? false);
   const username = input.username.trim();
@@ -172,7 +187,7 @@ export function addTeamMember(
     throw new TeamError('TEAM_MEMBER_EXISTS', 409, 'user is already a team member');
   }
   const joinedAt = input.now ?? Date.now();
-  transaction(db, () => {
+  return transaction(db, () => {
     try {
       insertTeamMember(db, {
         teamId: input.teamId,
@@ -186,9 +201,20 @@ export function addTeamMember(
       }
       throw err;
     }
+    return syncMemberJoinedTeam(db, {
+      teamId: input.teamId,
+      userId: target.id,
+      now: joinedAt,
+    });
   });
 }
 
+/**
+ * Removes a member from a team and revokes the contest participation the team
+ * granted. Only `source = 'team'` participant rows are deleted; administrator
+ * imports and self-registrations are preserved, as is participation justified
+ * by another registered team.
+ */
 export function removeTeamMember(
   db: DatabaseSync,
   input: { teamId: number; actorId: number; userId: number; now?: number; isAdmin?: boolean },
@@ -211,9 +237,16 @@ export function removeTeamMember(
   }
   transaction(db, () => {
     removeTeamMemberRow(db, input.teamId, input.userId);
+    syncMemberLeftTeam(db, { teamId: input.teamId, userId: input.userId });
   });
 }
 
+/**
+ * Lets an ordinary member leave a team. Team-derived contest participation is
+ * revoked in the same transaction, while administrator imports,
+ * self-registrations and participation kept alive by another registered team
+ * are preserved.
+ */
 export function leaveTeam(db: DatabaseSync, teamId: number, userId: number): void {
   requireTeam(db, teamId);
   const member = getTeamMember(db, teamId, userId);
@@ -229,6 +262,7 @@ export function leaveTeam(db: DatabaseSync, teamId: number, userId: number): voi
   }
   transaction(db, () => {
     removeTeamMemberRow(db, teamId, userId);
+    syncMemberLeftTeam(db, { teamId, userId });
   });
 }
 

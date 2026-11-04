@@ -6,10 +6,15 @@ import {
   type ContestRow,
 } from '../storage/repos/contests.js';
 import {
+  deleteRegistrationRow,
+  getRegistrationRow,
+} from '../storage/repos/contest-registrations.js';
+import {
   deleteContestTeamRegistration,
   findContestTeamMemberConflict,
   getContestTeamRegistration,
   insertContestTeamRegistration,
+  listContestIdsForTeam,
   listContestTeamRegistrations,
   listRegisteredTeamIdsForUser,
   type TeamRegistrationDto,
@@ -141,9 +146,10 @@ export function registerTeamForContest(
     }
     // Every member of the team becomes an accepted contest participant in the
     // same transaction. An existing participant row (individual import, pending
-    // or rejected registration) is preserved untouched.
+    // or rejected registration) is preserved untouched. New rows are tagged
+    // `source = 'team'` so membership changes can revoke exactly those rows.
     for (const member of listTeamMembers(db, input.teamId)) {
-      addParticipantIfAbsent(db, input.contestId, member.userId, registeredAt);
+      addParticipantIfAbsent(db, input.contestId, member.userId, registeredAt, 'team');
     }
   });
 }
@@ -152,12 +158,12 @@ export function registerTeamForContest(
  * Removes a team registration. Only administrators/contest managers can do
  * this. Existing submissions keep their `team_id` attribution.
  *
- * Participant rows are intentionally retained: they may be administrator
- * imports that predate the team registration, and this service cannot tell the
- * two sources apart. In `team` mode a removed member therefore still needs a
+ * Participant rows are intentionally retained, including `source = 'team'`
+ * rows: revoking participation is a separate administrator action, and the
+ * rows may predate the registration or be backed by submissions. In `team`
+ * mode a member of the removed team therefore still needs a currently
  * registered team to submit (`TEAM_REQUIRED`); in `both` mode the retained row
- * keeps individual submission eligibility. Revoking participation is a
- * separate administrator action.
+ * keeps individual submission eligibility.
  */
 export function removeTeamFromContest(
   db: DatabaseSync,
@@ -192,6 +198,81 @@ export function getRegisteredTeamForUser(
   userId: number,
 ): number | null {
   return listRegisteredTeamIdsForUser(db, contestId, userId)[0] ?? null;
+}
+
+/** Outcome of propagating a team membership change to contest participation. */
+export interface TeamMemberContestSync {
+  /** Contests that received a new `source = 'team'` participant row. */
+  linkedContestIds: number[];
+  /**
+   * Contests where the row was left untouched because the user already
+   * represents another registered team for the same contest.
+   */
+  skipped: Array<{ contestId: number; teamId: number; teamName: string }>;
+}
+
+/**
+ * Grants participation in every contest the team is already registered for.
+ *
+ * Called after a new `team_members` row was inserted, inside the caller's
+ * transaction. A user whose only missing piece is participation becomes an
+ * accepted participant with `source = 'team'`.
+ *
+ * Joining a team must never create a second team affiliation for one contest.
+ * When the user already represents another registered team there, the
+ * participant row is left alone and the conflict is reported back to the
+ * caller rather than silently overwritten.
+ */
+export function syncMemberJoinedTeam(
+  db: DatabaseSync,
+  input: { teamId: number; userId: number; now?: number },
+): TeamMemberContestSync {
+  const now = input.now ?? Date.now();
+  const sync: TeamMemberContestSync = { linkedContestIds: [], skipped: [] };
+  for (const contestId of listContestIdsForTeam(db, input.teamId)) {
+    const otherTeamId = listRegisteredTeamIdsForUser(db, contestId, input.userId).find(
+      (teamId) => teamId !== input.teamId,
+    );
+    if (otherTeamId !== undefined) {
+      sync.skipped.push({
+        contestId,
+        teamId: otherTeamId,
+        teamName: getTeamRow(db, otherTeamId)?.name ?? '',
+      });
+      continue;
+    }
+    // An existing row (admin import, self-registration, pending review) wins.
+    if (getRegistrationRow(db, contestId, input.userId)) continue;
+    addParticipantIfAbsent(db, contestId, input.userId, now, 'team');
+    sync.linkedContestIds.push(contestId);
+  }
+  return sync;
+}
+
+/**
+ * Revokes team-derived participation after the user left a team.
+ *
+ * Called after the `team_members` row was deleted, inside the caller's
+ * transaction. Only `source = 'team'` rows are removed: administrator imports
+ * (`manual`) and self-registrations (`self`) are never touched. A user who is
+ * still a member of another registered team for the same contest keeps the row.
+ *
+ * @returns contest ids whose participant row was deleted.
+ */
+export function syncMemberLeftTeam(
+  db: DatabaseSync,
+  input: { teamId: number; userId: number },
+): number[] {
+  const removedContestIds: number[] = [];
+  for (const contestId of listContestIdsForTeam(db, input.teamId)) {
+    const row = getRegistrationRow(db, contestId, input.userId);
+    if (!row || row.source !== 'team') continue;
+    // Another registered team still justifies the participation row.
+    if (listRegisteredTeamIdsForUser(db, contestId, input.userId).length > 0) continue;
+    deleteRegistrationRow(db, contestId, input.userId);
+    removedContestIds.push(contestId);
+  }
+  return removedContestIds;
 }
 
 /**
