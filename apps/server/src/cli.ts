@@ -7,6 +7,7 @@ import { applyPendingRestore } from './services/system-ops.js';
 import { recoverInterruptedJudgeTasks } from './storage/repos/judge.js';
 import { startScheduler } from './judge/scheduler.js';
 import { startBackupScheduler } from './services/backup-scheduler.js';
+import { startLearningStatsScheduler } from './services/learning-stats-scheduler.js';
 import { startContestClock } from './services/contest-clock.js';
 import { buildApp } from './app.js';
 import { join } from 'node:path';
@@ -56,6 +57,14 @@ const backupScheduler = startBackupScheduler({
     }
   },
 });
+// Learning analytics caches are derived data: rebuild them shortly after boot
+// and every few hours, independent of the judge and backup timers.
+const statsScheduler = startLearningStatsScheduler({
+  db,
+  onError: (error) => app.log.warn({ err: error }, '学习统计定时重建失败'),
+  onSlow: (elapsedMs) => app.log.warn({ elapsedMs }, '学习统计重建阻塞事件循环时间过长'),
+  onRun: (result) => app.log.info(result, '已完成学习统计定时重建'),
+});
 const contestClock = startContestClock(db);
 const port = config.port;
 const host = config.host;
@@ -74,6 +83,7 @@ parentPort?.postMessage({ type: 'ready', port: actualPort });
 
 async function shutdown() {
   backupScheduler.stop();
+  statsScheduler.stop();
   contestClock.stop();
   await scheduler.stop();
   await app.close();
