@@ -91,6 +91,11 @@ export interface SubmissionDto {
   hackedAt?: string | null;
   hackedBy?: number | null;
   hackId?: number | null;
+  /**
+   * 1-based position in the judging queue (same order as the scheduler claims
+   * tasks); `null` unless the submission is currently queued.
+   */
+  queuePosition?: number | null;
   code?: string;
   results?: TestResultDto[];
 }

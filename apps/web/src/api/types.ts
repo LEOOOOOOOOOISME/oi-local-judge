@@ -409,6 +409,8 @@ export interface Submission {
   hackedAt?: string | null;
   hackedBy?: number | null;
   hackId?: number | null;
+  /** 队列位置（1-based）；仅排队中的提交有值，其余为 null。 */
+  queuePosition?: number | null;
   code?: string;
   results?: TestResult[];
 }

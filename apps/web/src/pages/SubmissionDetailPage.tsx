@@ -96,6 +96,8 @@ export function SubmissionDetailPage() {
   }
 
   const pending = isPendingStatus(submission.status);
+  const queuePosition = submission.queuePosition ?? null;
+  const showQueuePosition = submission.status === 'queued' && queuePosition !== null;
   const canCancel = pending && (user?.role === 'admin' || user?.role === 'contestmanager');
   const requestCancel = () => {
     modal.confirm({
@@ -300,6 +302,7 @@ export function SubmissionDetailPage() {
         tags={
           <>
             <SubmissionStatusBadge status={submission.status} verdict={submission.verdict} />
+            {showQueuePosition ? <Tag color="blue">排队第 {queuePosition} 位</Tag> : null}
             {submission.hackedAt ? <Tag color="red">HACKED</Tag> : null}
             <Tag>{languageLabel(submission.language)}</Tag>
           </>
@@ -332,7 +335,9 @@ export function SubmissionDetailPage() {
                 <span className="pending-dot" />
                 <div>
                   <div className="pending-title">
-                    {SUBMISSION_STATUS_LABEL[submission.status]}…
+                    {showQueuePosition
+                      ? `排队第 ${queuePosition} 位`
+                      : `${SUBMISSION_STATUS_LABEL[submission.status]}…`}
                   </div>
                   <div className="muted">评测完成后页面会通过 WebSocket 自动刷新。</div>
                 </div>
