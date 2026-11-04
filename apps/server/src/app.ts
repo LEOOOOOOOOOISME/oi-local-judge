@@ -27,6 +27,7 @@ import { registerTeamRoutes } from './http/teams.js';
 import { registerAdminTeamRoutes } from './http/admin-teams.js';
 import { registerClassRoutes } from './http/classes.js';
 import { registerProblemSetRoutes } from './http/problem-sets.js';
+import { registerTrainingPlanRoutes } from './http/training-plans.js';
 import { recordAudit } from './storage/repos/audit.js';
 import { createHub, type Hub } from './realtime/hub.js';
 import { authenticateRequest, requireAuth, requireRole } from './security/auth.js';
@@ -152,6 +153,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
   });
   registerProblemSetRoutes(app, { db, config, auth });
+  registerTrainingPlanRoutes(app, { db, config, auth });
 
   const webDist = join(process.cwd(), 'apps/web/dist');
   if (existsSync(webDist)) {
