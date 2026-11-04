@@ -146,6 +146,14 @@
   font-size: 11pt;
 }
 
+.award-certificate-team .award-certificate-name {
+  min-width: 72mm;
+}
+
+.award-certificate-team .award-certificate-class {
+  letter-spacing: 2px;
+}
+
 .award-certificate-text {
   margin: 6mm 0 3mm;
   font-size: 13pt;

@@ -30,8 +30,11 @@ import { getCorrectionRanking } from '../services/correction-ranking.js';
 import { getTeamRanking } from '../services/team-ranking.js';
 import {
   AwardConfigError,
+  AwardScopeError,
   getContestAwards,
+  getTeamContestAwards,
   setAwardConfig,
+  type AwardScope,
 } from '../services/awards.js';
 import {
   ContestTeamError,
@@ -102,6 +105,32 @@ function sendInvalidRegistrationWindow(reply: FastifyReply): FastifyReply {
   });
 }
 
+function parseAwardScope(raw: unknown): AwardScope | null {
+  if (raw === undefined || raw === 'individual') return 'individual';
+  if (raw === 'team') return 'team';
+  return null;
+}
+
+async function loadContestAwards(
+  db: DatabaseSync,
+  contestId: number,
+  scope: AwardScope,
+  dataDir: string,
+) {
+  return scope === 'team'
+    ? getTeamContestAwards(db, contestId)
+    : getContestAwards(db, contestId, dataDir);
+}
+
+function sendAwardScopeError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof AwardScopeError) {
+    return reply
+      .code(err.status)
+      .send({ ok: false, error: { code: err.code, message: err.message } });
+  }
+  throw err;
+}
+
 export function registerContestRoutes(app: FastifyInstance, options: ContestRouteOptions): void {
   app.get('/api/contests', async () => ({
     ok: true,
@@ -170,7 +199,7 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     (options.config ? requireAuth({ db: options.db, config: options.config }) : undefined);
   const teamGuards = teamAuth ? [teamAuth] : [];
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { scope?: string } }>(
     '/api/contests/:id/awards',
     { preHandler: teamGuards },
     async (request, reply) => {
@@ -186,6 +215,22 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       if (!contest) {
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       }
+      const scope = parseAwardScope(request.query?.scope);
+      if (!scope) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'INVALID_SCOPE', message: 'scope must be individual or team' },
+        });
+      }
+      if (scope === 'team' && contest.team_mode === 'individual') {
+        return reply.code(400).send({
+          ok: false,
+          error: {
+            code: 'SCOPE_NOT_TEAM',
+            message: 'this contest does not accept teams, so it has no team awards',
+          },
+        });
+      }
       const ready =
         contest.status === 'ended' ||
         contest.status === 'archived' ||
@@ -200,31 +245,48 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
           },
         });
       }
-      const awards = await getContestAwards(
-        options.db,
-        contestId,
-        options.config?.dataDir ?? process.cwd(),
-      );
-      if (!awards) {
-        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      try {
+        const awards = await loadContestAwards(
+          options.db,
+          contestId,
+          scope,
+          options.config?.dataDir ?? process.cwd(),
+        );
+        if (!awards) {
+          return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+        }
+        return { ok: true, data: awards };
+      } catch (err) {
+        return sendAwardScopeError(reply, err);
       }
-      return { ok: true, data: awards };
     },
   );
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{ Params: { id: string }; Querystring: { scope?: string } }>(
     '/api/admin/contests/:id/awards',
     { preHandler: guards },
     async (request, reply) => {
-      const awards = await getContestAwards(
-        options.db,
-        Number(request.params.id),
-        options.config?.dataDir ?? process.cwd(),
-      );
-      if (!awards) {
-        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      const scope = parseAwardScope(request.query?.scope);
+      if (!scope) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'INVALID_SCOPE', message: 'scope must be individual or team' },
+        });
       }
-      return { ok: true, data: awards };
+      try {
+        const awards = await loadContestAwards(
+          options.db,
+          Number(request.params.id),
+          scope,
+          options.config?.dataDir ?? process.cwd(),
+        );
+        if (!awards) {
+          return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+        }
+        return { ok: true, data: awards };
+      } catch (err) {
+        return sendAwardScopeError(reply, err);
+      }
     },
   );
 

@@ -1,4 +1,15 @@
-import type { AwardConfig, AwardCounts, AwardLevel, AwardRow } from '../api/types';
+import type {
+  AwardConfig,
+  AwardCounts,
+  AwardLevel,
+  AwardRow,
+  TeamAwardRow,
+} from '../api/types';
+
+/** 区分后端返回的个人奖行与团队奖行（团队行有 teamId）。 */
+export function isTeamAwardRow(row: AwardRow | TeamAwardRow): row is TeamAwardRow {
+  return 'teamId' in row;
+}
 
 /** 奖项排序固定为金、银、铜，供统计与筛选项复用。 */
 export const AWARD_LEVELS: readonly AwardLevel[] = ['gold', 'silver', 'bronze'] as const;
@@ -80,6 +91,27 @@ export function filterAwardRows(rows: readonly AwardRow[], filter: AwardRowFilte
   });
 }
 
+export interface TeamAwardRowFilter {
+  keyword?: string;
+  award?: AwardFilterValue;
+}
+
+/** 团队奖项表筛选：关键字匹配团队名与证书编号，可再按奖项过滤。 */
+export function filterTeamAwardRows(
+  rows: readonly TeamAwardRow[],
+  filter: TeamAwardRowFilter,
+): TeamAwardRow[] {
+  const keyword = filter.keyword?.trim().toLowerCase() ?? '';
+  const award = filter.award ?? 'all';
+  return rows.filter((row) => {
+    if (award !== 'all') {
+      if (award === 'none' ? row.award !== null : row.award !== award) return false;
+    }
+    if (keyword === '') return true;
+    return `${row.teamName}\n${row.certificateNo}`.toLowerCase().includes(keyword);
+  });
+}
+
 function escapeCsvCell(value: string | number | null): string {
   const text = value === null ? '' : String(value);
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
@@ -96,6 +128,28 @@ export function buildAwardsCsv(rows: readonly AwardRow[]): string {
         row.username,
         row.realName,
         row.className,
+        row.totalScore,
+        row.solved,
+        awardLabel(row.award),
+        row.certificateNo,
+      ]
+        .map(escapeCsvCell)
+        .join(','),
+    ),
+  ];
+  return `\uFEFF${lines.join('\r\n')}\r\n`;
+}
+
+/** 导出团队奖项成绩单 CSV（UTF-8 BOM + CRLF），可用 Excel 直接打开。 */
+export function buildTeamAwardsCsv(rows: readonly TeamAwardRow[]): string {
+  const header = ['名次', '团队', '成员数', '总分', 'AC', '奖项', '证书编号'];
+  const lines = [
+    header.map(escapeCsvCell).join(','),
+    ...rows.map((row) =>
+      [
+        row.rank,
+        row.teamName,
+        row.memberCount,
         row.totalScore,
         row.solved,
         awardLabel(row.award),

@@ -1377,6 +1377,9 @@ export interface AddProblemSetShareRequest {
 /** Awards：比赛奖项与证书（GET /api/contests/:id/awards）。 */
 export type AwardLevel = 'gold' | 'silver' | 'bronze';
 
+/** 奖项口径：个人奖按正式榜，团队奖按团队榜。 */
+export type AwardScope = 'individual' | 'team';
+
 /** 金/银/铜奖人数百分比；三项之和不超过 100。 */
 export interface AwardConfig {
   goldPercent: number;
@@ -1397,6 +1400,18 @@ export interface AwardRow {
   certificateNo: string;
 }
 
+/** 团队榜中的一行奖项数据；未获奖的行 award 为 null。 */
+export interface TeamAwardRow {
+  rank: number;
+  teamId: number;
+  teamName: string;
+  memberCount: number;
+  totalScore: number;
+  solved: number;
+  award: AwardLevel | null;
+  certificateNo: string;
+}
+
 export interface AwardCounts {
   gold: number;
   silver: number;
@@ -1411,4 +1426,14 @@ export interface ContestAwards {
   config: AwardConfig;
   rows: AwardRow[];
   counts: AwardCounts;
+  scope: 'individual';
+}
+
+/** GET /api/contests/:id/awards?scope=team 的返回结构。 */
+export interface TeamContestAwards {
+  contest: Contest;
+  config: AwardConfig;
+  rows: TeamAwardRow[];
+  counts: AwardCounts;
+  scope: 'team';
 }
