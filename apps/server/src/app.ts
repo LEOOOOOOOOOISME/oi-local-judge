@@ -35,6 +35,18 @@ import { authenticateRequest, requireAuth, requireRole } from './security/auth.j
 import { migrate } from './storage/migrate.js';
 import { openDatabase } from './storage/db.js';
 import { repairLegacyTestcasePaths } from './services/problems.js';
+import {
+  recordRequest,
+  startEventLoopMonitor,
+  stopEventLoopMonitor,
+} from './services/metrics.js';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    /** High-resolution request start, used by the local runtime metrics. */
+    metricsStartedAt?: bigint;
+  }
+}
 
 export interface AppOptions {
   logger?: boolean;
@@ -52,6 +64,24 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   const hub = opts.hub ?? createHub();
 
   const app = Fastify({ logger: opts.logger ?? false });
+  startEventLoopMonitor();
+  // Local runtime metrics: the start timestamp lives on the request, and only
+  // the path (never the query string) is retained by the collector.
+  app.addHook('onRequest', async (request) => {
+    request.metricsStartedAt = process.hrtime.bigint();
+  });
+  app.addHook('onResponse', async (request, reply) => {
+    const startedAt = request.metricsStartedAt;
+    const durationMs = startedAt
+      ? Number(process.hrtime.bigint() - startedAt) / 1_000_000
+      : reply.elapsedTime;
+    recordRequest({
+      method: request.method,
+      url: request.url,
+      statusCode: reply.statusCode,
+      durationMs,
+    });
+  });
   app.addHook('onResponse', async (request, reply) => {
     if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return;
     if (!request.url.startsWith('/api/admin')) return;
@@ -214,6 +244,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   });
 
   app.addHook('onClose', async () => {
+    stopEventLoopMonitor();
     if (ownsDb) db.close();
   });
 

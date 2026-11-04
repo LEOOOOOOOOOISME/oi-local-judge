@@ -634,3 +634,26 @@
   color: var(--text-2);
   font-size: 12px;
 }
+
+/* Local runtime metrics（系统运维「指标」Tab） */
+.system-metrics-title {
+  margin: 18px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.system-metrics-path {
+  display: inline-block;
+  max-width: 520px;
+  overflow: hidden;
+  font-size: 12px;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.system-metrics-duration {
+  font-size: 12px;
+}
