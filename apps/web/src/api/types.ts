@@ -94,6 +94,10 @@ export interface ProblemSummary {
   tags: string[];
   timeMs: number;
   memoryMb: number;
+  /** 题目归属类型；旧后端可能不返回。 */
+  ownerType?: ProblemOwnerType;
+  /** 题目归属 id；system 题目为 null。旧后端可能不返回。 */
+  ownerId?: number | null;
 }
 
 export interface ProblemDetail extends ProblemSummary {

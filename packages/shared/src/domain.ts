@@ -12,6 +12,9 @@ export interface UserDto {
 
 export type ProblemType = 'standard' | 'file-io' | 'interactive' | 'output-only' | 'objective';
 
+/** Problem ACL：题目归属类型（系统 / 个人 / 团队）。 */
+export type ProblemOwnerType = 'system' | 'user' | 'team';
+
 export interface ProblemSummaryDto {
   id: number;
   title: string;
@@ -20,6 +23,9 @@ export interface ProblemSummaryDto {
   tags: string[];
   timeMs: number;
   memoryMb: number;
+  /** 归属类型；system 题目没有 ownerId。 */
+  ownerType: ProblemOwnerType;
+  ownerId: number | null;
 }
 
 export interface ProblemDetailDto extends ProblemSummaryDto {
