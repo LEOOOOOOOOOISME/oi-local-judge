@@ -36,8 +36,27 @@ export interface OfficialRankingResult {
   config: RankingConfig;
   archived: boolean;
   preset: string;
+  /**
+   * Monotonic version of this ranking snapshot, bumped by
+   * `invalidateOfficialRanking`. WebSocket deltas carry the same number so a
+   * client can discard a delta that is older than the snapshot it already has.
+   */
+  version: number;
   pluginError?: string;
   officialFrozenUntil: number | null;
+}
+
+/**
+ * Compact ranking change set: only the rows that changed, all user ids with
+ * their new rank (ranks can shift for unchanged rows) and the removed users.
+ */
+export interface RankingDelta {
+  contestId: number;
+  /** Version of the `next` snapshot the delta was computed from. */
+  version: number;
+  changed: OfficialRankingRow[];
+  ranks: Array<{ userId: number; rank: number }>;
+  removed: number[];
 }
 
 function parseConfig(contest: ContestRow): {
@@ -78,10 +97,19 @@ export const DEFAULT_RANKING_CACHE_TTL_MS = 1000;
 interface OfficialRankingCacheEntry {
   dataDir: string;
   expiresAt: number;
+  version: number;
   promise: Promise<OfficialRankingResult | null>;
 }
 
 const rankingCaches = new WeakMap<DatabaseSync, Map<number, OfficialRankingCacheEntry>>();
+
+/**
+ * Per-database, per-contest monotonic versions. A version starts at 0 and is
+ * incremented by every invalidation, so a delta always carries a number greater
+ * than the snapshot it was diffed from. Kept separate from the cache because an
+ * invalidation must bump the version even when nothing is cached.
+ */
+const rankingVersions = new WeakMap<DatabaseSync, Map<number, number>>();
 
 function rankingCacheFor(db: DatabaseSync): Map<number, OfficialRankingCacheEntry> {
   let cache = rankingCaches.get(db);
@@ -90,6 +118,26 @@ function rankingCacheFor(db: DatabaseSync): Map<number, OfficialRankingCacheEntr
     rankingCaches.set(db, cache);
   }
   return cache;
+}
+
+function rankingVersionsFor(db: DatabaseSync): Map<number, number> {
+  let versions = rankingVersions.get(db);
+  if (!versions) {
+    versions = new Map();
+    rankingVersions.set(db, versions);
+  }
+  return versions;
+}
+
+/** Current version of a contest snapshot; an unseen contest starts at 0. */
+function currentRankingVersion(db: DatabaseSync, contestId: number): number {
+  const versions = rankingVersionsFor(db);
+  const version = versions.get(contestId);
+  if (version === undefined) {
+    versions.set(contestId, 0);
+    return 0;
+  }
+  return version;
 }
 
 /**
@@ -107,25 +155,43 @@ function rankingCacheTtlMs(): number {
 
 /**
  * Drops the cached official ranking for one contest, or for every contest of
- * this database when `contestId` is omitted. Call it after any mutation that
- * can change the ranking: judge results, hacks, official scores, contest
- * status/config, participants or plugins.
+ * this database when `contestId` is omitted, and bumps the contest version.
+ * Call it after any mutation that can change the ranking: judge results, hacks,
+ * official scores, contest status/config, participants or plugins.
+ *
+ * Returns the new version of the affected contest; for a database-wide
+ * invalidation it returns the highest new version (each known contest is bumped
+ * independently).
  */
-export function invalidateOfficialRanking(db: DatabaseSync, contestId?: number): void {
+export function invalidateOfficialRanking(db: DatabaseSync, contestId?: number): number {
+  const versions = rankingVersionsFor(db);
+
   if (contestId === undefined) {
+    let highest = 0;
+    for (const [id, version] of versions) {
+      const bumped = version + 1;
+      versions.set(id, bumped);
+      if (bumped > highest) highest = bumped;
+    }
     rankingCaches.delete(db);
-    return;
+    return highest;
   }
+
+  const nextVersion = (versions.get(contestId) ?? 0) + 1;
+  versions.set(contestId, nextVersion);
+
   const cache = rankingCaches.get(db);
-  if (!cache) return;
+  if (!cache) return nextVersion;
   cache.delete(contestId);
   if (cache.size === 0) rankingCaches.delete(db);
+  return nextVersion;
 }
 
 export async function computeOfficialRanking(
   db: DatabaseSync,
   contestId: number,
   dataDir = process.cwd(),
+  version = currentRankingVersion(db, contestId),
 ): Promise<OfficialRankingResult | null> {
   const contest = getContest(db, contestId);
   if (!contest) return null;
@@ -263,8 +329,50 @@ export async function computeOfficialRanking(
     config: parsed.config,
     archived: contest.archived_at !== null,
     preset: parsed.rawPreset,
+    version,
     officialFrozenUntil: contest.official_frozen_until,
     ...(pluginError ? { pluginError } : {}),
+  };
+}
+
+/**
+ * Pure diff between two snapshots of the same contest ranking.
+ *
+ * `changed` holds the complete rows whose JSON changed (or which are new),
+ * `ranks` maps every user of the new snapshot to its rank, and `removed` lists
+ * users present before but gone now. Returns null when the board is identical;
+ * a version bump alone does not produce a delta.
+ */
+export function diffOfficialRanking(
+  prev: OfficialRankingResult,
+  next: OfficialRankingResult,
+): RankingDelta | null {
+  const prevById = new Map<number, OfficialRankingRow>();
+  for (const row of prev.rows) prevById.set(row.userId, row);
+  const nextById = new Map<number, OfficialRankingRow>();
+  for (const row of next.rows) nextById.set(row.userId, row);
+
+  const changed: OfficialRankingRow[] = [];
+  for (const row of next.rows) {
+    const before = prevById.get(row.userId);
+    // Rows are plain JSON objects produced by the same pipeline, so a stable
+    // stringify is the cheapest complete "did this row change" test.
+    if (!before || JSON.stringify(before) !== JSON.stringify(row)) changed.push(row);
+  }
+
+  const removed: number[] = [];
+  for (const userId of prevById.keys()) {
+    if (!nextById.has(userId)) removed.push(userId);
+  }
+
+  if (changed.length === 0 && removed.length === 0) return null;
+
+  return {
+    contestId: next.contest.id,
+    version: next.version,
+    changed,
+    ranks: next.rows.map((row) => ({ userId: row.userId, rank: row.rank })),
+    removed,
   };
 }
 
@@ -291,13 +399,19 @@ export function getOfficialRanking(
     return cached.promise;
   }
 
+  const version = currentRankingVersion(db, contestId);
   let promise: Promise<OfficialRankingResult | null>;
-  promise = computeOfficialRanking(db, contestId, dataDir).catch((err: unknown) => {
+  promise = computeOfficialRanking(db, contestId, dataDir, version).catch((err: unknown) => {
     // A rejected promise must not be cached, otherwise every retry within the
     // TTL would replay the same failure.
     if (cache.get(contestId)?.promise === promise) cache.delete(contestId);
     throw err;
   });
-  cache.set(contestId, { dataDir, expiresAt: now + rankingCacheTtlMs(), promise });
+  cache.set(contestId, {
+    dataDir,
+    expiresAt: now + rankingCacheTtlMs(),
+    version,
+    promise,
+  });
   return promise;
 }
