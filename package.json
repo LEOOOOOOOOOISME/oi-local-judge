@@ -23,6 +23,7 @@
     "build": "node tools/build-help-docs.mjs && tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/desktop/tsconfig.json && npm run build --workspace @oij/web",
     "build:portable": "node tools/build-portable.mjs",
     "build:release": "node tools/release/build-release.mjs",
+    "release:bump": "node tools/release/bump-version.mjs",
     "start": "node apps/server/dist/cli.js",
     "electron:smoke": "electron tools/electron-smoke.cjs",
     "electron:smoke:flags": "electron --no-sandbox --disable-gpu tools/electron-smoke.cjs",
