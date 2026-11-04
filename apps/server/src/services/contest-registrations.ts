@@ -98,6 +98,16 @@ export function registerForContest(
   if (closed) {
     throw new ContestRegistrationError('REGISTRATION_CLOSED', 403, 'registration is closed');
   }
+  if (contest.registration_open_at !== null && now < contest.registration_open_at) {
+    throw new ContestRegistrationError(
+      'REGISTRATION_NOT_OPEN',
+      403,
+      'registration has not opened yet',
+    );
+  }
+  if (contest.registration_close_at !== null && now > contest.registration_close_at) {
+    throw new ContestRegistrationError('REGISTRATION_CLOSED', 403, 'registration is closed');
+  }
 
   const existing = getRegistrationRow(db, input.contestId, input.userId);
   if (existing && (existing.status === 'pending' || existing.status === 'accepted')) {
@@ -129,17 +139,42 @@ export function registerForContest(
   return status;
 }
 
-/** Cancels a pending self-registration. Accepted participants cannot cancel. */
+/**
+ * Cancels a self-registration. Pending registrations can always be cancelled;
+ * accepted participants may cancel only before the contest starts.
+ */
 export function cancelRegistration(
   db: DatabaseSync,
-  input: { contestId: number; userId: number },
+  input: { contestId: number; userId: number; now?: number },
 ): void {
+  const now = input.now ?? Date.now();
+  const contest = requireContest(db, input.contestId);
   const row = requireRegistration(db, input.contestId, input.userId);
-  if (row.status !== 'pending') {
+  if (row.status === 'pending') {
+    deleteRegistrationRow(db, input.contestId, input.userId);
+    return;
+  }
+  if (row.status !== 'accepted') {
     throw new ContestRegistrationError(
       'CANNOT_CANCEL',
       409,
-      'only pending registrations can be cancelled',
+      'only pending or accepted registrations can be cancelled',
+    );
+  }
+  const started =
+    contest.status === 'running' ||
+    contest.status === 'frozen' ||
+    (contest.start_at !== null && now >= contest.start_at);
+  const ended =
+    contest.status === 'ended' ||
+    contest.status === 'archived' ||
+    contest.archived_at !== null ||
+    (contest.end_at !== null && now >= contest.end_at);
+  if (started || ended) {
+    throw new ContestRegistrationError(
+      'CANNOT_CANCEL',
+      409,
+      'accepted registrations cannot be cancelled after the contest starts',
     );
   }
   deleteRegistrationRow(db, input.contestId, input.userId);

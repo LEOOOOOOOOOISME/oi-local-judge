@@ -5,6 +5,7 @@ import {
   Button,
   Card,
   Col,
+  DatePicker,
   Empty,
   Form,
   Input,
@@ -19,6 +20,8 @@ import {
   Tag,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
+import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../api/client';
@@ -83,6 +86,8 @@ interface ContestFormValues {
   mode: string;
   teamMode: TeamMode;
   registrationMode: RegistrationMode;
+  registrationOpenAt?: Dayjs | null;
+  registrationCloseAt?: Dayjs | null;
   startAt: string;
   endAt: string;
   freezeAt?: string;
@@ -383,6 +388,12 @@ export function AdminContestConsolePage() {
       mode: contest.mode,
       teamMode: resolveTeamMode(contest),
       registrationMode: resolveRegistrationMode(contest),
+      registrationOpenAt: contest.registration_open_at
+        ? dayjs(contest.registration_open_at)
+        : null,
+      registrationCloseAt: contest.registration_close_at
+        ? dayjs(contest.registration_close_at)
+        : null,
       startAt: toLocalDateTimeInput(contest.start_at),
       endAt: toLocalDateTimeInput(contest.end_at),
       freezeAt: toLocalDateTimeInput(contest.freeze_at),
@@ -446,6 +457,10 @@ export function AdminContestConsolePage() {
         mode: values.mode,
         teamMode: values.teamMode,
         registrationMode: values.registrationMode,
+        registrationOpenAt: values.registrationOpenAt ? values.registrationOpenAt.valueOf() : null,
+        registrationCloseAt: values.registrationCloseAt
+          ? values.registrationCloseAt.valueOf()
+          : null,
         startAt,
         endAt,
         freezeAt: fromLocalDateTimeInput(values.freezeAt ?? ''),
@@ -1558,6 +1573,26 @@ export function AdminContestConsolePage() {
               <Col span={8}>
                 <Form.Item label="封榜时间（可空）" name="freezeAt">
                   <Input type="datetime-local" />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item
+                  label="报名开始时间（可空）"
+                  name="registrationOpenAt"
+                  tooltip="留空表示不限制报名开始时间"
+                >
+                  <DatePicker showTime allowClear style={{ width: '100%' }} placeholder="不限制" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  label="报名截止时间（可空）"
+                  name="registrationCloseAt"
+                  tooltip="留空表示不限制报名截止时间；需晚于开始时间"
+                >
+                  <DatePicker showTime allowClear style={{ width: '100%' }} placeholder="不限制" />
                 </Form.Item>
               </Col>
             </Row>

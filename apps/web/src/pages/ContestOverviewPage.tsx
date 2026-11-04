@@ -41,11 +41,15 @@ import {
 } from '../utils/teamContest';
 import {
   allowsSelfRegistration,
+  canCancelAcceptedRegistration,
   describeRegistrationError,
   registrationModeLabel,
   registrationStatusColor,
   registrationStatusLabel,
+  registrationWindowState,
+  registrationWindowText,
   resolveRegistrationMode,
+  resolveRegistrationWindow,
 } from '../utils/registration';
 import {
   CONTEST_PHASE_LABEL,
@@ -197,6 +201,13 @@ export function ContestOverviewPage() {
       contest.status === 'archived' ||
       Boolean(contest.archived_at) ||
       (contest.end_at !== null && now >= contest.end_at));
+  const registrationWindow = resolveRegistrationWindow(contest);
+  const windowState = registrationWindowState(contest, now);
+  const registrationNotOpen = windowState === 'before-open';
+  const acceptedCancellable =
+    myRegistration !== null &&
+    myRegistration.status === 'accepted' &&
+    canCancelAcceptedRegistration(contest, now);
 
   const invalidateRegistration = () => {
     void queryClient.invalidateQueries({ queryKey: ['my-registration', contestId] });
@@ -496,6 +507,9 @@ export function ContestOverviewPage() {
               items={[
                 { label: '赛制', value: contestModeLabel(contest.mode) },
                 { label: '报名方式', value: registrationModeLabel(registrationMode) },
+                ...(registrationMode === 'manual'
+                  ? []
+                  : [{ label: '报名时间', value: registrationWindowText(contest) }]),
                 ...(teamEnabled
                   ? [{ label: '团队报名', value: teamModeLabel(teamMode) }]
                   : []),
@@ -568,10 +582,27 @@ export function ContestOverviewPage() {
                   </span>
                 ) : null}
                 {myRegistration.status === 'rejected' ? (
-                  <span className="muted">报名未通过，可在比赛结束前重新报名。</span>
+                  <span className="muted">
+                    {registrationNotOpen
+                      ? '报名未通过，可在报名开放后重新报名。'
+                      : '报名未通过，可在比赛结束前重新报名。'}
+                  </span>
                 ) : null}
                 {registrationClosed ? (
                   <span className="muted">报名已截止。</span>
+                ) : myRegistration.status === 'accepted' ? (
+                  acceptedCancellable ? (
+                    <Button
+                      size="small"
+                      danger
+                      loading={registrationBusy}
+                      onClick={() => void cancelRegistration()}
+                    >
+                      取消报名
+                    </Button>
+                  ) : (
+                    <span className="muted">比赛已经开始，不能再取消报名。</span>
+                  )
                 ) : myRegistration.status === 'pending' ? (
                   <Button
                     size="small"
@@ -582,31 +613,47 @@ export function ContestOverviewPage() {
                     取消报名
                   </Button>
                 ) : myRegistration.status === 'rejected' ? (
-                  <Button
-                    size="small"
-                    type="primary"
-                    loading={registrationBusy}
-                    onClick={() => void selfRegister()}
-                  >
-                    重新报名
-                  </Button>
+                  registrationNotOpen ? (
+                    <span className="muted">报名尚未开始。</span>
+                  ) : (
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={registrationBusy}
+                      onClick={() => void selfRegister()}
+                    >
+                      重新报名
+                    </Button>
+                  )
                 ) : null}
               </div>
             ) : (
               <div className="stack">
                 <span className="muted">
-                  {registrationMode === 'approval'
-                    ? '本场比赛需要管理员审核报名。'
-                    : '本场比赛开放自助报名。'}
+                  {registrationNotOpen
+                    ? `报名尚未开始${
+                        registrationWindow.openAt !== null
+                          ? `，将于 ${formatDateTime(registrationWindow.openAt)} 开放。`
+                          : '。'
+                      }`
+                    : registrationClosed
+                      ? `报名已截止${
+                          registrationWindow.closeAt !== null
+                            ? `（${formatDateTime(registrationWindow.closeAt)}）`
+                            : ''
+                        }。`
+                      : registrationMode === 'approval'
+                        ? '本场比赛需要管理员审核报名。'
+                        : '本场比赛开放自助报名。'}
                 </span>
                 <Button
                   type="primary"
                   size="small"
-                  disabled={registrationClosed}
+                  disabled={registrationClosed || registrationNotOpen}
                   loading={registrationBusy}
                   onClick={() => void selfRegister()}
                 >
-                  {registrationClosed ? '报名已截止' : '报名'}
+                  {registrationClosed ? '报名已截止' : registrationNotOpen ? '报名未开始' : '报名'}
                 </Button>
               </div>
             )}

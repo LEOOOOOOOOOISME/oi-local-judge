@@ -340,6 +340,10 @@ export interface CreateContestRequest {
   teamMode?: TeamMode;
   /** 个人报名方式，省略时后端默认 manual（管理员导入）。 */
   registrationMode?: RegistrationMode;
+  /** 报名开始时间（epoch ms）；null/省略表示不限制。 */
+  registrationOpenAt?: number | null;
+  /** 报名截止时间（epoch ms）；null/省略表示不限制。 */
+  registrationCloseAt?: number | null;
   startAt?: number;
   endAt?: number;
   freezeAt?: number;
@@ -352,6 +356,10 @@ export interface UpdateContestRequest {
   mode?: string;
   teamMode?: TeamMode;
   registrationMode?: RegistrationMode;
+  /** 报名开始时间（epoch ms）；null 表示清除限制，省略表示不修改。 */
+  registrationOpenAt?: number | null;
+  /** 报名截止时间（epoch ms）；null 表示清除限制，省略表示不修改。 */
+  registrationCloseAt?: number | null;
   startAt?: number | null;
   endAt?: number | null;
   freezeAt?: number | null;
@@ -414,6 +422,10 @@ export interface Contest {
   registration_mode?: RegistrationMode;
   /** 兼容已映射为 camelCase 的接口返回。 */
   registrationMode?: RegistrationMode;
+  /** 报名开始时间（epoch ms）；null 表示不限制。 */
+  registration_open_at?: number | null;
+  /** 报名截止时间（epoch ms）；null 表示不限制。 */
+  registration_close_at?: number | null;
   start_at: number | null;
   end_at: number | null;
   freeze_at: number | null;
