@@ -18,6 +18,7 @@ import {
   unlockProblem,
 } from '../storage/repos/hacks.js';
 import { getSubmission, listHackTargets } from '../storage/repos/submissions.js';
+import { getRegisteredTeamForUser } from '../services/contest-teams.js';
 import { resolveDataPath } from '../judge/pipeline.js';
 
 export interface HackRouteOptions {
@@ -157,6 +158,9 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
         problemId,
         hackerId: request.user!.id,
         targetSubmissionId: target.id,
+        // Score attribution follows the team the hacker currently represents in
+        // this contest. Hacks by unaffiliated users stay individual (null).
+        teamId: getRegisteredTeamForUser(options.db, contestId, request.user!.id),
         inputPath,
       });
       void judgeHack(options.db, options.config, hackId).catch(() => {});

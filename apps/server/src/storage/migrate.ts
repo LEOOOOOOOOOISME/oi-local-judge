@@ -135,6 +135,7 @@ CREATE TABLE IF NOT EXISTS contest_hacks(
   problem_id INTEGER NOT NULL,
   hacker_id INTEGER NOT NULL,
   target_submission_id INTEGER NOT NULL,
+  team_id INTEGER,
   input_path TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'queued',
   verdict TEXT,
@@ -294,6 +295,7 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'submissions', 'message', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'contests', 'team_mode', "TEXT NOT NULL DEFAULT 'individual'");
   ensureColumn(db, 'submissions', 'team_id', 'INTEGER');
+  ensureColumn(db, 'contest_hacks', 'team_id', 'INTEGER');
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
     db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)').run(Date.now());
