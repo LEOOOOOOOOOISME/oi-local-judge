@@ -1,6 +1,10 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { transaction } from '../storage/db.js';
-import { getContest, type ContestRow } from '../storage/repos/contests.js';
+import {
+  addParticipantIfAbsent,
+  getContest,
+  type ContestRow,
+} from '../storage/repos/contests.js';
 import {
   deleteContestTeamRegistration,
   findContestTeamMemberConflict,
@@ -10,7 +14,7 @@ import {
   listRegisteredTeamIdsForUser,
   type TeamRegistrationDto,
 } from '../storage/repos/contest-teams.js';
-import { getTeamMember, getTeamRow } from '../storage/repos/teams.js';
+import { getTeamMember, getTeamRow, listTeamMembers } from '../storage/repos/teams.js';
 
 export type { ContestTeamMemberDto, TeamRegistrationDto } from '../storage/repos/contest-teams.js';
 
@@ -56,6 +60,10 @@ function isUniqueConstraintError(err: unknown, columns: string): boolean {
  * Registers a team for a contest. The actor must be the team captain, or an
  * administrator/contest manager (`isAdmin`). The contest must accept teams and
  * no team member may already represent another team in the same contest.
+ *
+ * Registration also grants every current team member `accepted` contest
+ * participation, so members pass the contest access check and can submit. Rows
+ * that already exist are kept as-is (existing individual registration wins).
  */
 export function registerTeamForContest(
   db: DatabaseSync,
@@ -131,12 +139,25 @@ export function registerTeamForContest(
       }
       throw err;
     }
+    // Every member of the team becomes an accepted contest participant in the
+    // same transaction. An existing participant row (individual import, pending
+    // or rejected registration) is preserved untouched.
+    for (const member of listTeamMembers(db, input.teamId)) {
+      addParticipantIfAbsent(db, input.contestId, member.userId, registeredAt);
+    }
   });
 }
 
 /**
  * Removes a team registration. Only administrators/contest managers can do
  * this. Existing submissions keep their `team_id` attribution.
+ *
+ * Participant rows are intentionally retained: they may be administrator
+ * imports that predate the team registration, and this service cannot tell the
+ * two sources apart. In `team` mode a removed member therefore still needs a
+ * registered team to submit (`TEAM_REQUIRED`); in `both` mode the retained row
+ * keeps individual submission eligibility. Revoking participation is a
+ * separate administrator action.
  */
 export function removeTeamFromContest(
   db: DatabaseSync,
