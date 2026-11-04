@@ -24,6 +24,7 @@ import { createUser } from '../src/storage/repos/users.js';
 import {
   addTeamMember,
   createTeam,
+  dissolveTeam,
   getTeam,
   leaveTeam,
   removeTeamMember,
@@ -1038,6 +1039,194 @@ describe('team membership contest sync', () => {
     }
     expect(duplicateLeave).toBeInstanceOf(TeamError);
     expect((duplicateLeave as TeamError).code).toBe('TEAM_MEMBER_NOT_FOUND');
+  });
+});
+
+describe('team dissolution contest cleanup', () => {
+  function expectTeamError(fn: () => unknown, code: string, status: number): void {
+    let caught: unknown;
+    try {
+      fn();
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(TeamError);
+    expect((caught as TeamError).code).toBe(code);
+    expect((caught as TeamError).status).toBe(status);
+  }
+
+  function contestTeamsCount(ctx: Ctx, teamId: number): number {
+    const row = ctx.db
+      .prepare('SELECT COUNT(*) AS n FROM contest_teams WHERE team_id = ?')
+      .get(teamId) as { n: number };
+    return Number(row.n);
+  }
+
+  it('revokes team-sourced participation and drops registrations on dissolve', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob']);
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.alice)?.source).toBe('team');
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)?.source).toBe('team');
+
+    dissolveTeam(ctx.db, { teamId: alpha, actorId: ctx.users.alice, isAdmin: false });
+
+    expect(getTeam(ctx.db, alpha)).toBeNull();
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.alice)).toBeNull();
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toBeNull();
+    expect(contestTeamsCount(ctx, alpha)).toBe(0);
+    expect(listContestTeams(ctx.db, contestId)).toEqual([]);
+    const members = ctx.db
+      .prepare('SELECT COUNT(*) AS n FROM team_members WHERE team_id = ?')
+      .get(alpha) as { n: number };
+    expect(Number(members.n)).toBe(0);
+  });
+
+  it('preserves manual imports and self-registrations when the team dissolves', () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, {
+      name: 'DissolveBoth',
+      teamMode: 'both',
+      registrationMode: 'open',
+      startAt: 100_000,
+      endAt: 200_000,
+      problemIds: [ctx.problemId],
+    });
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob', 'carol']);
+    // An administrator imported bob individually before the team registered.
+    addParticipant(ctx.db, contestId, ctx.users.bob, 500);
+    // carol registered herself.
+    registerForContest(ctx.db, { contestId, userId: ctx.users.carol, now: 600 });
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+
+    dissolveTeam(ctx.db, { teamId: alpha, actorId: ctx.users.alice, isAdmin: false });
+
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toMatchObject({
+      status: 'accepted',
+      source: 'manual',
+      registered_at: 500,
+    });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.carol)).toMatchObject({
+      status: 'accepted',
+      source: 'self',
+      registered_at: 600,
+    });
+    // Only the purely team-derived captain row goes away.
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.alice)).toBeNull();
+  });
+
+  it('keeps participation justified by another registered team', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob']);
+    const gamma = makeTeam(ctx, 'dave', 'Gamma');
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: gamma,
+      actorId: ctx.users.dave,
+      isAdmin: false,
+      now: 1222,
+    });
+    // Joining Gamma is skipped: Alpha still represents bob in this contest.
+    const sync = addTeamMember(ctx.db, {
+      teamId: gamma,
+      actorId: ctx.users.dave,
+      username: 'bob',
+      now: 2000,
+    });
+    expect(sync.skipped).toEqual([{ contestId, teamId: alpha, teamName: 'Alpha' }]);
+
+    dissolveTeam(ctx.db, { teamId: alpha, actorId: ctx.users.alice, isAdmin: false });
+
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toMatchObject({
+      status: 'accepted',
+      source: 'team',
+      registered_at: 1111,
+    });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.alice)).toBeNull();
+    expect(listContestTeams(ctx.db, contestId).map((row) => row.teamId)).toEqual([gamma]);
+  });
+
+  it('rejects dissolution by a non-owner and leaves participation intact', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob']);
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+
+    expectTeamError(
+      () => dissolveTeam(ctx.db, { teamId: alpha, actorId: ctx.users.bob, isAdmin: false }),
+      'TEAM_FORBIDDEN',
+      403,
+    );
+    expect(getTeam(ctx.db, alpha)?.members.map((member) => member.username)).toEqual([
+      'alice',
+      'bob',
+    ]);
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.alice)?.source).toBe('team');
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)?.source).toBe('team');
+    expect(contestTeamsCount(ctx, alpha)).toBe(1);
+  });
+
+  it('rolls back the whole dissolution when revoking participation fails', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob']);
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+
+    ctx.db.exec(
+      `CREATE TRIGGER boom_participant_delete BEFORE DELETE ON contest_participants
+       WHEN OLD.user_id = ${ctx.users.bob} BEGIN SELECT RAISE(ABORT, 'boom'); END`,
+    );
+    // The captain row is deleted before bob's delete aborts; the transaction must
+    // restore the team, both memberships, the participant rows and the audit row.
+    expect(() =>
+      dissolveTeam(ctx.db, { teamId: alpha, actorId: ctx.users.alice, isAdmin: false }),
+    ).toThrow(/boom/);
+    ctx.db.exec('DROP TRIGGER boom_participant_delete');
+
+    expect(getTeam(ctx.db, alpha)?.members.map((member) => member.username)).toEqual([
+      'alice',
+      'bob',
+    ]);
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.alice)?.source).toBe('team');
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)?.source).toBe('team');
+    expect(contestTeamsCount(ctx, alpha)).toBe(1);
+    const audit = ctx.db
+      .prepare("SELECT COUNT(*) AS n FROM audit_logs WHERE action = 'team.dissolve'")
+      .get() as { n: number };
+    expect(Number(audit.n)).toBe(0);
   });
 });
 
