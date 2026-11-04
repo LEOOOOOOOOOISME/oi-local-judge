@@ -57,6 +57,28 @@ export function getJudgeTaskBySubmission(
   );
 }
 
+/**
+ * Returns the 1-based position of a submission's task in the judging queue, or
+ * `null` when it has no position.
+ *
+ * Only `queued` tasks are part of the queue: a claimed (running/compiling) or
+ * terminal (done/failed/canceled) task has no position. The order mirrors
+ * `claimNextTask` exactly (`priority DESC, id ASC`), so position N means that
+ * N-1 queued tasks would be claimed before this one.
+ */
+export function getQueuePosition(db: DatabaseSync, submissionId: number): number | null {
+  const task = getJudgeTaskBySubmission(db, submissionId);
+  if (!task || task.status !== 'queued') return null;
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS ahead FROM judge_tasks
+       WHERE status = 'queued'
+         AND (priority > ? OR (priority = ? AND id < ?))`,
+    )
+    .get(task.priority, task.priority, task.id) as unknown as { ahead: number };
+  return row.ahead + 1;
+}
+
 export function claimNextTask(db: DatabaseSync, worker: string): JudgeTaskRow | null {
   db.exec('BEGIN IMMEDIATE');
   try {
