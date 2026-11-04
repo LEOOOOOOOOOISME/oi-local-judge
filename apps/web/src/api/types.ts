@@ -1348,6 +1348,62 @@ export interface CreateTeamResult {
   id: number;
 }
 
+/** Classes：教学班级（后端 teams.kind='class'，与团队路由完全隔离）。 */
+export type ClassRole = 'coach' | 'assistant' | 'member';
+
+/** GET /api/classes 列表项；role 为当前用户在班级中的身份。 */
+export interface ClassSummary {
+  id: number;
+  name: string;
+  ownerId: number;
+  kind: 'class';
+  allowContest: boolean;
+  createdAt: number;
+  memberCount: number;
+  role: ClassRole;
+}
+
+export interface ClassMember {
+  userId: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  role: ClassRole;
+  joinedAt: number;
+}
+
+/** GET /api/classes/:id；members 仅班级成员与管理员可见。 */
+export interface ClassDetail {
+  id: number;
+  name: string;
+  ownerId: number;
+  kind: 'class';
+  allowContest: boolean;
+  createdAt: number;
+  /** 当前用户在班级中的身份；非成员为 null。 */
+  viewerRole: ClassRole | null;
+  members?: ClassMember[];
+}
+
+/** POST /api/admin/classes：仅管理员与比赛管理员可用。 */
+export interface CreateClassRequest {
+  name: string;
+  allowContest?: boolean;
+}
+
+export interface CreateClassResult {
+  id: number;
+}
+
+export interface AddClassMemberRequest {
+  username: string;
+  role?: ClassRole;
+}
+
+export interface AddClassCoachRequest {
+  username: string;
+}
+
 export interface AddTeamMemberRequest {
   username: string;
 }
