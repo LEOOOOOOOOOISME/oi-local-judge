@@ -41,12 +41,14 @@ describe('computeAwardCounts', () => {
       gold: 1,
       silver: 2,
       bronze: 3,
+      participation: 0,
       total: 6,
     });
     expect(computeAwardCounts(100, DEFAULT_CONFIG)).toEqual({
       gold: 10,
       silver: 20,
       bronze: 30,
+      participation: 0,
       total: 60,
     });
   });
@@ -56,18 +58,20 @@ describe('computeAwardCounts', () => {
       gold: 1,
       silver: 1,
       bronze: 1,
+      participation: 0,
       total: 3,
     });
   });
 
   it('累计人数不超过总人数，先金后银再铜', () => {
     expect(computeAwardCounts(2, { goldPercent: 50, silverPercent: 50, bronzePercent: 50 })).toEqual(
-      { gold: 1, silver: 1, bronze: 0, total: 2 },
+      { gold: 1, silver: 1, bronze: 0, participation: 0, total: 2 },
     );
     expect(computeAwardCounts(1, DEFAULT_CONFIG)).toEqual({
       gold: 1,
       silver: 0,
       bronze: 0,
+      participation: 0,
       total: 1,
     });
   });
@@ -77,12 +81,14 @@ describe('computeAwardCounts', () => {
       gold: 0,
       silver: 0,
       bronze: 0,
+      participation: 0,
       total: 0,
     });
     expect(computeAwardCounts(0, DEFAULT_CONFIG)).toEqual({
       gold: 0,
       silver: 0,
       bronze: 0,
+      participation: 0,
       total: 0,
     });
   });
@@ -203,10 +209,50 @@ describe('awardLabel / awardColor', () => {
     expect(awardLabel('gold')).toBe('金牌');
     expect(awardLabel('silver')).toBe('银牌');
     expect(awardLabel('bronze')).toBe('铜牌');
+    expect(awardLabel('participation')).toBe('参赛');
     expect(awardLabel(null)).toBe('未获奖');
     expect(awardColor('gold')).toBe('gold');
     expect(awardColor('bronze')).toBe('orange');
+    expect(awardColor('participation')).toBe('blue');
     expect(awardColor(null)).toBe('default');
+  });
+});
+
+describe('participation certificates', () => {
+  it('按 participation 筛选个人与团队行', () => {
+    const individual = [
+      row({ userId: 1, award: 'gold', certificateNo: 'C7-1' }),
+      row({ userId: 2, award: 'participation', certificateNo: 'C7-2' }),
+    ];
+    expect(filterAwardRows(individual, { award: 'participation' }).map((item) => item.userId)).toEqual([
+      2,
+    ]);
+
+    const teams = [
+      teamRow({ teamId: 3, award: 'gold', certificateNo: 'T7-3' }),
+      teamRow({ teamId: 4, award: 'participation', certificateNo: 'T7-4' }),
+    ];
+    expect(
+      filterTeamAwardRows(teams, { award: 'participation' }).map((item) => item.teamId),
+    ).toEqual([4]);
+  });
+
+  it('CSV 用“参赛”输出 participation 行', () => {
+    const individual = buildAwardsCsv([
+      row({ userId: 9, username: 'dave', realName: 'Dave', award: 'participation', certificateNo: 'C7-9' }),
+    ])
+      .replace('\uFEFF', '')
+      .trimEnd()
+      .split('\r\n');
+    expect(individual[1]).toBe('1,dave,Dave,高一(1)班,300,3,参赛,C7-9');
+
+    const team = buildTeamAwardsCsv([
+      teamRow({ teamId: 9, teamName: 'Omega', award: 'participation', certificateNo: 'T7-9' }),
+    ])
+      .replace('\uFEFF', '')
+      .trimEnd()
+      .split('\r\n');
+    expect(team[1]).toBe('1,Omega,2,200,1,参赛,T7-9');
   });
 });
 

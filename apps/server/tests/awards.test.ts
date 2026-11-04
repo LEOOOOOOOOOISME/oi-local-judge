@@ -262,26 +262,29 @@ describe('award config', () => {
       gold: 1,
       silver: 2,
       bronze: 3,
+      participation: 0,
       total: 6,
     });
     expect(computeAwardCounts(3, DEFAULT_AWARD_CONFIG)).toEqual({
       gold: 1,
       silver: 1,
       bronze: 1,
+      participation: 0,
       total: 3,
     });
     expect(
       computeAwardCounts(2, { goldPercent: 100, silverPercent: 0, bronzePercent: 0 }),
-    ).toEqual({ gold: 2, silver: 0, bronze: 0, total: 2 });
+    ).toEqual({ gold: 2, silver: 0, bronze: 0, participation: 0, total: 2 });
     expect(computeAwardCounts(0, DEFAULT_AWARD_CONFIG)).toEqual({
       gold: 0,
       silver: 0,
       bronze: 0,
+      participation: 0,
       total: 0,
     });
     expect(
       computeAwardCounts(4, { goldPercent: 0, silverPercent: 20, bronzePercent: 30 }),
-    ).toEqual({ gold: 0, silver: 1, bronze: 1, total: 2 });
+    ).toEqual({ gold: 0, silver: 1, bronze: 1, participation: 0, total: 2 });
   });
 });
 
@@ -302,7 +305,13 @@ describe('contest awards service', () => {
       null,
       null,
     ]);
-    expect(awards.counts).toEqual({ gold: 1, silver: 2, bronze: 3, total: 6 });
+    expect(awards.counts).toEqual({
+      gold: 1,
+      silver: 2,
+      bronze: 3,
+      participation: 0,
+      total: 6,
+    });
     expect(awards.rows[0]).toMatchObject({
       userId: users[0],
       username: 'award-user-0',
@@ -331,7 +340,13 @@ describe('contest awards service', () => {
       'silver',
       'bronze',
     ]);
-    expect(awards.counts).toEqual({ gold: 2, silver: 1, bronze: 1, total: 4 });
+    expect(awards.counts).toEqual({
+      gold: 2,
+      silver: 1,
+      bronze: 1,
+      participation: 0,
+      total: 4,
+    });
     const audit = db
       .prepare(
         "SELECT target_type, target_id, actor_id, detail_json FROM audit_logs WHERE action = 'contest.awards.config.update' AND target_id = ? ORDER BY id DESC",
@@ -354,7 +369,13 @@ describe('contest awards service', () => {
       'bronze',
       null,
     ]);
-    expect(awards.counts).toEqual({ gold: 1, silver: 2, bronze: 1, total: 4 });
+    expect(awards.counts).toEqual({
+      gold: 1,
+      silver: 2,
+      bronze: 1,
+      participation: 0,
+      total: 4,
+    });
   });
 
   it('excludes hidden participants from the awards table', async () => {
@@ -364,7 +385,13 @@ describe('contest awards service', () => {
     expect(awards.rows.some((row) => row.userId === users[0])).toBe(false);
     expect(awards.rows.map((row) => row.rank)).toEqual([1, 2]);
     expect(awards.rows.map((row) => row.award)).toEqual(['gold', 'silver']);
-    expect(awards.counts).toEqual({ gold: 1, silver: 1, bronze: 0, total: 2 });
+    expect(awards.counts).toEqual({
+      gold: 1,
+      silver: 1,
+      bronze: 0,
+      participation: 0,
+      total: 2,
+    });
   });
 
   it('supports zero percentages', async () => {
@@ -381,7 +408,13 @@ describe('contest awards service', () => {
       null,
       null,
     ]);
-    expect(awards.counts).toEqual({ gold: 0, silver: 1, bronze: 0, total: 1 });
+    expect(awards.counts).toEqual({
+      gold: 0,
+      silver: 1,
+      bronze: 0,
+      participation: 0,
+      total: 1,
+    });
   });
 
   it('keeps certificate numbers stable when ranks change', async () => {
@@ -420,6 +453,113 @@ describe('contest awards service', () => {
   });
 });
 
+describe('participation certificates', () => {
+  it('keeps the default response unchanged when participation is not requested', async () => {
+    const contestId = makeScoredContest(
+      'Participation default',
+      [100, 90, 80, 70, 60, 50, 40, 30, 20, 10],
+    );
+    const awards = (await getContestAwards(db, contestId, root))!;
+    expect(awards.rows.map((row) => row.award)).toEqual([
+      'gold',
+      'silver',
+      'silver',
+      'bronze',
+      'bronze',
+      'bronze',
+      null,
+      null,
+      null,
+      null,
+    ]);
+    expect(awards.counts).toEqual({
+      gold: 1,
+      silver: 2,
+      bronze: 3,
+      participation: 0,
+      total: 6,
+    });
+
+    const explicitOff = (await getContestAwards(db, contestId, root, {
+      includeParticipation: false,
+    }))!;
+    expect(explicitOff.rows).toEqual(awards.rows);
+    expect(explicitOff.counts).toEqual(awards.counts);
+  });
+
+  it('marks every non-medal row as participation and counts them', async () => {
+    const contestId = makeScoredContest(
+      'Participation include',
+      [100, 90, 80, 70, 60, 50, 40, 30, 20, 10],
+    );
+    const awards = (await getContestAwards(db, contestId, root, {
+      includeParticipation: true,
+    }))!;
+    expect(awards.rows.map((row) => row.award)).toEqual([
+      'gold',
+      'silver',
+      'silver',
+      'bronze',
+      'bronze',
+      'bronze',
+      'participation',
+      'participation',
+      'participation',
+      'participation',
+    ]);
+    expect(awards.counts).toEqual({
+      gold: 1,
+      silver: 2,
+      bronze: 3,
+      participation: 4,
+      total: 6,
+    });
+    expect(awards.rows.every((row) => row.award !== null)).toBe(true);
+    for (const row of awards.rows.slice(6)) {
+      expect(row.certificateNo).toBe(certificateNo(contestId, row.userId));
+      expect(row.certificateNo).toBe(`C${contestId}-${row.userId}`);
+    }
+  });
+
+  it('adds no participation rows when every ranked row already has a medal', async () => {
+    const contestId = makeScoredContest('Participation full medals', [100, 90]);
+    db.prepare('UPDATE contests SET award_config_json = ? WHERE id = ?').run(
+      JSON.stringify({ goldPercent: 100, silverPercent: 0, bronzePercent: 0 }),
+      contestId,
+    );
+    const awards = (await getContestAwards(db, contestId, root, {
+      includeParticipation: true,
+    }))!;
+    expect(awards.rows.map((row) => row.award)).toEqual(['gold', 'gold']);
+    expect(awards.counts).toEqual({
+      gold: 2,
+      silver: 0,
+      bronze: 0,
+      participation: 0,
+      total: 2,
+    });
+  });
+
+  it('excludes hidden participants from participation certificates', async () => {
+    const contestId = makeScoredContest(
+      'Participation hidden',
+      [100, 90, 80, 70, 60],
+      { hidden: [0] },
+    );
+    const awards = (await getContestAwards(db, contestId, root, {
+      includeParticipation: true,
+    }))!;
+    expect(awards.rows.map((row) => row.userId)).toEqual([users[1], users[2], users[3], users[4]]);
+    expect(awards.rows.map((row) => row.award)).toEqual([
+      'gold',
+      'silver',
+      'bronze',
+      'participation',
+    ]);
+    expect(awards.counts.participation).toBe(1);
+  });
+});
+
 describe('team contest awards service', () => {
   it('awards team bands by team rank and attaches team certificate numbers', async () => {
     const specs: TeamSpec[] = Array.from({ length: 10 }, (_, index) => ({
@@ -446,7 +586,13 @@ describe('team contest awards service', () => {
       null,
       null,
     ]);
-    expect(awards.counts).toEqual({ gold: 1, silver: 2, bronze: 3, total: 6 });
+    expect(awards.counts).toEqual({
+      gold: 1,
+      silver: 2,
+      bronze: 3,
+      participation: 0,
+      total: 6,
+    });
     expect(awards.rows[0]).toMatchObject({
       teamId: teamIds[0],
       teamName: 'Team default bands Team 0',
@@ -457,6 +603,36 @@ describe('team contest awards service', () => {
     expect(awards.rows[0].certificateNo).toBe(teamCertificateNo(contestId, teamIds[0]!));
     expect(awards.rows[0].certificateNo).toBe(`T${contestId}-${teamIds[0]}`);
     expect(awards.rows.every((row) => row.certificateNo.startsWith(`T${contestId}-`))).toBe(true);
+  });
+
+  it('adds participation certificates for every registered team without a medal', async () => {
+    const specs: TeamSpec[] = Array.from({ length: 4 }, (_, index) => ({
+      name: `Team ${index}`,
+      ownerIndex: index,
+      score: 100 - index * 10,
+    }));
+    const { contestId, teamIds } = makeScoredTeamContest('Team participation', specs);
+
+    const awards = (await getTeamContestAwards(db, contestId, {
+      includeParticipation: true,
+    }))!;
+    expect(awards.rows.map((row) => row.award)).toEqual([
+      'gold',
+      'silver',
+      'bronze',
+      'participation',
+    ]);
+    expect(awards.counts).toEqual({
+      gold: 1,
+      silver: 1,
+      bronze: 1,
+      participation: 1,
+      total: 3,
+    });
+    expect(awards.rows.slice(3).map((row) => row.certificateNo)).toEqual([
+      `T${contestId}-${teamIds[3]}`,
+    ]);
+    expect(awards.rows.every((row) => row.award !== null)).toBe(true);
   });
 
   it('keeps the same award for tied team ranks', async () => {
@@ -477,7 +653,13 @@ describe('team contest awards service', () => {
       'bronze',
       null,
     ]);
-    expect(awards.counts).toEqual({ gold: 1, silver: 2, bronze: 1, total: 4 });
+    expect(awards.counts).toEqual({
+      gold: 1,
+      silver: 2,
+      bronze: 1,
+      participation: 0,
+      total: 4,
+    });
   });
 
   it('returns an empty team awards table when no team is registered', async () => {
@@ -485,7 +667,13 @@ describe('team contest awards service', () => {
     const awards = (await getTeamContestAwards(db, contestId))!;
     expect(awards.scope).toBe('team');
     expect(awards.rows).toEqual([]);
-    expect(awards.counts).toEqual({ gold: 0, silver: 0, bronze: 0, total: 0 });
+    expect(awards.counts).toEqual({
+      gold: 0,
+      silver: 0,
+      bronze: 0,
+      participation: 0,
+      total: 0,
+    });
   });
 
   it('does not include teams that are not registered for the contest', async () => {
@@ -828,5 +1016,125 @@ describe('team awards HTTP routes', () => {
     });
     expect(adminRes.statusCode).toBe(400);
     expect(adminRes.json()).toMatchObject({ error: { code: 'SCOPE_NOT_TEAM' } });
+  });
+});
+
+describe('participation HTTP routes', () => {
+  it('parses participation=1 and participation=true for public awards', async () => {
+    const contestId = makeScoredContest(
+      'Participation HTTP',
+      [100, 90, 80, 70, 60, 50, 40, 30],
+    );
+
+    for (const value of ['1', 'true']) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/contests/${contestId}/awards?participation=${value}`,
+        headers: { cookie: cookieFor(contestantId) },
+      });
+      expect(res.statusCode).toBe(200);
+      const data = (
+        res.json() as {
+          data: {
+            rows: Array<{ award: string | null; certificateNo: string }>;
+            counts: { participation: number; total: number };
+          };
+        }
+      ).data;
+      expect(data.rows.map((row) => row.award)).toEqual([
+        'gold',
+        'silver',
+        'silver',
+        'bronze',
+        'bronze',
+        'participation',
+        'participation',
+        'participation',
+      ]);
+      expect(data.counts).toMatchObject({ participation: 3, total: 5 });
+      expect(data.rows.slice(5).every((row) => row.certificateNo.startsWith(`C${contestId}-`))).toBe(
+        true,
+      );
+    }
+
+    const off = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/awards?participation=0`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(off.statusCode).toBe(200);
+    expect(
+      (off.json() as { data: { counts: { participation: number } } }).data.counts.participation,
+    ).toBe(0);
+  });
+
+  it('rejects invalid participation values with INVALID_PARTICIPATION', async () => {
+    const contestId = makeScoredContest('Participation invalid', [100, 90, 80]);
+
+    for (const value of ['2', 'yes', '']) {
+      const res = await app.inject({
+        method: 'GET',
+        url: `/api/contests/${contestId}/awards?participation=${value}`,
+        headers: { cookie: cookieFor(contestantId) },
+      });
+      expect(res.statusCode).toBe(400);
+      expect(res.json()).toMatchObject({ error: { code: 'INVALID_PARTICIPATION' } });
+    }
+
+    const adminRes = await app.inject({
+      method: 'GET',
+      url: `/api/admin/contests/${contestId}/awards?participation=nope`,
+      headers: { cookie: cookieFor(adminId) },
+    });
+    expect(adminRes.statusCode).toBe(400);
+    expect(adminRes.json()).toMatchObject({ error: { code: 'INVALID_PARTICIPATION' } });
+  });
+
+  it('supports participation on the admin and team scopes', async () => {
+    const contestId = makeScoredContest(
+      'Participation HTTP admin',
+      [100, 90, 80, 70, 60, 50, 40, 30],
+    );
+    const adminRes = await app.inject({
+      method: 'GET',
+      url: `/api/admin/contests/${contestId}/awards?participation=1`,
+      headers: { cookie: cookieFor(adminId) },
+    });
+    expect(adminRes.statusCode).toBe(200);
+    expect(
+      (adminRes.json() as { data: { counts: { participation: number } } }).data.counts
+        .participation,
+    ).toBe(3);
+
+    const { contestId: teamContestId } = makeScoredTeamContest('Participation HTTP team', [
+      { name: 'Alpha', ownerIndex: 0, score: 100 },
+      { name: 'Beta', ownerIndex: 1, score: 90 },
+      { name: 'Gamma', ownerIndex: 2, score: 80 },
+      { name: 'Delta', ownerIndex: 3, score: 70 },
+    ]);
+    const teamRes = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${teamContestId}/awards?scope=team&participation=1`,
+      headers: { cookie: cookieFor(contestantId) },
+    });
+    expect(teamRes.statusCode).toBe(200);
+    const teamData = (
+      teamRes.json() as {
+        data: {
+          scope: string;
+          rows: Array<{ award: string | null; certificateNo: string }>;
+          counts: { participation: number; total: number };
+        };
+      }
+    ).data;
+    expect(teamData.scope).toBe('team');
+    expect(teamData.rows.map((row) => row.award)).toEqual([
+      'gold',
+      'silver',
+      'bronze',
+      'participation',
+    ]);
+    expect(teamData.counts).toMatchObject({ participation: 1, total: 3 });
+    expect(teamData.rows[3]?.certificateNo.startsWith(`T${teamContestId}-`)).toBe(true);
   });
 });

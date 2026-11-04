@@ -25,16 +25,19 @@ export function AwardCertificate({
   const team = isTeamAwardRow(row) ? row : null;
   const individual = team === null ? (row as AwardRow) : null;
   const name = team ? team.teamName : (individual?.realName ?? individual?.username ?? '');
+  const participation = row.award === 'participation';
   return (
     <article
       className={`award-certificate award-certificate-${row.award ?? 'none'}${
         team ? ' award-certificate-team' : ''
       }`}
-      aria-label={`${name} 的${team ? '团队' : ''}获奖证书`}
+      aria-label={`${name} 的${team ? '团队' : ''}${participation ? '参赛证书' : '获奖证书'}`}
     >
       <div className="award-certificate-frame">
         <div className="award-certificate-brand">OI LOCAL JUDGE</div>
-        <h1 className="award-certificate-title">荣 誉 证 书</h1>
+        <h1 className="award-certificate-title">
+          {participation ? '参赛证书' : '荣 誉 证 书'}
+        </h1>
         <p className="award-certificate-prefix">{team ? '兹证明团队' : '兹证明'}</p>
         <p className="award-certificate-name">{name}</p>
         {team ? (
@@ -43,7 +46,15 @@ export function AwardCertificate({
           <p className="award-certificate-class">{individual.className}</p>
         ) : null}
         <p className="award-certificate-text">
-          在 <strong>{contestName}</strong> 中表现优异，荣获
+          {participation ? (
+            <>
+              在 <strong>{contestName}</strong> 中完成比赛，获得
+            </>
+          ) : (
+            <>
+              在 <strong>{contestName}</strong> 中表现优异，荣获
+            </>
+          )}
         </p>
         <p className="award-certificate-award">{awardLabel(row.award)}</p>
         <p className="award-certificate-meta">

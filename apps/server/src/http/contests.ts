@@ -34,6 +34,7 @@ import {
   getContestAwards,
   getTeamContestAwards,
   setAwardConfig,
+  type AwardQueryOptions,
   type AwardScope,
 } from '../services/awards.js';
 import {
@@ -111,15 +112,37 @@ function parseAwardScope(raw: unknown): AwardScope | null {
   return null;
 }
 
+/**
+ * `participation=1` / `true` 开启参赛证书，`0` / `false` 关闭；缺省为关闭。
+ * 其他值返回 null，由路由以 400 INVALID_PARTICIPATION 拒绝。
+ */
+function parseParticipation(raw: unknown): boolean | null {
+  if (raw === undefined) return false;
+  if (raw === '1' || raw === 'true') return true;
+  if (raw === '0' || raw === 'false') return false;
+  return null;
+}
+
+function sendInvalidParticipation(reply: FastifyReply): FastifyReply {
+  return reply.code(400).send({
+    ok: false,
+    error: {
+      code: 'INVALID_PARTICIPATION',
+      message: 'participation must be 1, true, 0 or false',
+    },
+  });
+}
+
 async function loadContestAwards(
   db: DatabaseSync,
   contestId: number,
   scope: AwardScope,
   dataDir: string,
+  options: AwardQueryOptions = {},
 ) {
   return scope === 'team'
-    ? getTeamContestAwards(db, contestId)
-    : getContestAwards(db, contestId, dataDir);
+    ? getTeamContestAwards(db, contestId, options)
+    : getContestAwards(db, contestId, dataDir, options);
 }
 
 function sendAwardScopeError(reply: FastifyReply, err: unknown): FastifyReply {
@@ -199,7 +222,10 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     (options.config ? requireAuth({ db: options.db, config: options.config }) : undefined);
   const teamGuards = teamAuth ? [teamAuth] : [];
 
-  app.get<{ Params: { id: string }; Querystring: { scope?: string } }>(
+  app.get<{
+    Params: { id: string };
+    Querystring: { scope?: string; participation?: string };
+  }>(
     '/api/contests/:id/awards',
     { preHandler: teamGuards },
     async (request, reply) => {
@@ -221,6 +247,10 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
           ok: false,
           error: { code: 'INVALID_SCOPE', message: 'scope must be individual or team' },
         });
+      }
+      const participation = parseParticipation(request.query?.participation);
+      if (participation === null) {
+        return sendInvalidParticipation(reply);
       }
       if (scope === 'team' && contest.team_mode === 'individual') {
         return reply.code(400).send({
@@ -251,6 +281,7 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
           contestId,
           scope,
           options.config?.dataDir ?? process.cwd(),
+          { includeParticipation: participation },
         );
         if (!awards) {
           return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
@@ -262,7 +293,10 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     },
   );
 
-  app.get<{ Params: { id: string }; Querystring: { scope?: string } }>(
+  app.get<{
+    Params: { id: string };
+    Querystring: { scope?: string; participation?: string };
+  }>(
     '/api/admin/contests/:id/awards',
     { preHandler: guards },
     async (request, reply) => {
@@ -273,12 +307,17 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
           error: { code: 'INVALID_SCOPE', message: 'scope must be individual or team' },
         });
       }
+      const participation = parseParticipation(request.query?.participation);
+      if (participation === null) {
+        return sendInvalidParticipation(reply);
+      }
       try {
         const awards = await loadContestAwards(
           options.db,
           Number(request.params.id),
           scope,
           options.config?.dataDir ?? process.cwd(),
+          { includeParticipation: participation },
         );
         if (!awards) {
           return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
