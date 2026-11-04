@@ -64,6 +64,19 @@ interface WrongBody {
   };
 }
 
+interface SubmissionListBody {
+  ok: true;
+  data: Array<{
+    id: number;
+    problemId: number;
+    contestId: number | null;
+    status: string;
+    verdict: string | null;
+    score: number;
+    createdAt: string;
+  }>;
+}
+
 interface ClassStatsBody {
   ok: true;
   data: {
@@ -79,6 +92,7 @@ interface ClassStatsBody {
 
 let neverAcProblem = 0;
 let solvedProblem = 0;
+let hiddenProblem = 0;
 
 function seedUser(username: string, role: 'admin' | 'contestmanager' | 'contestant'): number {
   return createUser(db, {
@@ -88,11 +102,12 @@ function seedUser(username: string, role: 'admin' | 'contestmanager' | 'contesta
   });
 }
 
-function makeProblem(title: string): number {
+function makeProblem(title: string, visibility: 'public' | 'hidden' = 'public'): number {
   return createProblem(db, {
     title,
     type: 'standard',
     tags: ['dp'],
+    visibility,
     timeMs: 1000,
     memoryMb: 64,
     testcases: [{ inputPath: '1.in', outputPath: '1.out', points: 100 }],
@@ -129,10 +144,13 @@ beforeAll(async () => {
   }
   neverAcProblem = makeProblem('Never AC');
   solvedProblem = makeProblem('Solved');
+  hiddenProblem = makeProblem('Hidden Problem', 'hidden');
   const now = Date.now();
   addSubmission(ids.bob, neverAcProblem, 'WA', 0, now - 2 * 86_400_000);
   addSubmission(ids.bob, solvedProblem, 'AC', 100, now - 86_400_000);
   addSubmission(ids.bob, neverAcProblem, 'WA', 10, now - 86_400_000 + 1_000);
+  // Newest submission; only admins may see it through the submissions list.
+  addSubmission(ids.bob, hiddenProblem, 'AC', 100, now);
   app = await buildApp({ db, config });
 });
 
@@ -186,6 +204,7 @@ describe('learning analytics HTTP API', () => {
   it('requires authentication on every analytics route', async () => {
     const routes = [
       `/api/students/${ids.bob}/stats`,
+      `/api/students/${ids.bob}/submissions`,
       `/api/students/${ids.bob}/wrong-problems`,
       `/api/classes/${classId}/learning-stats`,
     ];
@@ -287,6 +306,36 @@ describe('learning analytics HTTP API', () => {
     const outsider = await api('GET', `/api/students/${ids.bob}/wrong-problems`, 'carol');
     expect(outsider.statusCode).toBe(403);
     expect(errorCode(outsider.json())).toBe('STUDENT_FORBIDDEN');
+  });
+
+  it('filters hidden-problem submissions from the student list by the problem ACL', async () => {
+    // The newest submission belongs to a system-hidden problem. `limit` counts
+    // visible rows, so a page of two still returns two public submissions.
+    const coach = await api('GET', `/api/students/${ids.bob}/submissions?limit=2`, 'alice');
+    expect(coach.statusCode, coach.body).toBe(200);
+    const coachRows = (coach.json() as SubmissionListBody).data;
+    expect(coachRows).toHaveLength(2);
+    expect(coachRows.map((row) => row.problemId)).not.toContain(hiddenProblem);
+    expect(coach.body).not.toContain('Hidden Problem');
+
+    // A student cannot use their own list to discover the hidden problem.
+    const self = await api('GET', `/api/students/${ids.bob}/submissions`, 'bob');
+    expect(self.statusCode, self.body).toBe(200);
+    const selfRows = (self.json() as SubmissionListBody).data;
+    expect(selfRows).toHaveLength(3);
+    expect(selfRows.map((row) => row.problemId)).not.toContain(hiddenProblem);
+
+    // Admins keep the hidden submission at the top of the list.
+    const admin = await api('GET', `/api/students/${ids.bob}/submissions?limit=2`, 'admin');
+    expect(admin.statusCode, admin.body).toBe(200);
+    const adminRows = (admin.json() as SubmissionListBody).data;
+    expect(adminRows.map((row) => row.problemId)).toEqual([hiddenProblem, neverAcProblem]);
+
+    // Summaries never carry titles or source code.
+    for (const row of [...coachRows, ...adminRows]) {
+      expect(row).not.toHaveProperty('code');
+      expect(row).not.toHaveProperty('title');
+    }
   });
 
   it('exposes class learning stats to coaches and admins only', async () => {
