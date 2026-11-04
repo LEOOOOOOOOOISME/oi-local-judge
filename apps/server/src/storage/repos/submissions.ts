@@ -154,10 +154,30 @@ export function finishSubmission(
 }
 
 /**
+ * Marks a submission as canceled and clears any judge output.
+ *
+ * Cancellation is not a verdict: the row keeps `verdict = NULL` and no
+ * per-testcase rows, so nothing can be mistaken for SE/WA. `judged_at` records
+ * when judging stopped. Idempotent — a second call just rewrites the same state.
+ */
+export function cancelSubmissionState(
+  db: DatabaseSync,
+  submissionId: number,
+  now = Date.now(),
+): void {
+  db.prepare(
+    `UPDATE submissions SET status = 'canceled', verdict = NULL, score = 0, time_ms = 0,
+       memory_kb = 0, message = '', judged_at = ? WHERE id = ?`,
+  ).run(now, submissionId);
+  db.prepare('DELETE FROM test_results WHERE submission_id = ?').run(submissionId);
+}
+
+/**
  * Puts a submission back into the judging queue: clears every judge-produced
  * field and drops its per-testcase rows, so a rejudge cannot display stale
- * results. The caller is expected to run this inside a transaction together
- * with `enqueueRejudge`.
+ * results. Canceled submissions are accepted as well — canceling is reversible
+ * through a rejudge. The caller is expected to run this inside a transaction
+ * together with `enqueueRejudge`.
  */
 export function resetSubmissionForRejudge(db: DatabaseSync, submissionId: number): void {
   db.prepare(

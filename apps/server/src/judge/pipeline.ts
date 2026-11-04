@@ -23,6 +23,7 @@ import {
   type TestcaseRow,
 } from '../storage/repos/problems.js';
 import {
+  cancelSubmissionState,
   finishSubmission,
   getSubmission,
   replaceTestResults,
@@ -31,6 +32,7 @@ import {
 import { compileSource } from './compiler.js';
 import { ensureCompiledProgram } from './compile-cache.js';
 import { ensureChecker } from './checker-cache.js';
+import { JudgeCanceledError, isJudgeCanceledError } from './cancellation.js';
 import {
   gradeObjective,
   parseObjectiveAnswers,
@@ -69,6 +71,8 @@ export interface JudgeSubmissionOptions {
   events?: EventPublisher;
   /** Alias for `events`, matching the phase-1a plan's `hub` parameter name. */
   hub?: EventPublisher;
+  /** Aborting this signal stops the run and records `canceled` (not failed). */
+  signal?: AbortSignal;
 }
 
 export interface JudgedResult {
@@ -279,6 +283,40 @@ function markSubmissionFailed(
   });
 }
 
+/**
+ * Records a cancellation instead of a failure. A canceled run never gets a
+ * verdict, so the page shows `canceled` rather than SE/WA.
+ */
+function markSubmissionCanceled(
+  db: DatabaseSync,
+  submissionId: number,
+  events: EventPublisher | undefined,
+): void {
+  transaction(db, () => cancelSubmissionState(db, submissionId));
+  publishUpdate(db, submissionId, events, {
+    submissionId,
+    status: 'canceled',
+    verdict: null,
+    score: 0,
+    timeMs: 0,
+    memoryKb: 0,
+    message: '',
+    results: [],
+  });
+}
+
+/** Throws a recognizable error when the submission was canceled. */
+function throwIfCanceled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new JudgeCanceledError();
+  }
+}
+
+/** True when a caught error is the result of canceling the run. */
+function isCanceledFailure(err: unknown, signal: AbortSignal | undefined): boolean {
+  return isJudgeCanceledError(err) || signal?.aborted === true;
+}
+
 export async function judgeTestcase(args: {
   config: Config;
   problem: ProblemRow;
@@ -286,8 +324,10 @@ export async function judgeTestcase(args: {
   workdir: string;
   outExe: string;
   checkerExe?: string;
+  signal?: AbortSignal;
 }): Promise<JudgedResult> {
-  const { config, problem, testcase, workdir, outExe, checkerExe } = args;
+  const { config, problem, testcase, workdir, outExe, checkerExe, signal } = args;
+  throwIfCanceled(signal);
   const stdoutFile = join(workdir, `case-${testcase.id}.out`);
   const stderrFile = join(workdir, `case-${testcase.id}.err`);
   const inputPath = resolveDataPath(config.dataDir, testcase.input_path);
@@ -314,7 +354,10 @@ export async function judgeTestcase(args: {
     stdinFile,
     stdoutFile,
     stderrFile,
+    signal,
   });
+
+  throwIfCanceled(signal);
 
   const base = {
     testcaseId: testcase.id,
@@ -415,12 +458,16 @@ export async function judgeTestcase(args: {
  * rejecting, so a scheduler can keep processing.
  */
 export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<void> {
-  const { db, config, submissionId } = options;
+  const { db, config, submissionId, signal } = options;
   const events = options.events ?? options.hub;
 
   const submission = getSubmission(db, submissionId);
   if (!submission) {
     throw new Error(`submission ${submissionId} not found`);
+  }
+  if (signal?.aborted) {
+    markSubmissionCanceled(db, submissionId, events);
+    return;
   }
 
   const problem = getProblem(db, submission.problem_id);
@@ -436,6 +483,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
 
   if (problem.type === 'objective') {
     try {
+      throwIfCanceled(signal);
       setSubmissionStatus(db, submissionId, 'running');
       const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
       const objective = parseObjectiveConfig(problem.objective_json);
@@ -445,6 +493,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       }
       const answers = parseObjectiveAnswers(readFileSync(sourcePath, 'utf8'));
       const graded = gradeObjective(objective, answers);
+      throwIfCanceled(signal);
       persistJudged(
         db,
         submissionId,
@@ -454,6 +503,14 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         graded.score,
       );
     } catch (err) {
+      if (isCanceledFailure(err, signal)) {
+        try {
+          markSubmissionCanceled(db, submissionId, events);
+        } catch {
+          // The database may be gone; the scheduler records the task separately.
+        }
+        return;
+      }
       markSubmissionFailed(
         db,
         submissionId,
@@ -474,11 +531,13 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
     mkdirSync(tmpRoot, { recursive: true });
     const workdir = mkdtempSync(join(tmpRoot, `answer-${submissionId}-`));
     try {
+      throwIfCanceled(signal);
       setSubmissionStatus(db, submissionId, 'running');
       const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
       const answers = parseOutputAnswers(readFileSync(sourcePath, 'utf8'), testcases);
       const answerPaths = writeAnswerFiles(join(workdir, 'answers'), testcases, answers);
       const results = testcases.map((testcase) => {
+        throwIfCanceled(signal);
         const accepted = outputMatches(
           resolveDataPath(config.dataDir, testcase.output_path),
           answerPaths.get(testcase.id)!,
@@ -494,6 +553,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         };
       });
       const score = results.reduce((sum, result) => sum + result.score, 0);
+      throwIfCanceled(signal);
       persistJudged(
         db,
         submissionId,
@@ -503,6 +563,14 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         score,
       );
     } catch (err) {
+      if (isCanceledFailure(err, signal)) {
+        try {
+          markSubmissionCanceled(db, submissionId, events);
+        } catch {
+          // The database may be gone; the scheduler records the task separately.
+        }
+        return;
+      }
       markSubmissionFailed(
         db,
         submissionId,
@@ -538,6 +606,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         sourcePath,
         language: submission.language,
       });
+      throwIfCanceled(signal);
       if (!compiled.ok || !compiled.exe) {
         persistJudged(db, submissionId, events, [], 'CE', 0, clipMessage(compiled.message));
         return;
@@ -550,6 +619,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         includeDir: join(process.cwd(), 'vendor'),
         timeoutMs: 60_000,
       });
+      throwIfCanceled(signal);
       if (!interactor.ok || !interactor.exe) {
         markSubmissionFailed(
           db,
@@ -559,9 +629,11 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         );
         return;
       }
+      throwIfCanceled(signal);
       setSubmissionStatus(db, submissionId, 'running');
       const results = [];
       for (const testcase of testcases) {
+        throwIfCanceled(signal);
         const inputPath = resolveDataPath(config.dataDir, testcase.input_path);
         const answerPath = resolveDataPath(config.dataDir, testcase.output_path);
         const run = await runInteractive({
@@ -576,6 +648,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
           interactorErr: join(workdir, `interactor-${testcase.id}.err`),
           contestantErr: join(workdir, `contestant-${testcase.id}.err`),
         });
+        throwIfCanceled(signal);
         results.push({
           testcaseId: testcase.id,
           verdict: run.verdict,
@@ -586,6 +659,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         });
       }
       const score = results.reduce((sum, result) => sum + result.score, 0);
+      throwIfCanceled(signal);
       persistJudged(
         db,
         submissionId,
@@ -595,6 +669,14 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         score,
       );
     } catch (err) {
+      if (isCanceledFailure(err, signal)) {
+        try {
+          markSubmissionCanceled(db, submissionId, events);
+        } catch {
+          // The database may be gone; the scheduler records the task separately.
+        }
+        return;
+      }
       markSubmissionFailed(
         db,
         submissionId,
@@ -621,6 +703,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
   try {
     const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
 
+    throwIfCanceled(signal);
     setSubmissionStatus(db, submissionId, 'compiling');
     const compiled = await ensureCompiledProgram({
       gxx: config.gxx,
@@ -628,6 +711,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       sourcePath,
       language: submission.language,
     });
+    throwIfCanceled(signal);
     if (!compiled.ok || !compiled.exe) {
       persistJudged(db, submissionId, events, [], 'CE', 0, clipMessage(compiled.message));
       return;
@@ -647,6 +731,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         sourcePath: resolveDataPath(config.dataDir, problem.checker_path),
         includeDir: join(process.cwd(), 'vendor'),
       });
+      throwIfCanceled(signal);
       if (!checkerCompiled.ok || !checkerCompiled.exe) {
         markSubmissionFailed(
           db,
@@ -659,10 +744,12 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       checkerExe = checkerCompiled.exe;
     }
 
+    throwIfCanceled(signal);
     setSubmissionStatus(db, submissionId, 'running');
     const results: JudgedResult[] = [];
     const passed = new Set<number>();
     for (const testcase of testcases) {
+      throwIfCanceled(signal);
       const dependencies = (testcase.depends_on ?? '')
         .split(/[,\s]+/)
         .filter(Boolean)
@@ -686,7 +773,9 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         workdir,
         outExe,
         checkerExe,
+        signal,
       });
+      throwIfCanceled(signal);
       results.push(result);
       if (result.verdict === 'AC') passed.add(testcase.id);
     }
@@ -707,6 +796,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
     }));
     const score = aggregateSubtask(dtoResults, subtaskGroups);
 
+    throwIfCanceled(signal);
     persistJudged(
       db,
       submissionId,
@@ -716,6 +806,15 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       score,
     );
   } catch (err) {
+    if (isCanceledFailure(err, signal)) {
+      try {
+        markSubmissionCanceled(db, submissionId, events);
+      } catch {
+        // The database itself may be unavailable; the scheduler records the
+        // task failure separately.
+      }
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     try {
       markSubmissionFailed(db, submissionId, events, `judge failed: ${message}`);
