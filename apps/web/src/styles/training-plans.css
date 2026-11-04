@@ -1,0 +1,131 @@
+/* Training Plans：训练计划列表、详情与创建弹窗 */
+
+.training-plan-title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.training-plan-title-link {
+  font-weight: 600;
+}
+
+.training-plan-desc {
+  max-width: 560px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.training-plan-empty {
+  padding: 18px 0;
+  text-align: center;
+}
+
+.training-plan-empty .muted {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.training-plan-time {
+  font-size: 12px;
+}
+
+.training-plan-progress-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.training-plan-progress-cell .ant-progress {
+  margin: 0;
+}
+
+.training-plan-overdue {
+  font-size: 12px;
+}
+
+.training-plan-descriptions .ant-descriptions-item-label {
+  color: var(--text-3);
+}
+
+.training-plan-descriptions .ant-descriptions-item-content {
+  color: var(--text);
+}
+
+.training-plan-summary-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 12px;
+}
+
+.training-plan-summary-stats .ant-statistic-title {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.training-plan-summary-stats .ant-statistic-content {
+  font-size: 20px;
+}
+
+.training-plan-items-toolbar {
+  margin-bottom: 12px;
+}
+
+.training-plan-item-title {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.training-plan-item-meta {
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.training-plan-completed-at {
+  margin-top: 2px;
+  font-size: 12px;
+}
+
+.training-plan-member-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.training-plan-member-name {
+  font-weight: 500;
+}
+
+.training-plan-member-row-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.training-plan-member-items {
+  margin: -6px 0;
+}
+
+.training-plan-create-section {
+  margin-top: 4px;
+}
+
+.training-plan-create-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+@media (max-width: 720px) {
+  .training-plan-summary-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
