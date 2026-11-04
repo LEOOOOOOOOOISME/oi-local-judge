@@ -75,7 +75,8 @@ function presetForMode(mode: string): RankingPreset {
  * team equivalent, so it falls back to the mode's builtin preset.
  *
  * `freeze_at` is applied whenever it is set, matching the previous team
- * ranking behaviour: submissions created after it are hidden from the board.
+ * ranking behaviour: submissions and team-attributed hacks created after it are
+ * hidden from the board. The individual board keeps its own freeze semantics.
  */
 export function getTeamRanking(
   db: DatabaseSync,
@@ -125,25 +126,28 @@ export function getTeamRanking(
   const preset: RankingPreset = parsed.pluginName
     ? presetForMode(contest.mode)
     : parsed.config.preset;
+  const freezeAt = contest.freeze_at ?? null;
   const config: RankingConfig = {
     ...parsed.config,
     preset,
     // Team boards always honour freeze_at when it is configured, regardless of
     // the contest status the official ranking keys its freeze off.
-    freezeAt: contest.freeze_at,
+    freezeAt,
   };
 
   // Hack points belong to the team the hacker represented at creation time.
   // `team_id` is null for individual hacks and for legacy rows written before
   // team attribution existed, so those never reach the team board. `promoted`
   // is the administrator-confirmed form of a successful hack, while `reverted`
-  // and unjudgeable states contribute nothing.
+  // and unjudgeable states contribute nothing. Hacks created after freeze_at
+  // are hidden exactly like the team submissions the shared engine drops.
   const hacks = listHacks(db, contestId)
     .filter(
       (hack) =>
         hack.team_id !== null &&
         teamIdSet.has(hack.team_id) &&
-        (hack.status === 'success' || hack.status === 'failed' || hack.status === 'promoted'),
+        (hack.status === 'success' || hack.status === 'failed' || hack.status === 'promoted') &&
+        (freezeAt === null || hack.created_at <= freezeAt),
     )
     .map((hack) => ({
       hackerId: hack.team_id as number,

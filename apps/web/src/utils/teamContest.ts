@@ -82,17 +82,24 @@ function csvCell(value: string): string {
 
 /**
  * 团队榜 CSV：名次/团队/成员数/总分（ACM/CF-like 为 AC 数/罚时）/AC 数/各题得分。
+ *
+ * `hackScore` 列始终存在以保持导出列稳定；只有 CF-like 团队榜真正计 Hack 分，
+ * OI/IOI/ACM 导出为 0。
  */
 export function buildTeamRankingCsv(
   problems: Array<Pick<TeamRankingProblem, 'id'>>,
   rows: TeamRankingRow[],
   acmStyle = false,
+  cfLike = false,
 ): string {
+  const hackCell = (row: TeamRankingRow): string =>
+    String(cfLike ? (row.hackScore ?? 0) : 0);
   const header = [
     '排名',
     '团队',
     '成员数',
     ...(acmStyle ? ['AC 数', '罚时'] : ['总分', 'AC 数']),
+    'Hack 分',
     ...problems.map((_problem, index) => rankingProblemLetter(index)),
   ];
   const lines = rows.map((row) => [
@@ -102,6 +109,7 @@ export function buildTeamRankingCsv(
     ...(acmStyle
       ? [String(row.solved), String(row.penalty)]
       : [String(row.totalScore), String(row.solved)]),
+    hackCell(row),
     ...problems.map(
       (problem) => String(row.cells.find((cell) => cell.problemId === problem.id)?.score ?? 0),
     ),
