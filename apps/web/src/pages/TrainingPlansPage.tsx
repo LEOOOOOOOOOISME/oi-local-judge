@@ -12,6 +12,7 @@ import { ErrorResult, PageLoading } from '../components/PageStates';
 import { TrainingPlanCreateModal } from '../components/TrainingPlanCreateModal';
 import { formatDateTime } from '../utils/format';
 import {
+  canSearchAllGroups,
   filterTrainingPlans,
   manageableGroups,
   planTimeStatus,
@@ -53,7 +54,8 @@ export function TrainingPlansPage() {
     [classesQuery.data, teamsQuery.data, user?.id, isAdmin],
   );
   // 管理员入口始终可见（若不在任何组中，弹窗会给出提示）。
-  const canCreate = isAdmin || groups.length > 0;
+  // 比赛管理员现在也能搜索全量班级/团队，因此同样始终显示创建入口。
+  const canCreate = canSearchAllGroups(user?.role) || groups.length > 0;
 
   const plans = plansQuery.data ?? [];
   const visiblePlans = filterTrainingPlans(plans, filter);

@@ -74,12 +74,12 @@ function escapeLike(value: string): string {
 }
 
 /**
- * 管理员全量团队搜索：按团队名模糊匹配（大小写不敏感），按名称排序。
- * `limit` 会被夹在 1–100 之间，默认 20。
+ * 管理员全量组搜索：按名称模糊匹配（大小写不敏感），按名称排序。
+ * `kind` 可选过滤班级/团队；`limit` 会被夹在 1–100 之间，默认 20。
  */
 export function searchTeams(
   db: DatabaseSync,
-  filter: { query?: string; limit?: number } = {},
+  filter: { query?: string; limit?: number; kind?: TeamKind } = {},
 ): AdminTeamRow[] {
   const clauses: string[] = [];
   const params: Array<string | number> = [];
@@ -87,6 +87,10 @@ export function searchTeams(
   if (query !== '') {
     clauses.push("t.name LIKE ? ESCAPE '\\'");
     params.push(`%${escapeLike(query)}%`);
+  }
+  if (filter.kind !== undefined) {
+    clauses.push('t.kind = ?');
+    params.push(filter.kind);
   }
   const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
   const limit = Math.min(Math.max(Math.floor(filter.limit ?? 20), 1), 100);

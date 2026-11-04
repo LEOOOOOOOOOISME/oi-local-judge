@@ -30,9 +30,11 @@ import type {
 import { useAuth } from '../auth/AuthContext';
 import { formatDateTime } from '../utils/format';
 import {
+  canSearchAllGroups,
   describeTrainingPlanError,
   manageableGroups,
 } from '../utils/trainingPlans';
+import { AdminGroupSearchSelect } from './AdminGroupSearchSelect';
 
 interface CreateTrainingPlanFormValues {
   groupId: number;
@@ -51,7 +53,8 @@ interface DraftTrainingPlanItem {
 /**
  * 创建训练计划弹窗。
  *
- * 组只能从 `/api/classes` 与 `/api/teams` 返回的“我可管理的班级/团队”中选择，
+ * 管理员/比赛管理员通过 `GET /api/admin/groups` 搜索并选择任意班级/团队；
+ * 普通用户只能从 `/api/classes` 与 `/api/teams` 返回的“我可管理的组”中选择，
  * 与后端 `canManageGroup` 的权限口径保持一致。题目可以先留空，创建后在详情页补充。
  */
 export function TrainingPlanCreateModal({
@@ -82,6 +85,7 @@ export function TrainingPlanCreateModal({
     currentUserId: user?.id,
     isAdmin: user?.role === 'admin',
   });
+  const canSearchAll = canSearchAllGroups(user?.role);
 
   const resetDraft = () => {
     setItems([]);
@@ -201,7 +205,7 @@ export function TrainingPlanCreateModal({
       okText="创建"
       cancelText="取消"
       confirmLoading={createMutation.isPending}
-      okButtonProps={{ disabled: groups.length === 0 }}
+      okButtonProps={{ disabled: !canSearchAll && groups.length === 0 }}
       destroyOnHidden
     >
       <Form<CreateTrainingPlanFormValues>
@@ -210,7 +214,7 @@ export function TrainingPlanCreateModal({
         requiredMark={false}
         onFinish={(values) => createMutation.mutate(values)}
       >
-        {groups.length === 0 && !groupsLoading ? (
+        {!canSearchAll && groups.length === 0 && !groupsLoading ? (
           <Alert
             type="warning"
             showIcon
@@ -224,18 +228,26 @@ export function TrainingPlanCreateModal({
           label="班级 / 团队"
           name="groupId"
           rules={[{ required: true, message: '请选择班级或团队' }]}
-          extra="只列出你当前可以管理的班级与团队。"
+          extra={
+            canSearchAll
+              ? '管理员可搜索并选择任意班级或团队。'
+              : '只列出你当前可以管理的班级与团队。'
+          }
         >
-          <Select
-            showSearch
-            optionFilterProp="label"
-            loading={groupsLoading}
-            placeholder={groupsLoading ? '正在加载可管理的组…' : '选择班级或团队'}
-            options={groups.map((group) => ({
-              value: group.id,
-              label: group.label,
-            }))}
-          />
+          {canSearchAll ? (
+            <AdminGroupSearchSelect placeholder="搜索班级或团队名称" />
+          ) : (
+            <Select
+              showSearch
+              optionFilterProp="label"
+              loading={groupsLoading}
+              placeholder={groupsLoading ? '正在加载可管理的组…' : '选择班级或团队'}
+              options={groups.map((group) => ({
+                value: group.id,
+                label: group.label,
+              }))}
+            />
+          )}
         </Form.Item>
 
         <Form.Item
