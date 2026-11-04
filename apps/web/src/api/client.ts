@@ -183,3 +183,47 @@ export function apiUpload<T>(
     headers: { 'Content-Type': contentType },
   });
 }
+
+/**
+ * 以当前会话下载后端生成的文件（如比赛成绩报告 CSV）。
+ * 手动触发浏览器保存，避免整页跳转离开管理控制台。
+ */
+export async function downloadApiFile(path: string, filename: string): Promise<void> {
+  let response: Response;
+  try {
+    response = await fetch(path, { credentials: 'include' });
+  } catch {
+    throw new ApiError(0, '网络连接失败，请确认后端服务已启动');
+  }
+
+  if (!response.ok) {
+    const text = await response.text();
+    let envelope: ApiEnvelope<unknown> | null = null;
+    if (text.length > 0) {
+      try {
+        envelope = JSON.parse(text) as ApiEnvelope<unknown>;
+      } catch {
+        envelope = null;
+      }
+    }
+    if (response.status === 401) emitUnauthorized();
+    throw new ApiError(
+      response.status,
+      envelope?.error?.message ?? defaultErrorMessage(response.status),
+      envelope?.error?.code,
+    );
+  }
+
+  const blob = await response.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const anchor = document.createElement('a');
+    anchor.href = objectUrl;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
