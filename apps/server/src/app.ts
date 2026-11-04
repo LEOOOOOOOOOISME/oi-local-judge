@@ -25,6 +25,7 @@ import { registerAdminJudgeRoutes } from './http/admin-judge.js';
 import { registerHackRoutes } from './http/hacks.js';
 import { registerTeamRoutes } from './http/teams.js';
 import { registerAdminTeamRoutes } from './http/admin-teams.js';
+import { registerClassRoutes } from './http/classes.js';
 import { registerProblemSetRoutes } from './http/problem-sets.js';
 import { recordAudit } from './storage/repos/audit.js';
 import { createHub, type Hub } from './realtime/hub.js';
@@ -142,6 +143,12 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   registerTeamRoutes(app, { db, config, auth });
   registerAdminTeamRoutes(app, {
     db,
+    adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
+  });
+  registerClassRoutes(app, {
+    db,
+    config,
+    auth,
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
   });
   registerProblemSetRoutes(app, { db, config, auth });
