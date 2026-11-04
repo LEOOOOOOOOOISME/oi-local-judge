@@ -40,7 +40,7 @@ import {
   teamModeLabel,
 } from '../utils/teamContest';
 import {
-  allowsSelfRegistration,
+  allowsIndividualSelfRegistration,
   canCancelAcceptedRegistration,
   describeRegistrationError,
   registrationModeLabel,
@@ -138,7 +138,11 @@ export function ContestOverviewPage() {
   const teamMode = resolveTeamMode(contestSource);
   const teamEnabled = teamMode !== 'individual';
   const registrationMode = resolveRegistrationMode(contestSource);
-  const registrationEnabled = allowsSelfRegistration(registrationMode);
+  const teamOnly = teamMode === 'team';
+  const individualRegistrationEnabled = allowsIndividualSelfRegistration(
+    registrationMode,
+    teamMode,
+  );
   const isManager = user?.role === 'admin' || user?.role === 'contestmanager';
 
   const myTeamsQuery = useQuery({
@@ -154,11 +158,12 @@ export function ContestOverviewPage() {
     staleTime: 10_000,
     retry: false,
   });
-  // manual 模式下后端只允许管理员导入，选手侧不显示自助报名入口。
+  // manual 模式下后端只允许管理员导入，选手侧不显示自助报名入口；纯团队赛仍需
+  // 读取报名状态，以便展示通过团队带入的 accepted 成员。
   const myRegistrationQuery = useQuery({
     queryKey: ['my-registration', contestId],
     queryFn: () => apiGet<MyContestRegistration>(`/api/contests/${contestId}/registration`),
-    enabled: validId && Boolean(user) && registrationEnabled,
+    enabled: validId && Boolean(user) && (individualRegistrationEnabled || teamOnly),
     staleTime: 5_000,
     retry: false,
   });
@@ -533,7 +538,50 @@ export function ContestOverviewPage() {
               isManager ? <Link to={`/admin/contests/${contest.id}`}>报名管理</Link> : null
             }
           >
-            {registrationMode === 'manual' ? (
+            {teamOnly ? (
+              <div className="stack">
+                {!user ? (
+                  <Empty
+                    image={Empty.PRESENTED_IMAGE_SIMPLE}
+                    description={<Link to={loginHref}>登录后查看团队报名状态</Link>}
+                  />
+                ) : myRegistrationQuery.isPending ? (
+                  <div className="inline-loading">
+                    <Spin />
+                  </div>
+                ) : myRegistrationQuery.isError ? (
+                  <div className="side-error">
+                    <span className="muted">报名状态加载失败</span>
+                    <Button size="small" onClick={() => void myRegistrationQuery.refetch()}>
+                      重试
+                    </Button>
+                  </div>
+                ) : myRegistration ? (
+                  <div className="stack">
+                    <Space wrap>
+                      <Tag color={registrationStatusColor(myRegistration.status)}>
+                        {myRegistration.status === 'accepted'
+                          ? '已报名'
+                          : registrationStatusLabel(myRegistration.status)}
+                      </Tag>
+                      {myRegistration.checkedInAt !== null ? (
+                        <Tag color="blue">已签到</Tag>
+                      ) : null}
+                    </Space>
+                    <span className="muted">
+                      {myRegistration.status === 'accepted'
+                        ? '你已随团队报名本场比赛，团队报名与成员调整由队长负责。'
+                        : '本场比赛仅限团队报名，请由队长完成团队报名。'}
+                    </span>
+                  </div>
+                ) : (
+                  <div className="stack">
+                    <span className="muted">本场比赛仅限团队报名，个人不能自助报名。</span>
+                    <span className="muted">请由队长完成团队报名。</span>
+                  </div>
+                )}
+              </div>
+            ) : registrationMode === 'manual' ? (
               <div className="stack">
                 <Space wrap>
                   <Tag>{registrationModeLabel(registrationMode)}</Tag>
