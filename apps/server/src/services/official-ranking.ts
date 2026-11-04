@@ -59,7 +59,15 @@ export interface RankingDelta {
   removed: number[];
 }
 
-function parseConfig(contest: ContestRow): {
+/**
+ * Resolves the effective ranking config of a contest: the stored
+ * `ranking_rule_json` preset when it is a builtin one, otherwise a preset
+ * derived from `contest.mode`. Plugin presets are reported through
+ * `pluginName`; `config.preset` then falls back to `oi` for callers that can
+ * only run a builtin preset. `freezeAt` reflects the contest's *official*
+ * freeze status, so callers with different freeze semantics must override it.
+ */
+export function parseRankingConfig(contest: ContestRow): {
   config: RankingConfig;
   rawPreset: string;
   pluginName: string | null;
@@ -205,7 +213,7 @@ export async function computeOfficialRanking(
   }));
   const problemIds = problems.map((problem) => problem.id);
   const userIds = getVisibleParticipants(db, contestId);
-  const parsed = parseConfig(contest);
+  const parsed = parseRankingConfig(contest);
 
   if (
     contest.official_frozen_until !== null &&

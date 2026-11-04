@@ -72,25 +72,28 @@ function csvCell(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-/** 团队榜 CSV：名次/团队/成员数/总分/AC 数/各题得分。 */
+/**
+ * 团队榜 CSV：名次/团队/成员数/总分（ACM/CF-like 为 AC 数/罚时）/AC 数/各题得分。
+ */
 export function buildTeamRankingCsv(
   problems: Array<Pick<TeamRankingProblem, 'id'>>,
   rows: TeamRankingRow[],
+  acmStyle = false,
 ): string {
   const header = [
     '排名',
     '团队',
     '成员数',
-    '总分',
-    'AC 数',
+    ...(acmStyle ? ['AC 数', '罚时'] : ['总分', 'AC 数']),
     ...problems.map((_problem, index) => rankingProblemLetter(index)),
   ];
   const lines = rows.map((row) => [
     String(row.rank),
     row.teamName,
     String(row.memberCount),
-    String(row.totalScore),
-    String(row.solved),
+    ...(acmStyle
+      ? [String(row.solved), String(row.penalty)]
+      : [String(row.totalScore), String(row.solved)]),
     ...problems.map(
       (problem) => String(row.cells.find((cell) => cell.problemId === problem.id)?.score ?? 0),
     ),
