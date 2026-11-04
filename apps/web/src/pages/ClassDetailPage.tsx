@@ -12,15 +12,16 @@ import {
   Result,
   Select,
   Space,
+  Switch,
   Table,
   Tag,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
-import { Link, useParams } from 'react-router-dom';
+import { PlusOutlined, ReloadOutlined, SettingOutlined, DeleteOutlined } from '@ant-design/icons';
+import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, apiDelete, apiGet, apiPost } from '../api/client';
-import type { ClassDetail, ClassMember, ClassRole } from '../api/types';
+import { ApiError, apiDelete, apiGet, apiPatch, apiPost } from '../api/client';
+import type { ClassDetail, ClassMember, ClassRole, UpdateClassRequest } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { AllowContestTag, ClassRoleTag } from '../components/ClassTags';
 import { ClassWorkbench } from '../components/ClassWorkbench';
@@ -30,6 +31,7 @@ import {
   CLASS_MEMBER_ROLE_OPTIONS,
   addableClassRoles,
   canManageClassCoaches,
+  canManageClassSettings,
   canManageClassStudents,
   countClassMembers,
   describeClassError,
@@ -43,15 +45,23 @@ interface AddMemberFormValues {
   role: ClassRole;
 }
 
+interface ClassSettingsFormValues {
+  name: string;
+  allowContest: boolean;
+}
+
 export function ClassDetailPage() {
   const { message } = App.useApp();
   const { user } = useAuth();
   const params = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const classId = Number(params.id);
   const validClassId = Number.isInteger(classId) && classId > 0;
   const [addOpen, setAddOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [addForm] = Form.useForm<AddMemberFormValues>();
+  const [settingsForm] = Form.useForm<ClassSettingsFormValues>();
 
   const detailQuery = useQuery({
     queryKey: ['class', classId],
@@ -110,6 +120,37 @@ export function ClassDetailPage() {
     },
   });
 
+  const updateSettingsMutation = useMutation({
+    mutationFn: (values: ClassSettingsFormValues) => {
+      const body: UpdateClassRequest = {
+        name: values.name.trim(),
+        allowContest: values.allowContest,
+      };
+      return apiPatch<null>(`/api/classes/${classId}`, body);
+    },
+    onSuccess: () => {
+      message.success('班级设置已保存');
+      setSettingsOpen(false);
+      invalidateClass();
+    },
+    onError: (error) => {
+      message.error(describeClassError(error, '保存班级设置失败'));
+    },
+  });
+
+  const deleteClassMutation = useMutation({
+    mutationFn: () => apiDelete<null>(`/api/classes/${classId}`),
+    onSuccess: () => {
+      message.success('班级已删除');
+      queryClient.removeQueries({ queryKey: ['class', classId] });
+      void queryClient.invalidateQueries({ queryKey: ['classes'] });
+      navigate('/classes');
+    },
+    onError: (error) => {
+      message.error(describeClassError(error, '删除班级失败'));
+    },
+  });
+
   const retry = () => void detailQuery.refetch();
 
   if (!validClassId) {
@@ -165,6 +206,7 @@ export function ClassDetailPage() {
   };
   const canManageStudents = canManageClassStudents(permissionInput);
   const canManageCoaches = canManageClassCoaches(permissionInput);
+  const canManageSettings = canManageClassSettings(permissionInput);
   const canAddMembers = canManageStudents || canManageCoaches;
   const canViewLearning = canViewClassLearning({ viewerRole, isAdmin });
   const counts = detail.members ? countClassMembers(detail.members) : null;
@@ -174,6 +216,14 @@ export function ClassDetailPage() {
   const roleOptions = CLASS_MEMBER_ROLE_OPTIONS.filter((option) =>
     allowedRoles.includes(option.value),
   );
+
+  const openSettings = () => {
+    settingsForm.setFieldsValue({
+      name: detail.name,
+      allowContest: detail.allowContest,
+    });
+    setSettingsOpen(true);
+  };
 
   const memberColumns: TableColumnsType<ClassMember> = [
     {
@@ -283,6 +333,11 @@ export function ClassDetailPage() {
             <Button icon={<ReloadOutlined />} loading={detailQuery.isFetching} onClick={retry}>
               刷新
             </Button>
+            {canManageSettings ? (
+              <Button icon={<SettingOutlined />} onClick={openSettings}>
+                设置
+              </Button>
+            ) : null}
             {canAddMembers ? (
               <Button
                 type="primary"
@@ -404,6 +459,83 @@ export function ClassDetailPage() {
             {canManageCoaches ? '' : '添加教练需要班级创建者或管理员权限。'}
           </div>
         </Form>
+      </Modal>
+
+      <Modal
+        title="班级设置"
+        open={settingsOpen}
+        onCancel={() => setSettingsOpen(false)}
+        onOk={() => settingsForm.submit()}
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={updateSettingsMutation.isPending}
+        afterClose={() => settingsForm.resetFields()}
+        destroyOnHidden
+        footer={(_, { OkBtn, CancelBtn }) => (
+          <div className="class-settings-footer">
+            <Popconfirm
+              title="删除班级？"
+              description="将移除全部成员并撤销班级参赛资格，且无法恢复。"
+              okText="删除"
+              okButtonProps={{ danger: true }}
+              cancelText="取消"
+              onConfirm={() => deleteClassMutation.mutate()}
+            >
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                loading={deleteClassMutation.isPending}
+                disabled={updateSettingsMutation.isPending}
+              >
+                删除班级
+              </Button>
+            </Popconfirm>
+            <Space>
+              <CancelBtn />
+              <OkBtn />
+            </Space>
+          </div>
+        )}
+      >
+        <Form<ClassSettingsFormValues>
+          form={settingsForm}
+          layout="vertical"
+          requiredMark={false}
+          onFinish={(values) => updateSettingsMutation.mutate(values)}
+        >
+          <Form.Item
+            label="班级名称"
+            name="name"
+            rules={[
+              { required: true, message: '请输入班级名称' },
+              {
+                validator: (_rule, value: string | undefined) => {
+                  const length = Array.from((value ?? '').trim()).length;
+                  if (length < 2 || length > 40) {
+                    return Promise.reject(new Error('班级名称长度为 2~40 个字符'));
+                  }
+                  return Promise.resolve();
+                },
+              },
+            ]}
+          >
+            <Input placeholder="例如：高一(1)班" maxLength={40} />
+          </Form.Item>
+          <Form.Item
+            label="允许以班级为单位参赛"
+            name="allowContest"
+            valuePropName="checked"
+            extra="关闭后不能再以该班级报名新的比赛；已报名的比赛不会被自动取消。"
+          >
+            <Switch />
+          </Form.Item>
+        </Form>
+        <Alert
+          type="warning"
+          showIcon
+          message="删除班级不可恢复"
+          description="删除后会清理全部班级成员、班级报名记录以及由班级授予的参赛资格；管理员导入与自主报名不受影响。"
+        />
       </Modal>
     </div>
   );

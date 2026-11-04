@@ -16,6 +16,7 @@ import {
   canTeachGroup,
   createClass,
   createTeam,
+  deleteClass,
   getClass,
   getTeam,
   listClassesForUser,
@@ -24,6 +25,7 @@ import {
   removeClassMember,
   transferCaptain,
   TeamError,
+  updateClass,
 } from '../src/services/teams.js';
 import {
   ContestTeamError,
@@ -381,6 +383,184 @@ describe('class groups', () => {
     expect(canManageGroup(db, teamId, carol)).toBe(true);
     expect(canTeachGroup(db, teamId, carol)).toBe(true);
     expect(canManageCoaches(db, teamId, carol)).toBe(true);
+  });
+
+  it('lets the owner and admins update a class but not other coaches', () => {
+    const { db, admin, manager, alice } = setup();
+    const classId = createClass(db, {
+      name: 'Class A',
+      ownerId: manager,
+      actorRole: 'contestmanager',
+    });
+    addClassCoach(db, { classId, actorId: manager, username: 'alice' });
+
+    updateClass(db, {
+      classId,
+      actorId: manager,
+      name: '  Renamed Class  ',
+      allowContest: false,
+    });
+    expect(getClass(db, classId)).toMatchObject({
+      name: 'Renamed Class',
+      allowContest: false,
+    });
+
+    // An admin may edit without owning the class.
+    updateClass(db, { classId, actorId: admin, isAdmin: true, name: 'Admin Renamed' });
+    expect(getClass(db, classId)?.name).toBe('Admin Renamed');
+
+    // A non-owner coach cannot rename or flip the switch.
+    expectTeamError(
+      () => updateClass(db, { classId, actorId: alice, name: 'Coach Renamed' }),
+      'CLASS_FORBIDDEN',
+      403,
+    );
+    expectTeamError(
+      () => updateClass(db, { classId, actorId: alice, allowContest: false }),
+      'CLASS_FORBIDDEN',
+      403,
+    );
+    expect(getClass(db, classId)).toMatchObject({
+      name: 'Admin Renamed',
+      allowContest: false,
+    });
+  });
+
+  it('validates class renames and enforces one name across teams and classes', () => {
+    const { db, manager, alice, bob } = setup();
+    const classId = createClass(db, {
+      name: 'Class A',
+      ownerId: manager,
+      actorRole: 'contestmanager',
+    });
+    createTeam(db, { name: 'Existing Team', ownerId: bob });
+    createClass(db, { name: 'Class B', ownerId: manager, actorRole: 'contestmanager' });
+
+    expectTeamError(
+      () => updateClass(db, { classId, actorId: manager, name: 'A' }),
+      'TEAM_NAME_INVALID',
+      400,
+    );
+    expectTeamError(
+      () => updateClass(db, { classId, actorId: manager, name: 'x'.repeat(41) }),
+      'TEAM_NAME_INVALID',
+      400,
+    );
+    expectTeamError(
+      () => updateClass(db, { classId, actorId: manager, name: 'Existing Team' }),
+      'TEAM_NAME_TAKEN',
+      409,
+    );
+    expectTeamError(
+      () => updateClass(db, { classId, actorId: manager, name: 'Class B' }),
+      'TEAM_NAME_TAKEN',
+      409,
+    );
+
+    // Keeping the current name and editing only the switch is allowed.
+    updateClass(db, { classId, actorId: manager, name: 'Class A', allowContest: false });
+    expect(getClass(db, classId)).toMatchObject({ name: 'Class A', allowContest: false });
+
+    // An empty patch and team ids are rejected by the class service.
+    expectTeamError(
+      () => updateClass(db, { classId, actorId: manager }),
+      'BAD_REQUEST',
+      400,
+    );
+    const teamId = createTeam(db, { name: 'Solo Team', ownerId: alice });
+    expectTeamError(
+      () => updateClass(db, { classId: teamId, actorId: alice, name: 'Whatever' }),
+      'CLASS_NOT_FOUND',
+      404,
+    );
+    expect(getTeam(db, teamId)?.kind).toBe('team');
+  });
+
+  it('deletes a class with memberships, participation, registrations and an audit record', () => {
+    const { db, admin, manager, alice, bob } = setup();
+    const contestId = makeContest(db);
+    const classId = createClass(db, {
+      name: 'Contest Class',
+      ownerId: manager,
+      actorRole: 'contestmanager',
+    });
+    addClassCoach(db, { classId, actorId: manager, username: 'alice' });
+    addClassMember(db, { classId, actorId: manager, username: 'bob' });
+    registerTeamForContest(db, {
+      contestId,
+      teamId: classId,
+      actorId: manager,
+      isAdmin: false,
+    });
+    // Only the student is enrolled; coaches stay staff.
+    expect(getRegistrationRow(db, contestId, bob)).not.toBeNull();
+    expect(getRegistrationRow(db, contestId, manager)).toBeNull();
+    const contestTeams = db
+      .prepare('SELECT COUNT(*) AS n FROM contest_teams WHERE team_id = ?')
+      .get(classId) as { n: number };
+    expect(Number(contestTeams.n)).toBe(1);
+
+    deleteClass(db, { classId, actorId: manager, isAdmin: false });
+
+    expect(getClass(db, classId)).toBeNull();
+    expect(getTeam(db, classId)).toBeNull();
+    const members = db
+      .prepare('SELECT COUNT(*) AS n FROM team_members WHERE team_id = ?')
+      .get(classId) as { n: number };
+    expect(Number(members.n)).toBe(0);
+    expect(getRegistrationRow(db, contestId, bob)).toBeNull();
+    expect(getRegistrationRow(db, contestId, alice)).toBeNull();
+    const contestTeamsAfter = db
+      .prepare('SELECT COUNT(*) AS n FROM contest_teams WHERE team_id = ?')
+      .get(classId) as { n: number };
+    expect(Number(contestTeamsAfter.n)).toBe(0);
+
+    const audit = db
+      .prepare(
+        "SELECT actor_id, action, target_type, target_id FROM audit_logs WHERE action = 'class.dissolve'",
+      )
+      .get() as
+      | { actor_id: number; action: string; target_type: string; target_id: string }
+      | undefined;
+    expect(audit).toMatchObject({
+      actor_id: manager,
+      action: 'class.dissolve',
+      target_type: 'class',
+      target_id: String(classId),
+    });
+
+    // Admin deletion and non-class ids.
+    const another = createClass(db, {
+      name: 'Admin Deleted',
+      ownerId: manager,
+      actorRole: 'contestmanager',
+    });
+    deleteClass(db, { classId: another, actorId: admin, isAdmin: true });
+    expect(getClass(db, another)).toBeNull();
+
+    const teamId = createTeam(db, { name: 'Delete Team', ownerId: bob });
+    expectTeamError(
+      () => deleteClass(db, { classId: teamId, actorId: bob, isAdmin: false }),
+      'CLASS_NOT_FOUND',
+      404,
+    );
+    expect(getTeam(db, teamId)).not.toBeNull();
+  });
+
+  it('rejects class deletion by a non-owner coach', () => {
+    const { db, manager, alice } = setup();
+    const classId = createClass(db, {
+      name: 'Protected Class',
+      ownerId: manager,
+      actorRole: 'contestmanager',
+    });
+    addClassCoach(db, { classId, actorId: manager, username: 'alice' });
+    expectTeamError(
+      () => deleteClass(db, { classId, actorId: alice, isAdmin: false }),
+      'CLASS_FORBIDDEN',
+      403,
+    );
+    expect(getClass(db, classId)).not.toBeNull();
   });
 });
 

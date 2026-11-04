@@ -7,11 +7,13 @@ import {
   addClassCoach,
   addClassMember,
   createClass,
+  deleteClass,
   getClass,
   listClassesForUser,
   removeClassCoach,
   removeClassMember,
   TeamError,
+  updateClass,
   type TeamDetail,
   type TeamMemberDto,
   type TeamRole,
@@ -73,7 +75,10 @@ export function registerClassRoutes(app: FastifyInstance, options: ClassRouteOpt
     { preHandler },
     async (request, reply) => {
       const classId = parsePositiveInt(request.params.id);
-      const group = classId === null ? null : getClass(options.db, classId);
+      if (classId === null) {
+        return notFound(reply, 'CLASS_NOT_FOUND', 'class not found');
+      }
+      const group = getClass(options.db, classId);
       if (!group) {
         return notFound(reply, 'CLASS_NOT_FOUND', 'class not found');
       }
@@ -92,6 +97,70 @@ export function registerClassRoutes(app: FastifyInstance, options: ClassRouteOpt
         data.members = group.members;
       }
       return { ok: true, data };
+    },
+  );
+
+  app.patch<{ Params: { id: string }; Body: { name?: unknown; allowContest?: unknown } }>(
+    '/api/classes/:id',
+    { preHandler },
+    async (request, reply) => {
+      const classId = parsePositiveInt(request.params.id);
+      if (classId === null) {
+        return notFound(reply, 'CLASS_NOT_FOUND', 'class not found');
+      }
+      const group = getClass(options.db, classId);
+      if (!group) {
+        return notFound(reply, 'CLASS_NOT_FOUND', 'class not found');
+      }
+      const body = request.body ?? {};
+      if (body.name === undefined && body.allowContest === undefined) {
+        return badRequest(reply, 'BAD_REQUEST', 'name or allowContest is required');
+      }
+      if (body.name !== undefined && typeof body.name !== 'string') {
+        return badRequest(reply, 'TEAM_NAME_INVALID', 'class name must be a string');
+      }
+      if (body.allowContest !== undefined && typeof body.allowContest !== 'boolean') {
+        return badRequest(reply, 'BAD_REQUEST', 'allowContest must be a boolean');
+      }
+      const actor = request.user!;
+      try {
+        updateClass(options.db, {
+          classId,
+          actorId: actor.id,
+          isAdmin: actor.role === 'admin',
+          name: body.name,
+          allowContest: body.allowContest,
+        });
+        return { ok: true, data: null };
+      } catch (err) {
+        return sendClassError(reply, err);
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/classes/:id',
+    { preHandler },
+    async (request, reply) => {
+      const classId = parsePositiveInt(request.params.id);
+      if (classId === null) {
+        return notFound(reply, 'CLASS_NOT_FOUND', 'class not found');
+      }
+      const group = getClass(options.db, classId);
+      if (!group) {
+        return notFound(reply, 'CLASS_NOT_FOUND', 'class not found');
+      }
+      const actor = request.user!;
+      try {
+        deleteClass(options.db, {
+          classId,
+          actorId: actor.id,
+          isAdmin: actor.role === 'admin',
+        });
+        return { ok: true, data: null };
+      } catch (err) {
+        return sendClassError(reply, err);
+      }
     },
   );
 
