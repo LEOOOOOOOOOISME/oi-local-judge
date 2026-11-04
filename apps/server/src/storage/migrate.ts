@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS contest_participants(
   contest_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'accepted', extra_time INTEGER NOT NULL DEFAULT 0,
   registered_at INTEGER, checked_in_at INTEGER, reviewed_at INTEGER, reviewed_by INTEGER,
+  source TEXT NOT NULL DEFAULT 'manual',
   PRIMARY KEY(contest_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS contest_official_scores(
@@ -277,6 +278,7 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'contest_participants', 'checked_in_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'reviewed_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'reviewed_by', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'source', "TEXT NOT NULL DEFAULT 'manual'");
   ensureColumn(db, 'contests', 'registration_mode', "TEXT NOT NULL DEFAULT 'manual'");
   ensureColumn(db, 'contests', 'registration_open_at', 'INTEGER');
   ensureColumn(db, 'contests', 'registration_close_at', 'INTEGER');

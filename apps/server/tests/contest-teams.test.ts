@@ -21,7 +21,15 @@ import { getRegistrationRow } from '../src/storage/repos/contest-registrations.j
 import { createProblem } from '../src/storage/repos/problems.js';
 import { getSubmission } from '../src/storage/repos/submissions.js';
 import { createUser } from '../src/storage/repos/users.js';
-import { addTeamMember, createTeam } from '../src/services/teams.js';
+import {
+  addTeamMember,
+  createTeam,
+  getTeam,
+  leaveTeam,
+  removeTeamMember,
+  TeamError,
+} from '../src/services/teams.js';
+import { registerForContest } from '../src/services/contest-registrations.js';
 import {
   ContestTeamError,
   getRegisteredTeamForUser,
@@ -752,6 +760,284 @@ describe('submission team attribution', () => {
     // submission in both mode; it no longer gets a team attribution.
     const { id } = submit(ctx, ctx.users.bob, contestId);
     expect(getSubmission(ctx.db, id)?.team_id).toBeNull();
+  });
+});
+
+describe('team membership contest sync', () => {
+  it('grants participation when a new member joins a registered team', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha');
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toBeNull();
+
+    const sync = addTeamMember(ctx.db, {
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      username: 'bob',
+      now: 2000,
+    });
+
+    expect(sync).toEqual({ linkedContestIds: [contestId], skipped: [] });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toMatchObject({
+      status: 'accepted',
+      source: 'team',
+      registered_at: 2000,
+    });
+  });
+
+  it('returns an empty report when the team has no contest registration', () => {
+    const ctx = setup();
+    const alpha = makeTeam(ctx, 'alice', 'Alpha');
+    const sync = addTeamMember(ctx.db, {
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      username: 'bob',
+    });
+    expect(sync).toEqual({ linkedContestIds: [], skipped: [] });
+  });
+
+  it('tracks participant provenance: manual, self and team', () => {
+    const ctx = setup();
+    const manualContest = makeContest(ctx);
+    addParticipant(ctx.db, manualContest, ctx.users.carol, 400);
+    expect(getRegistrationRow(ctx.db, manualContest, ctx.users.carol)).toMatchObject({
+      status: 'accepted',
+      source: 'manual',
+    });
+
+    const selfContest = createContest(ctx.db, {
+      name: 'SelfOpen',
+      teamMode: 'both',
+      registrationMode: 'open',
+      startAt: 10_000,
+      endAt: 20_000,
+      problemIds: [ctx.problemId],
+    });
+    expect(
+      registerForContest(ctx.db, { contestId: selfContest, userId: ctx.users.dave, now: 500 }),
+    ).toBe('accepted');
+    expect(getRegistrationRow(ctx.db, selfContest, ctx.users.dave)).toMatchObject({
+      status: 'accepted',
+      source: 'self',
+      registered_at: 500,
+    });
+
+    const teamContest = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob']);
+    registerTeamForContest(ctx.db, {
+      contestId: teamContest,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+    expect(getRegistrationRow(ctx.db, teamContest, ctx.users.alice)?.source).toBe('team');
+    expect(getRegistrationRow(ctx.db, teamContest, ctx.users.bob)?.source).toBe('team');
+  });
+
+  it('revokes team-sourced participation when a member leaves or is removed', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob']);
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+
+    leaveTeam(ctx.db, alpha, ctx.users.bob);
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toBeNull();
+    // The captain is still a member, so their participation stays.
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.alice)?.source).toBe('team');
+
+    // Rejoining restores participation, and a captain removal revokes it again.
+    addTeamMember(ctx.db, { teamId: alpha, actorId: ctx.users.alice, username: 'bob', now: 2000 });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)?.source).toBe('team');
+    removeTeamMember(ctx.db, { teamId: alpha, actorId: ctx.users.alice, userId: ctx.users.bob });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toBeNull();
+  });
+
+  it('preserves administrator imports and self-registrations when membership ends', () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, {
+      name: 'OpenTeamCup',
+      teamMode: 'both',
+      registrationMode: 'open',
+      startAt: 100_000,
+      endAt: 200_000,
+      problemIds: [ctx.problemId],
+    });
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob', 'carol']);
+    // An administrator imported bob individually before the team registered.
+    addParticipant(ctx.db, contestId, ctx.users.bob, 500);
+    // carol registered herself.
+    registerForContest(ctx.db, { contestId, userId: ctx.users.carol, now: 600 });
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+
+    removeTeamMember(ctx.db, { teamId: alpha, actorId: ctx.users.alice, userId: ctx.users.bob });
+    leaveTeam(ctx.db, alpha, ctx.users.carol);
+
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toMatchObject({
+      status: 'accepted',
+      source: 'manual',
+      registered_at: 500,
+    });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.carol)).toMatchObject({
+      status: 'accepted',
+      source: 'self',
+      registered_at: 600,
+    });
+  });
+
+  it('keeps an explicit administrator add authoritative over team-derived rows', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob']);
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)?.source).toBe('team');
+
+    addParticipant(ctx.db, contestId, ctx.users.bob, 2222);
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toMatchObject({
+      status: 'accepted',
+      source: 'manual',
+    });
+
+    // Overwriting the provenance protects the row from the team removal path.
+    removeTeamMember(ctx.db, { teamId: alpha, actorId: ctx.users.alice, userId: ctx.users.bob });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)?.source).toBe('manual');
+  });
+
+  it('skips contests where the user already represents another registered team', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob']);
+    const gamma = makeTeam(ctx, 'dave', 'Gamma');
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: gamma,
+      actorId: ctx.users.dave,
+      isAdmin: false,
+      now: 1222,
+    });
+
+    const sync = addTeamMember(ctx.db, {
+      teamId: gamma,
+      actorId: ctx.users.dave,
+      username: 'bob',
+      now: 2000,
+    });
+    expect(sync).toEqual({
+      linkedContestIds: [],
+      skipped: [{ contestId, teamId: alpha, teamName: 'Alpha' }],
+    });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toMatchObject({
+      source: 'team',
+      registered_at: 1111,
+    });
+
+    // Leaving Gamma does not revoke the row while Alpha still justifies it.
+    removeTeamMember(ctx.db, { teamId: gamma, actorId: ctx.users.dave, userId: ctx.users.bob });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).not.toBeNull();
+
+    // Once no registered team is left, the team-sourced row is removed.
+    removeTeamMember(ctx.db, { teamId: alpha, actorId: ctx.users.alice, userId: ctx.users.bob });
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toBeNull();
+  });
+
+  it('keeps membership sync transactional and idempotent', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha');
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      isAdmin: false,
+      now: 1111,
+    });
+
+    // Force the participant insert to fail: the membership insert must roll back.
+    ctx.db.exec(
+      `CREATE TRIGGER boom_participant_insert BEFORE INSERT ON contest_participants
+       WHEN NEW.user_id = ${ctx.users.bob} BEGIN SELECT RAISE(ABORT, 'boom'); END`,
+    );
+    expect(() =>
+      addTeamMember(ctx.db, {
+        teamId: alpha,
+        actorId: ctx.users.alice,
+        username: 'bob',
+        now: 2000,
+      }),
+    ).toThrow(/boom/);
+    expect(getTeam(ctx.db, alpha)?.members.map((member) => member.username)).toEqual(['alice']);
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toBeNull();
+    ctx.db.exec('DROP TRIGGER boom_participant_insert');
+
+    const sync = addTeamMember(ctx.db, {
+      teamId: alpha,
+      actorId: ctx.users.alice,
+      username: 'bob',
+      now: 2000,
+    });
+    expect(sync.linkedContestIds).toEqual([contestId]);
+
+    // A duplicate add is rejected and never duplicates participant rows.
+    let duplicateAdd: unknown;
+    try {
+      addTeamMember(ctx.db, {
+        teamId: alpha,
+        actorId: ctx.users.alice,
+        username: 'bob',
+      });
+    } catch (err) {
+      duplicateAdd = err;
+    }
+    expect(duplicateAdd).toBeInstanceOf(TeamError);
+    expect((duplicateAdd as TeamError).code).toBe('TEAM_MEMBER_EXISTS');
+    const participantCount = ctx.db
+      .prepare('SELECT COUNT(*) AS n FROM contest_participants WHERE contest_id = ?')
+      .get(contestId) as { n: number };
+    expect(participantCount.n).toBe(2);
+
+    // Leaving twice is rejected the second time and leaves no dangling rows.
+    leaveTeam(ctx.db, alpha, ctx.users.bob);
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)).toBeNull();
+    let duplicateLeave: unknown;
+    try {
+      leaveTeam(ctx.db, alpha, ctx.users.bob);
+    } catch (err) {
+      duplicateLeave = err;
+    }
+    expect(duplicateLeave).toBeInstanceOf(TeamError);
+    expect((duplicateLeave as TeamError).code).toBe('TEAM_MEMBER_NOT_FOUND');
   });
 });
 
