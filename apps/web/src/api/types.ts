@@ -1346,6 +1346,15 @@ export interface RestoreRequestResult {
   restartRequired: true;
 }
 
+/** POST /api/admin/system/learning-stats/rebuild 返回结构：重建写入的行数。 */
+export interface LearningStatsRebuildResult {
+  users: number;
+  problems: number;
+  tags: number;
+  days: number;
+  durationMs: number;
+}
+
 /** Teams v1.2：常驻团队。 */
 export type TeamRole = 'captain' | 'member';
 
