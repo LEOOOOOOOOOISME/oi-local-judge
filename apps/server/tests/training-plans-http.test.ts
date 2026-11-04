@@ -15,7 +15,9 @@ import { openDatabase } from '../src/storage/db.js';
 import {
   addClassCoach,
   addClassMember,
+  addTeamMember,
   createClass,
+  createTeam,
 } from '../src/services/teams.js';
 
 const root = mkdtempSync(join(tmpdir(), 'oij-training-plans-http-'));
@@ -35,6 +37,10 @@ const ids: Record<Username, number> = {
 };
 const cookies: Record<string, string> = {};
 let classId = 0;
+/** A team owned by a student: neither an admin nor a contest manager belongs to it. */
+let foreignTeamId = 0;
+/** A second team, owned by another student, used to check captains are not global. */
+let otherTeamId = 0;
 let p1 = 0;
 let p2 = 0;
 let p3 = 0;
@@ -159,6 +165,9 @@ beforeAll(async () => {
   addClassCoach(db, { classId, actorId: ids.manager, username: 'coach' });
   addClassMember(db, { classId, actorId: ids.manager, username: 'alice' });
   addClassMember(db, { classId, actorId: ids.manager, username: 'bob' });
+  foreignTeamId = createTeam(db, { name: 'Foreign Team', ownerId: ids.alice });
+  addTeamMember(db, { teamId: foreignTeamId, actorId: ids.alice, username: 'bob' });
+  otherTeamId = createTeam(db, { name: 'Other Team', ownerId: ids.bob });
   p1 = makeProblem('HTTP P1');
   p2 = makeProblem('HTTP P2');
   p3 = makeProblem('HTTP P3');
@@ -189,18 +198,27 @@ function errorCode(body: unknown): string {
   return (body as ApiError).error.code;
 }
 
-async function createPlan(
+async function createPlanInGroup(
   username: string,
+  groupId: number,
   title: string,
   items: Array<{ problemId: number; targetScore?: number; dueAt?: number }> = [],
 ): Promise<number> {
   const response = await api('POST', '/api/training-plans', username, {
-    groupId: classId,
+    groupId,
     title,
     items,
   });
   expect(response.statusCode, response.body).toBe(201);
   return (response.json() as { data: { id: number } }).data.id;
+}
+
+async function createPlan(
+  username: string,
+  title: string,
+  items: Array<{ problemId: number; targetScore?: number; dueAt?: number }> = [],
+): Promise<number> {
+  return createPlanInGroup(username, classId, title, items);
 }
 
 describe('training plan HTTP API', () => {
@@ -465,5 +483,143 @@ describe('training plan HTTP API', () => {
     const gone = await api('GET', `/api/training-plans/${planId}`, 'coach');
     expect(gone.statusCode).toBe(404);
     expect(errorCode(gone.json())).toBe('TRAINING_PLAN_NOT_FOUND');
+  });
+
+  it('lets contest managers manage a plan in any group', async () => {
+    const planId = await createPlanInGroup('manager', foreignTeamId, 'Manager plan', [
+      { problemId: p1 },
+    ]);
+    const planPath = `/api/training-plans/${planId}`;
+
+    const detail = await api('GET', planPath, 'manager');
+    expect(detail.statusCode, detail.body).toBe(200);
+    const detailBody = (detail.json() as PlanDetailBody).data;
+    expect(detailBody).toMatchObject({
+      id: planId,
+      groupId: foreignTeamId,
+      groupKind: 'team',
+      title: 'Manager plan',
+      canManage: true,
+    });
+    expect(detailBody.memberProgress?.map((entry) => entry.userId).sort()).toEqual(
+      [ids.alice, ids.bob].sort(),
+    );
+
+    const update = await api('PUT', planPath, 'manager', {
+      title: 'Manager renamed',
+      description: 'managed by a contest manager',
+    });
+    expect(update.statusCode, update.body).toBe(200);
+
+    const add = await api('POST', `${planPath}/items`, 'manager', { problemId: p2 });
+    expect(add.statusCode, add.body).toBe(201);
+    const addedId = (add.json() as { data: { id: number } }).data.id;
+    const afterAdd = await api('GET', planPath, 'manager');
+    const itemIds = (afterAdd.json() as PlanDetailBody).data.items.map((item) => item.id);
+    expect(itemIds).toHaveLength(2);
+
+    const reorder = await api('PUT', `${planPath}/items`, 'manager', {
+      itemIds: [itemIds[1], itemIds[0]],
+    });
+    expect(reorder.statusCode, reorder.body).toBe(200);
+    const reordered = await api('GET', planPath, 'manager');
+    expect(
+      (reordered.json() as PlanDetailBody).data.items.map((item) => [
+        item.problemId,
+        item.ordinal,
+      ]),
+    ).toEqual([
+      [p2, 1],
+      [p1, 2],
+    ]);
+
+    const progress = await api('GET', `${planPath}/progress`, 'manager');
+    expect(progress.statusCode, progress.body).toBe(200);
+    expect(
+      (progress.json() as ProgressBody).data.members.map((entry) => entry.userId).sort(),
+    ).toEqual([ids.alice, ids.bob].sort());
+
+    // A plain member of the target group stays read-only.
+    const asMember = await api('GET', planPath, 'bob');
+    expect(asMember.statusCode).toBe(200);
+    const memberBody = (asMember.json() as PlanDetailBody).data;
+    expect(memberBody.canManage).toBe(false);
+    expect(memberBody.memberProgress).toBeUndefined();
+    expect((await api('PUT', planPath, 'bob', { title: 'Nope' })).statusCode).toBe(403);
+    expect(
+      (await api('POST', `${planPath}/items`, 'bob', { problemId: p3 })).statusCode,
+    ).toBe(403);
+    expect((await api('GET', `${planPath}/progress`, 'bob')).statusCode).toBe(403);
+    expect((await api('DELETE', planPath, 'bob')).statusCode).toBe(403);
+
+    const removeItem = await api('DELETE', `${planPath}/items/${addedId}`, 'manager');
+    expect(removeItem.statusCode, removeItem.body).toBe(200);
+    const remove = await api('DELETE', planPath, 'manager');
+    expect(remove.statusCode, remove.body).toBe(200);
+    const gone = await api('GET', planPath, 'manager');
+    expect(gone.statusCode).toBe(404);
+  });
+
+  it('keeps ordinary coaches limited to their own groups', async () => {
+    const planId = await createPlanInGroup('manager', foreignTeamId, 'Foreign plan', [
+      { problemId: p1 },
+    ]);
+    const planPath = `/api/training-plans/${planId}`;
+
+    const create = await api('POST', '/api/training-plans', 'coach', {
+      groupId: foreignTeamId,
+      title: 'Not allowed',
+    });
+    expect(create.statusCode).toBe(403);
+    expect(errorCode(create.json())).toBe('TRAINING_PLAN_FORBIDDEN');
+
+    // An outsider cannot even read the plan.
+    expect((await api('GET', planPath, 'coach')).statusCode).toBe(404);
+    expect((await api('PUT', planPath, 'coach', { title: 'Nope' })).statusCode).toBe(403);
+    expect((await api('DELETE', planPath, 'coach')).statusCode).toBe(403);
+    expect(
+      (await api('POST', `${planPath}/items`, 'coach', { problemId: p2 })).statusCode,
+    ).toBe(403);
+    expect((await api('GET', `${planPath}/progress`, 'coach')).statusCode).toBe(403);
+
+    expect((await api('DELETE', planPath, 'manager')).statusCode).toBe(200);
+  });
+
+  it('keeps team captains limited to their own groups', async () => {
+    const planId = await createPlanInGroup('manager', otherTeamId, 'Other team plan', [
+      { problemId: p1 },
+    ]);
+    const planPath = `/api/training-plans/${planId}`;
+
+    // Alice captains the foreign team, not this one.
+    expect((await api('GET', planPath, 'alice')).statusCode).toBe(404);
+    expect((await api('PUT', planPath, 'alice', { title: 'Nope' })).statusCode).toBe(403);
+    expect((await api('DELETE', planPath, 'alice')).statusCode).toBe(403);
+    expect(
+      (await api('POST', `${planPath}/items`, 'alice', { problemId: p2 })).statusCode,
+    ).toBe(403);
+    expect((await api('GET', `${planPath}/progress`, 'alice')).statusCode).toBe(403);
+
+    expect((await api('DELETE', planPath, 'manager')).statusCode).toBe(200);
+  });
+
+  it('keeps admin access to any group', async () => {
+    const planId = await createPlanInGroup('admin', foreignTeamId, 'Admin plan', [
+      { problemId: p1 },
+    ]);
+    const planPath = `/api/training-plans/${planId}`;
+
+    const detail = await api('GET', planPath, 'admin');
+    expect(detail.statusCode, detail.body).toBe(200);
+    expect((detail.json() as PlanDetailBody).data).toMatchObject({
+      groupId: foreignTeamId,
+      canManage: true,
+    });
+    expect((detail.json() as PlanDetailBody).data.memberProgress).toBeDefined();
+    expect((await api('PUT', planPath, 'admin', { title: 'Admin renamed' })).statusCode).toBe(
+      200,
+    );
+    expect((await api('GET', `${planPath}/progress`, 'admin')).statusCode).toBe(200);
+    expect((await api('DELETE', planPath, 'admin')).statusCode).toBe(200);
   });
 });

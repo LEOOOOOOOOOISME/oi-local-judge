@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fasti
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { requireAuth } from '../security/auth.js';
+import type { Role } from '../storage/repos/users.js';
 import {
   addTrainingPlanItem,
   createTrainingPlan,
@@ -29,6 +30,11 @@ function parsePositiveInt(raw: string): number | null {
 
 function isPositiveInt(value: unknown): value is number {
   return typeof value === 'number' && Number.isInteger(value) && value > 0;
+}
+
+/** Roles that may manage a training plan for any class or team. */
+function canManageAnyGroup(role: Role): boolean {
+  return role === 'admin' || role === 'contestmanager';
 }
 
 function badRequest(reply: FastifyReply, code: string, message: string): FastifyReply {
@@ -60,7 +66,10 @@ export function registerTrainingPlanRoutes(
     const user = request.user!;
     return {
       ok: true,
-      data: listTrainingPlans(db, { userId: user.id, isAdmin: user.role === 'admin' }),
+      data: listTrainingPlans(db, {
+        userId: user.id,
+        canManageAnyGroup: canManageAnyGroup(user.role),
+      }),
     };
   });
 
@@ -76,7 +85,7 @@ export function registerTrainingPlanRoutes(
       const detail = getTrainingPlan(db, {
         planId,
         userId: user.id,
-        isAdmin: user.role === 'admin',
+        canManageAnyGroup: canManageAnyGroup(user.role),
       });
       if (!detail) {
         return notFound(reply, 'TRAINING_PLAN_NOT_FOUND', 'training plan not found');
@@ -103,7 +112,7 @@ export function registerTrainingPlanRoutes(
           endsAt: body.endsAt,
           items: body.items,
           actorId: user.id,
-          isAdmin: user.role === 'admin',
+          canManageAnyGroup: canManageAnyGroup(user.role),
         });
         return reply.code(201).send({ ok: true, data: { id } });
       } catch (err) {
@@ -131,7 +140,7 @@ export function registerTrainingPlanRoutes(
         updateTrainingPlan(db, {
           planId,
           actorId: user.id,
-          isAdmin: user.role === 'admin',
+          canManageAnyGroup: canManageAnyGroup(user.role),
           patch,
         });
         return { ok: true, data: null };
@@ -154,7 +163,7 @@ export function registerTrainingPlanRoutes(
         deleteTrainingPlan(db, {
           planId,
           actorId: user.id,
-          isAdmin: user.role === 'admin',
+          canManageAnyGroup: canManageAnyGroup(user.role),
         });
         return { ok: true, data: null };
       } catch (err) {
@@ -180,7 +189,7 @@ export function registerTrainingPlanRoutes(
         const id = addTrainingPlanItem(db, {
           planId,
           actorId: user.id,
-          isAdmin: user.role === 'admin',
+          canManageAnyGroup: canManageAnyGroup(user.role),
           problemId: body.problemId,
           targetScore: body.targetScore,
           dueAt: body.dueAt,
@@ -210,7 +219,7 @@ export function registerTrainingPlanRoutes(
           planId,
           itemId,
           actorId: user.id,
-          isAdmin: user.role === 'admin',
+          canManageAnyGroup: canManageAnyGroup(user.role),
         });
         return { ok: true, data: null };
       } catch (err) {
@@ -241,7 +250,7 @@ export function registerTrainingPlanRoutes(
           planId,
           itemIds,
           actorId: user.id,
-          isAdmin: user.role === 'admin',
+          canManageAnyGroup: canManageAnyGroup(user.role),
         });
         return { ok: true, data: null };
       } catch (err) {
@@ -265,7 +274,7 @@ export function registerTrainingPlanRoutes(
           data: getTrainingPlanProgress(db, {
             planId,
             actorId: user.id,
-            isAdmin: user.role === 'admin',
+            canManageAnyGroup: canManageAnyGroup(user.role),
           }),
         };
       } catch (err) {
