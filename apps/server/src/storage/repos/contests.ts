@@ -265,6 +265,26 @@ export function addParticipant(
   ).run(contestId, userId, now);
 }
 
+/**
+ * Grants contest participation only when the user has no participant row yet.
+ *
+ * Used by team registration: an existing row (including an administrator's
+ * individual import, or a pending/rejected registration) is never overwritten,
+ * so a team registration cannot silently change a person's registration state.
+ */
+export function addParticipantIfAbsent(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+  now = Date.now(),
+): void {
+  db.prepare(
+    `INSERT INTO contest_participants(contest_id, user_id, status, registered_at)
+     VALUES (?, ?, 'accepted', ?)
+     ON CONFLICT(contest_id, user_id) DO NOTHING`,
+  ).run(contestId, userId, now);
+}
+
 export function getParticipants(db: DatabaseSync, contestId: number): number[] {
   return (
     db
