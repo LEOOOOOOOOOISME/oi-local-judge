@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
+import { ApiError } from '../api/client';
 import {
   allowsSelfRegistration,
+  canCancelAcceptedRegistration,
+  describeRegistrationError,
   registrationModeLabel,
   registrationStatusColor,
   registrationStatusLabel,
+  registrationWindowState,
+  registrationWindowText,
   resolveRegistrationMode,
+  resolveRegistrationWindow,
 } from './registration';
 
 describe('resolveRegistrationMode', () => {
@@ -55,5 +61,80 @@ describe('registration status helpers', () => {
     expect(registrationStatusColor('pending')).toBe('gold');
     expect(registrationStatusColor('accepted')).toBe('green');
     expect(registrationStatusColor('rejected')).toBe('red');
+  });
+});
+
+describe('resolveRegistrationWindow', () => {
+  it('reads snake_case bounds and defaults to unrestricted', () => {
+    expect(resolveRegistrationWindow(undefined)).toEqual({ openAt: null, closeAt: null });
+    expect(resolveRegistrationWindow({})).toEqual({ openAt: null, closeAt: null });
+    expect(
+      resolveRegistrationWindow({ registration_open_at: 1000, registration_close_at: 2000 }),
+    ).toEqual({ openAt: 1000, closeAt: 2000 });
+  });
+
+  it('accepts camelCase bounds for mapped DTOs', () => {
+    expect(
+      resolveRegistrationWindow({ registrationOpenAt: 1000, registrationCloseAt: 2000 }),
+    ).toEqual({ openAt: 1000, closeAt: 2000 });
+  });
+});
+
+describe('registrationWindowState', () => {
+  it('is unrestricted when neither bound is set', () => {
+    expect(registrationWindowState({}, 500)).toBe('unrestricted');
+    expect(registrationWindowState({ registration_open_at: null }, 500)).toBe('unrestricted');
+  });
+
+  it('uses inclusive boundaries like the server', () => {
+    const contest = { registration_open_at: 1000, registration_close_at: 2000 };
+    expect(registrationWindowState(contest, 999)).toBe('before-open');
+    expect(registrationWindowState(contest, 1000)).toBe('open');
+    expect(registrationWindowState(contest, 2000)).toBe('open');
+    expect(registrationWindowState(contest, 2001)).toBe('closed');
+  });
+});
+
+describe('registrationWindowText', () => {
+  it('shows an unrestricted label or the formatted range', () => {
+    expect(registrationWindowText({})).toBe('不限制');
+    expect(
+      registrationWindowText({ registration_open_at: 1000, registration_close_at: 2000 }),
+    ).toContain(' 至 ');
+  });
+});
+
+describe('canCancelAcceptedRegistration', () => {
+  it('allows cancellation before the start and blocks it afterwards', () => {
+    const contest = { start_at: 5000, end_at: 9000, status: 'draft' };
+    expect(canCancelAcceptedRegistration(contest, 4999)).toBe(true);
+    expect(canCancelAcceptedRegistration(contest, 5000)).toBe(false);
+  });
+
+  it('blocks cancellation for running, ended and archived contests', () => {
+    expect(canCancelAcceptedRegistration({ start_at: 5000, status: 'running' }, 1000)).toBe(false);
+    expect(canCancelAcceptedRegistration({ start_at: 5000, status: 'ended' }, 1000)).toBe(false);
+    expect(
+      canCancelAcceptedRegistration({ start_at: 5000, status: 'draft', archived_at: 1 }, 1000),
+    ).toBe(false);
+  });
+
+  it('allows cancellation when the start time is unknown', () => {
+    expect(canCancelAcceptedRegistration({ start_at: null, status: 'draft' }, 1000)).toBe(true);
+    expect(canCancelAcceptedRegistration(null, 1000)).toBe(false);
+  });
+});
+
+describe('describeRegistrationError', () => {
+  it('explains the registration window errors', () => {
+    expect(describeRegistrationError(new ApiError(403, 'x', 'REGISTRATION_NOT_OPEN'))).toBe(
+      '报名尚未开始',
+    );
+    expect(describeRegistrationError(new ApiError(403, 'x', 'REGISTRATION_CLOSED'))).toBe(
+      '报名已截止',
+    );
+    expect(
+      describeRegistrationError(new ApiError(400, 'x', 'INVALID_REGISTRATION_WINDOW')),
+    ).toBe('报名开始时间必须早于截止时间');
   });
 });

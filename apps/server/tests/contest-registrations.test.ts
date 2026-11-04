@@ -114,13 +114,20 @@ function setup(): Ctx {
 function makeContest(
   ctx: Ctx,
   mode: RegistrationMode = 'manual',
-  times: { startAt?: number | null; endAt?: number | null } = {},
+  times: {
+    startAt?: number | null;
+    endAt?: number | null;
+    registrationOpenAt?: number | null;
+    registrationCloseAt?: number | null;
+  } = {},
 ): number {
   return createContest(ctx.db, {
     name: `Contest-${mode}`,
     registrationMode: mode,
     startAt: times.startAt ?? 1000,
     endAt: times.endAt ?? null,
+    registrationOpenAt: times.registrationOpenAt ?? null,
+    registrationCloseAt: times.registrationCloseAt ?? null,
     problemIds: [ctx.problemId],
   });
 }
@@ -442,6 +449,142 @@ describe('contest registration service', () => {
       status: 'accepted',
       registeredAt: 4321,
     });
+  });
+});
+
+describe('registration window', () => {
+  it('rejects self-registration before the window opens', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, 'open', {
+      startAt: 1000,
+      endAt: 100_000,
+      registrationOpenAt: 5000,
+      registrationCloseAt: 9000,
+    });
+
+    expectRegistrationError(
+      () => registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 4999 }),
+      'REGISTRATION_NOT_OPEN',
+      403,
+    );
+    expect(
+      registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 5000 }),
+    ).toBe('accepted');
+  });
+
+  it('rejects self-registration after the window closes', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, 'open', {
+      startAt: 1000,
+      endAt: 100_000,
+      registrationOpenAt: 2000,
+      registrationCloseAt: 3000,
+    });
+
+    expectRegistrationError(
+      () => registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 3001 }),
+      'REGISTRATION_CLOSED',
+      403,
+    );
+    expect(
+      registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 3000 }),
+    ).toBe('accepted');
+  });
+
+  it('leaves registration unrestricted when the window bounds are null', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, 'open', { registrationOpenAt: null, registrationCloseAt: null });
+
+    expect(
+      registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 1 }),
+    ).toBe('accepted');
+  });
+
+  it('keeps approval registrations pending only inside the window', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, 'approval', {
+      startAt: 1000,
+      endAt: 100_000,
+      registrationOpenAt: 2000,
+      registrationCloseAt: 3000,
+    });
+
+    expectRegistrationError(
+      () => registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 1999 }),
+      'REGISTRATION_NOT_OPEN',
+      403,
+    );
+    expect(
+      registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 2500 }),
+    ).toBe('pending');
+  });
+
+  it('lets administrators review pending registrations outside the window', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, 'approval', {
+      startAt: 1000,
+      endAt: 100_000,
+      registrationOpenAt: 2000,
+      registrationCloseAt: 3000,
+    });
+    registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 2500 });
+
+    reviewRegistration(ctx.db, {
+      contestId,
+      userId: ctx.users.alice,
+      action: 'approve',
+      actorId: ctx.users.admin,
+      now: 99_000,
+    });
+
+    expect(getMyRegistration(ctx.db, contestId, ctx.users.alice)?.status).toBe('accepted');
+  });
+
+  it('lets accepted participants cancel before the contest starts', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, 'open', { startAt: 5000, endAt: 9000 });
+    registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 1000 });
+
+    cancelRegistration(ctx.db, { contestId, userId: ctx.users.alice, now: 4999 });
+    expect(getMyRegistration(ctx.db, contestId, ctx.users.alice)).toBeNull();
+
+    registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 2000 });
+    expectRegistrationError(
+      () => cancelRegistration(ctx.db, { contestId, userId: ctx.users.alice, now: 5000 }),
+      'CANNOT_CANCEL',
+      409,
+    );
+  });
+
+  it('rejects accepted cancellation once the contest is running or ended', () => {
+    const ctx = setup();
+    const runningId = makeContest(ctx, 'open', { startAt: 1000, endAt: 100_000 });
+    registerForContest(ctx.db, { contestId: runningId, userId: ctx.users.alice, now: 500 });
+    ctx.db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(runningId);
+    expectRegistrationError(
+      () => cancelRegistration(ctx.db, { contestId: runningId, userId: ctx.users.alice, now: 6000 }),
+      'CANNOT_CANCEL',
+      409,
+    );
+
+    const endedId = makeContest(ctx, 'open', { startAt: 1000, endAt: 100_000 });
+    addParticipant(ctx.db, endedId, ctx.users.bob);
+    ctx.db.prepare("UPDATE contests SET status = 'ended' WHERE id = ?").run(endedId);
+    expectRegistrationError(
+      () => cancelRegistration(ctx.db, { contestId: endedId, userId: ctx.users.bob, now: 6000 }),
+      'CANNOT_CANCEL',
+      409,
+    );
+  });
+
+  it('still cancels pending registrations after the contest starts', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, 'approval', { startAt: 1000, endAt: 100_000 });
+    ctx.db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(contestId);
+    registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 5000 });
+
+    cancelRegistration(ctx.db, { contestId, userId: ctx.users.alice, now: 6000 });
+    expect(getMyRegistration(ctx.db, contestId, ctx.users.alice)).toBeNull();
   });
 });
 
@@ -886,5 +1029,190 @@ describe('contest registration HTTP API', () => {
       submissionCount: 1,
       lastSubmissionAt: 7000,
     });
+  });
+
+  it('validates and stores the registration window on create and update', async () => {
+    const ctx = setup();
+    const app = await buildCtxApp(ctx);
+
+    const invalidCreate = await api(app, 'POST', '/api/admin/contests', ctx, 'admin', {
+      name: 'Bad Window',
+      registrationOpenAt: 2000,
+      registrationCloseAt: 1000,
+      problemIds: [ctx.problemId],
+    });
+    expect(invalidCreate.statusCode).toBe(400);
+    expect(errorCode(invalidCreate.json())).toBe('INVALID_REGISTRATION_WINDOW');
+
+    const created = await api(app, 'POST', '/api/admin/contests', ctx, 'admin', {
+      name: 'Window Cup',
+      registrationMode: 'open',
+      registrationOpenAt: 2000,
+      registrationCloseAt: 5000,
+      problemIds: [ctx.problemId],
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const contestId = (created.json() as { data: { id: number } }).data.id;
+    const createdDetail = await api(app, 'GET', `/api/contests/${contestId}`, ctx, 'alice');
+    expect(
+      (
+        createdDetail.json() as {
+          data: { contest: { registration_open_at: number; registration_close_at: number } };
+        }
+      ).data.contest,
+    ).toMatchObject({ registration_open_at: 2000, registration_close_at: 5000 });
+
+    // Partial update must compare against the stored counterpart.
+    const invalidUpdate = await api(app, 'PUT', `/api/admin/contests/${contestId}`, ctx, 'admin', {
+      registrationOpenAt: 6000,
+    });
+    expect(invalidUpdate.statusCode).toBe(400);
+    expect(errorCode(invalidUpdate.json())).toBe('INVALID_REGISTRATION_WINDOW');
+
+    const validUpdate = await api(app, 'PUT', `/api/admin/contests/${contestId}`, ctx, 'admin', {
+      registrationCloseAt: 9000,
+    });
+    expect(validUpdate.statusCode, validUpdate.body).toBe(200);
+    const updatedDetail = await api(app, 'GET', `/api/contests/${contestId}`, ctx, 'alice');
+    expect(
+      (
+        updatedDetail.json() as {
+          data: { contest: { registration_open_at: number; registration_close_at: number } };
+        }
+      ).data.contest,
+    ).toMatchObject({ registration_open_at: 2000, registration_close_at: 9000 });
+
+    const cleared = await api(app, 'PUT', `/api/admin/contests/${contestId}`, ctx, 'admin', {
+      registrationOpenAt: null,
+      registrationCloseAt: null,
+    });
+    expect(cleared.statusCode, cleared.body).toBe(200);
+    const clearedDetail = await api(app, 'GET', `/api/contests/${contestId}`, ctx, 'alice');
+    expect(
+      (
+        clearedDetail.json() as {
+          data: { contest: { registration_open_at: null; registration_close_at: null } };
+        }
+      ).data.contest,
+    ).toMatchObject({ registration_open_at: null, registration_close_at: null });
+  });
+
+  it('blocks self-registration outside the registration window', async () => {
+    const ctx = setup();
+    const now = Date.now();
+    const app = await buildCtxApp(ctx);
+
+    const futureId = createContest(ctx.db, {
+      name: 'Future Window',
+      registrationMode: 'open',
+      registrationOpenAt: now + 3_600_000,
+      problemIds: [ctx.problemId],
+    });
+    const notOpen = await api(app, 'POST', `/api/contests/${futureId}/register`, ctx, 'alice');
+    expect(notOpen.statusCode).toBe(403);
+    expect(errorCode(notOpen.json())).toBe('REGISTRATION_NOT_OPEN');
+
+    const pastId = createContest(ctx.db, {
+      name: 'Past Window',
+      registrationMode: 'open',
+      registrationOpenAt: now - 7_200_000,
+      registrationCloseAt: now - 3_600_000,
+      problemIds: [ctx.problemId],
+    });
+    const closed = await api(app, 'POST', `/api/contests/${pastId}/register`, ctx, 'bob');
+    expect(closed.statusCode).toBe(403);
+    expect(errorCode(closed.json())).toBe('REGISTRATION_CLOSED');
+
+    const openId = createContest(ctx.db, {
+      name: 'Open Window',
+      registrationMode: 'open',
+      registrationOpenAt: now - 1000,
+      registrationCloseAt: now + 3_600_000,
+      problemIds: [ctx.problemId],
+    });
+    const accepted = await api(app, 'POST', `/api/contests/${openId}/register`, ctx, 'carol');
+    expect(accepted.statusCode, accepted.body).toBe(200);
+    expect((accepted.json() as { data: { status: string } }).data.status).toBe('accepted');
+  });
+
+  it('lets accepted participants self-cancel before the start but not after', async () => {
+    const ctx = setup();
+    const now = Date.now();
+    const app = await buildCtxApp(ctx);
+
+    const upcomingId = createContest(ctx.db, {
+      name: 'Upcoming Cup',
+      registrationMode: 'open',
+      startAt: now + 3_600_000,
+      endAt: now + 7_200_000,
+      problemIds: [ctx.problemId],
+    });
+    expect(
+      (await api(app, 'POST', `/api/contests/${upcomingId}/register`, ctx, 'alice')).statusCode,
+    ).toBe(200);
+    const cancelled = await api(
+      app,
+      'DELETE',
+      `/api/contests/${upcomingId}/register`,
+      ctx,
+      'alice',
+    );
+    expect(cancelled.statusCode, cancelled.body).toBe(200);
+    expect(
+      (
+        (await api(app, 'GET', `/api/contests/${upcomingId}/registration`, ctx, 'alice')).json() as {
+          data: { registration: unknown };
+        }
+      ).data.registration,
+    ).toBeNull();
+
+    const runningId = makeRunningContest(ctx, 'open');
+    expect(
+      (await api(app, 'POST', `/api/contests/${runningId}/register`, ctx, 'bob')).statusCode,
+    ).toBe(200);
+    const cannotCancel = await api(
+      app,
+      'DELETE',
+      `/api/contests/${runningId}/register`,
+      ctx,
+      'bob',
+    );
+    expect(cannotCancel.statusCode).toBe(409);
+    expect(errorCode(cannotCancel.json())).toBe('CANNOT_CANCEL');
+  });
+
+  it('lets administrators import and review outside the registration window', async () => {
+    const ctx = setup();
+    const now = Date.now();
+    const app = await buildCtxApp(ctx);
+    const contestId = createContest(ctx.db, {
+      name: 'Past Approval',
+      registrationMode: 'approval',
+      registrationOpenAt: now - 7_200_000,
+      registrationCloseAt: now - 3_600_000,
+      problemIds: [ctx.problemId],
+    });
+    registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: now - 5_400_000 });
+
+    const approved = await api(
+      app,
+      'POST',
+      `/api/admin/contests/${contestId}/registrations/${ctx.users.alice}/approve`,
+      ctx,
+      'manager',
+    );
+    expect(approved.statusCode, approved.body).toBe(200);
+
+    const imported = await api(
+      app,
+      'POST',
+      `/api/admin/contests/${contestId}/participants`,
+      ctx,
+      'manager',
+      { userIds: [ctx.users.bob] },
+    );
+    expect(imported.statusCode, imported.body).toBe(200);
+    expect(getMyRegistration(ctx.db, contestId, ctx.users.bob)?.status).toBe('accepted');
+    expect(getMyRegistration(ctx.db, contestId, ctx.users.alice)?.status).toBe('accepted');
   });
 });

@@ -83,6 +83,7 @@ CREATE TABLE IF NOT EXISTS contests(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'oi',
   team_mode TEXT NOT NULL DEFAULT 'individual',
   registration_mode TEXT NOT NULL DEFAULT 'manual',
+  registration_open_at INTEGER, registration_close_at INTEGER,
   start_at INTEGER, end_at INTEGER, freeze_at INTEGER, unfreeze_at INTEGER,
   status TEXT NOT NULL DEFAULT 'draft', rules_json TEXT NOT NULL DEFAULT '{}'
 );
@@ -276,6 +277,8 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'contest_participants', 'reviewed_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'reviewed_by', 'INTEGER');
   ensureColumn(db, 'contests', 'registration_mode', "TEXT NOT NULL DEFAULT 'manual'");
+  ensureColumn(db, 'contests', 'registration_open_at', 'INTEGER');
+  ensureColumn(db, 'contests', 'registration_close_at', 'INTEGER');
   ensureColumn(db, 'submissions', 'phase', "TEXT NOT NULL DEFAULT 'contest'");
   ensureColumn(db, 'submissions', 'batch_id', 'INTEGER');
   ensureColumn(db, 'contests', 'ranking_rule_json', "TEXT NOT NULL DEFAULT '{}'");

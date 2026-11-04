@@ -22,6 +22,8 @@ export interface ContestRow {
   mode: string;
   team_mode: TeamMode;
   registration_mode: RegistrationMode;
+  registration_open_at: number | null;
+  registration_close_at: number | null;
   start_at: number | null;
   end_at: number | null;
   freeze_at: number | null;
@@ -39,6 +41,8 @@ export interface CreateContestInput {
   mode?: string;
   teamMode?: TeamMode;
   registrationMode?: RegistrationMode;
+  registrationOpenAt?: number | null;
+  registrationCloseAt?: number | null;
   startAt?: number | null;
   endAt?: number | null;
   freezeAt?: number | null;
@@ -48,14 +52,16 @@ export interface CreateContestInput {
 export function createContest(db: DatabaseSync, input: CreateContestInput): number {
   const result = db
     .prepare(
-      `INSERT INTO contests(name, mode, team_mode, registration_mode, start_at, end_at, freeze_at, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, 'draft')`,
+      `INSERT INTO contests(name, mode, team_mode, registration_mode, registration_open_at, registration_close_at, start_at, end_at, freeze_at, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`,
     )
     .run(
       input.name,
       input.mode ?? 'oi',
       input.teamMode ?? 'individual',
       input.registrationMode ?? 'manual',
+      input.registrationOpenAt ?? null,
+      input.registrationCloseAt ?? null,
       input.startAt ?? null,
       input.endAt ?? null,
       input.freezeAt ?? null,
@@ -95,6 +101,8 @@ export interface UpdateContestPatch {
   mode?: string;
   teamMode?: TeamMode;
   registrationMode?: RegistrationMode;
+  registrationOpenAt?: number | null;
+  registrationCloseAt?: number | null;
   startAt?: number | null;
   endAt?: number | null;
   freezeAt?: number | null;
@@ -114,6 +122,8 @@ export function updateContest(db: DatabaseSync, id: number, patch: UpdateContest
   add('mode', patch.mode);
   add('team_mode', patch.teamMode);
   add('registration_mode', patch.registrationMode);
+  add('registration_open_at', patch.registrationOpenAt);
+  add('registration_close_at', patch.registrationCloseAt);
   add('start_at', patch.startAt);
   add('end_at', patch.endAt);
   add('freeze_at', patch.freezeAt);

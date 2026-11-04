@@ -1,5 +1,6 @@
 import type { RegistrationMode, RegistrationStatus } from '../api/types';
 import { ApiError } from '../api/client';
+import { formatDateTime } from './format';
 
 /** 报名方式在管理端/比赛页的展示文案。 */
 export const REGISTRATION_MODE_LABEL: Record<RegistrationMode, string> = {
@@ -42,6 +43,82 @@ export function allowsSelfRegistration(mode: RegistrationMode): boolean {
   return mode !== 'manual';
 }
 
+/** 报名窗口状态：未配置 / 未开始 / 开放中 / 已截止。 */
+export type RegistrationWindowState = 'unrestricted' | 'before-open' | 'open' | 'closed';
+
+interface RegistrationWindowCarrier {
+  registration_open_at?: number | null;
+  registration_close_at?: number | null;
+  registrationOpenAt?: number | null;
+  registrationCloseAt?: number | null;
+}
+
+interface AcceptedCancelCarrier extends RegistrationWindowCarrier {
+  start_at?: number | null;
+  end_at?: number | null;
+  status?: string;
+  archived_at?: number | null;
+}
+
+export interface RegistrationWindow {
+  openAt: number | null;
+  closeAt: number | null;
+}
+
+/** 读取报名窗口（兼容 snake_case 数据库行与 camelCase DTO）；缺省即不限制。 */
+export function resolveRegistrationWindow(
+  contest: RegistrationWindowCarrier | null | undefined,
+): RegistrationWindow {
+  return {
+    openAt: contest?.registration_open_at ?? contest?.registrationOpenAt ?? null,
+    closeAt: contest?.registration_close_at ?? contest?.registrationCloseAt ?? null,
+  };
+}
+
+/** 按当前时间判断报名窗口状态。时间边界与后端一致：now < open 未开始，now > close 已截止。 */
+export function registrationWindowState(
+  contest: RegistrationWindowCarrier | null | undefined,
+  now: number,
+): RegistrationWindowState {
+  const { openAt, closeAt } = resolveRegistrationWindow(contest);
+  if (openAt === null && closeAt === null) return 'unrestricted';
+  if (openAt !== null && now < openAt) return 'before-open';
+  if (closeAt !== null && now > closeAt) return 'closed';
+  return 'open';
+}
+
+/** 报名窗口的展示文案；未配置时显示“不限制”。 */
+export function registrationWindowText(
+  contest: RegistrationWindowCarrier | null | undefined,
+): string {
+  const { openAt, closeAt } = resolveRegistrationWindow(contest);
+  if (openAt === null && closeAt === null) return '不限制';
+  return `${formatDateTime(openAt)} 至 ${formatDateTime(closeAt)}`;
+}
+
+/**
+ * 已通过（accepted）的选手能否自助取消：仅在比赛开始前且未结束时可以。
+ * 与后端 cancelRegistration 的判定保持一致。
+ */
+export function canCancelAcceptedRegistration(
+  contest: AcceptedCancelCarrier | null | undefined,
+  now: number,
+): boolean {
+  if (!contest) return false;
+  const status = contest.status;
+  if (status === 'running' || status === 'frozen' || status === 'ended' || status === 'archived') {
+    return false;
+  }
+  if (contest.archived_at !== null && contest.archived_at !== undefined) return false;
+  if (contest.start_at !== null && contest.start_at !== undefined && now >= contest.start_at) {
+    return false;
+  }
+  if (contest.end_at !== null && contest.end_at !== undefined && now >= contest.end_at) {
+    return false;
+  }
+  return true;
+}
+
 export const REGISTRATION_STATUS_LABEL: Record<RegistrationStatus, string> = {
   pending: '待审核',
   accepted: '已通过',
@@ -72,8 +149,12 @@ export function describeRegistrationError(error: unknown): string {
     switch (error.code) {
       case 'REGISTRATION_DISABLED':
         return '本场比赛未开放自助报名';
+      case 'REGISTRATION_NOT_OPEN':
+        return '报名尚未开始';
       case 'REGISTRATION_CLOSED':
         return '报名已截止';
+      case 'INVALID_REGISTRATION_WINDOW':
+        return '报名开始时间必须早于截止时间';
       case 'ALREADY_REGISTERED':
         return '你已报名本场比赛';
       case 'NOT_REGISTERED':

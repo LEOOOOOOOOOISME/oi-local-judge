@@ -76,6 +76,32 @@ function parseTeamId(raw: unknown): number | null {
   return typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : null;
 }
 
+type WindowTimestamp = { ok: true; value: number | null | undefined } | { ok: false };
+
+function readWindowTimestamp(raw: unknown): WindowTimestamp {
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (raw === null) return { ok: true, value: null };
+  if (typeof raw === 'number' && Number.isFinite(raw)) return { ok: true, value: raw };
+  return { ok: false };
+}
+
+function registrationWindowInvalid(
+  openAt: number | null,
+  closeAt: number | null,
+): boolean {
+  return openAt !== null && closeAt !== null && openAt >= closeAt;
+}
+
+function sendInvalidRegistrationWindow(reply: FastifyReply): FastifyReply {
+  return reply.code(400).send({
+    ok: false,
+    error: {
+      code: 'INVALID_REGISTRATION_WINDOW',
+      message: 'registrationOpenAt must be earlier than registrationCloseAt',
+    },
+  });
+}
+
 export function registerContestRoutes(app: FastifyInstance, options: ContestRouteOptions): void {
   app.get('/api/contests', async () => ({
     ok: true,
@@ -388,6 +414,8 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       mode?: string;
       teamMode?: string;
       registrationMode?: string;
+      registrationOpenAt?: number | null;
+      registrationCloseAt?: number | null;
       startAt?: number;
       endAt?: number;
       freezeAt?: number;
@@ -413,11 +441,21 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
           .code(400)
           .send({ ok: false, error: { code: 'INVALID_REGISTRATION_MODE' } });
       }
+      const openWindow = readWindowTimestamp(body.registrationOpenAt);
+      const closeWindow = readWindowTimestamp(body.registrationCloseAt);
+      if (!openWindow.ok || !closeWindow.ok) {
+        return sendInvalidRegistrationWindow(reply);
+      }
+      if (registrationWindowInvalid(openWindow.value ?? null, closeWindow.value ?? null)) {
+        return sendInvalidRegistrationWindow(reply);
+      }
       const id = createContest(options.db, {
         name: body.name,
         mode: body.mode,
         teamMode: body.teamMode,
         registrationMode: body.registrationMode,
+        registrationOpenAt: openWindow.value,
+        registrationCloseAt: closeWindow.value,
         startAt: body.startAt,
         endAt: body.endAt,
         freezeAt: body.freezeAt,
@@ -561,6 +599,8 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       mode?: string;
       teamMode?: string;
       registrationMode?: string;
+      registrationOpenAt?: number | null;
+      registrationCloseAt?: number | null;
       startAt?: number | null;
       endAt?: number | null;
       freezeAt?: number | null;
@@ -569,7 +609,8 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     };
   }>('/api/admin/contests/:id', { preHandler: guards }, async (request, reply) => {
     const contestId = Number(request.params.id);
-    if (!getContest(options.db, contestId)) {
+    const contest = getContest(options.db, contestId);
+    if (!contest) {
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
     }
     const body = request.body ?? {};
@@ -584,11 +625,25 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
         .code(400)
         .send({ ok: false, error: { code: 'INVALID_REGISTRATION_MODE' } });
     }
+    const openWindow = readWindowTimestamp(body.registrationOpenAt);
+    const closeWindow = readWindowTimestamp(body.registrationCloseAt);
+    if (!openWindow.ok || !closeWindow.ok) {
+      return sendInvalidRegistrationWindow(reply);
+    }
+    const resolvedOpen =
+      openWindow.value === undefined ? contest.registration_open_at : openWindow.value;
+    const resolvedClose =
+      closeWindow.value === undefined ? contest.registration_close_at : closeWindow.value;
+    if (registrationWindowInvalid(resolvedOpen, resolvedClose)) {
+      return sendInvalidRegistrationWindow(reply);
+    }
     updateContest(options.db, contestId, {
       name: body.name,
       mode: body.mode,
       teamMode: body.teamMode,
       registrationMode: body.registrationMode,
+      registrationOpenAt: openWindow.value,
+      registrationCloseAt: closeWindow.value,
       startAt: body.startAt,
       endAt: body.endAt,
       freezeAt: body.freezeAt,
