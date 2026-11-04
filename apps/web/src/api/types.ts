@@ -1314,6 +1314,10 @@ export interface BackupEntry {
 export interface UpdateCheckSuccess {
   current: string;
   latest: string;
+  /** 选中 Release 的原始 tag（如 `v1.1.0-rc.7`）。 */
+  tagName: string;
+  /** 选中 Release 是否为预发布版本。 */
+  isPrerelease: boolean;
   updateAvailable: boolean;
   /** Release 页面地址（不是安装包直链）。 */
   url: string | null;
