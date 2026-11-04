@@ -1375,7 +1375,7 @@ export interface AddProblemSetShareRequest {
 }
 
 /** Awards：比赛奖项与证书（GET /api/contests/:id/awards）。 */
-export type AwardLevel = 'gold' | 'silver' | 'bronze';
+export type AwardLevel = 'gold' | 'silver' | 'bronze' | 'participation';
 
 /** 奖项口径：个人奖按正式榜，团队奖按团队榜。 */
 export type AwardScope = 'individual' | 'team';
@@ -1387,7 +1387,7 @@ export interface AwardConfig {
   bronzePercent: number;
 }
 
-/** 正式榜中的一行奖项数据；未获奖的行 award 为 null。 */
+/** 正式榜中的一行奖项数据；未获奖的行 award 为 null（开启参赛证书后为 participation）。 */
 export interface AwardRow {
   rank: number;
   userId: number;
@@ -1400,7 +1400,7 @@ export interface AwardRow {
   certificateNo: string;
 }
 
-/** 团队榜中的一行奖项数据；未获奖的行 award 为 null。 */
+/** 团队榜中的一行奖项数据；未获奖的行 award 为 null（开启参赛证书后为 participation）。 */
 export interface TeamAwardRow {
   rank: number;
   teamId: number;
@@ -1416,7 +1416,9 @@ export interface AwardCounts {
   gold: number;
   silver: number;
   bronze: number;
-  /** 获奖总人数（金 + 银 + 铜）。 */
+  /** 参赛证书数量（仅在请求 participation 时为非零）。 */
+  participation: number;
+  /** 获奖总人数/队数（金 + 银 + 铜，不含参赛证书）。 */
   total: number;
 }
 

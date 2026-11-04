@@ -13,6 +13,7 @@ import {
   Select,
   Space,
   Statistic,
+  Switch,
   Table,
   Tag,
   Tooltip,
@@ -57,6 +58,7 @@ const AWARD_FILTER_OPTIONS: Array<{ value: AwardFilterValue; label: string }> = 
   { value: 'gold', label: '金牌' },
   { value: 'silver', label: '银牌' },
   { value: 'bronze', label: '铜牌' },
+  { value: 'participation', label: '参赛' },
   { value: 'none', label: '未获奖' },
 ];
 
@@ -91,6 +93,7 @@ export function ContestAwardsPage() {
   const { message } = App.useApp();
 
   const [scope, setScope] = useState<AwardScope>('individual');
+  const [includeParticipation, setIncludeParticipation] = useState(false);
   const [keyword, setKeyword] = useState('');
   const [awardFilter, setAwardFilter] = useState<AwardFilterValue>('all');
   const [classFilter, setClassFilter] = useState('all');
@@ -103,10 +106,12 @@ export function ContestAwardsPage() {
     staleTime: 30_000,
   });
   const awardsQuery = useQuery({
-    queryKey: ['contest-awards', contestId, scope],
+    queryKey: ['contest-awards', contestId, scope, includeParticipation],
     queryFn: () =>
       apiGet<ContestAwards | TeamContestAwards>(
-        `/api/contests/${contestId}/awards?scope=${scope}`,
+        `/api/contests/${contestId}/awards?scope=${scope}${
+          includeParticipation ? '&participation=1' : ''
+        }`,
       ),
     enabled: validId && Boolean(user),
     staleTime: 30_000,
@@ -117,7 +122,13 @@ export function ContestAwardsPage() {
   const contest = awards?.contest ?? detailQuery.data?.contest ?? null;
   const teamMode = resolveTeamMode(contest);
   const showScopeSwitch = teamMode !== 'individual';
-  const counts = awards?.counts ?? { gold: 0, silver: 0, bronze: 0, total: 0 };
+  const counts = awards?.counts ?? {
+    gold: 0,
+    silver: 0,
+    bronze: 0,
+    participation: 0,
+    total: 0,
+  };
   const config = awards?.config ?? EMPTY_CONFIG;
 
   const individualRows: AwardRow[] = awards?.scope === 'individual' ? awards.rows : [];
@@ -449,6 +460,11 @@ export function ContestAwardsPage() {
             <Tag color="gold">
               获奖 {counts.total} {unit}
             </Tag>
+            {includeParticipation ? (
+              <Tag color="blue">
+                参赛证书 {counts.participation} {unit}
+              </Tag>
+            ) : null}
             {preview ? <Tag color="orange">管理员预览</Tag> : null}
           </>
         }
@@ -531,6 +547,16 @@ export function ContestAwardsPage() {
             </span>
           </Card>
         </Col>
+        {includeParticipation ? (
+          <Col flex="1 1 150px">
+            <Card size="small" className="award-stat-card award-stat-participation">
+              <Statistic title="参赛证书" value={counts.participation} suffix={unit} />
+              <span className="award-stat-hint">
+                未获金/银/铜的{unit === '队' ? '团队' : '选手'}
+              </span>
+            </Card>
+          </Col>
+        ) : null}
       </Row>
 
       <Card
@@ -568,6 +594,17 @@ export function ContestAwardsPage() {
               style={{ width: 170 }}
             />
           ) : null}
+          <Space size={6} className="award-participation-toggle">
+            <Switch
+              size="small"
+              checked={includeParticipation}
+              onChange={(checked) => {
+                setIncludeParticipation(checked);
+                if (!checked && awardFilter === 'participation') setAwardFilter('all');
+              }}
+            />
+            <span className="muted">包含参赛证书</span>
+          </Space>
           <Button
             disabled={!hasFilters}
             onClick={() => {

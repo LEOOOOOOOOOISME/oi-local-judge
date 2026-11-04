@@ -14,10 +14,21 @@ export interface AwardConfig {
   bronzePercent: number;
 }
 
-export type AwardLevel = 'gold' | 'silver' | 'bronze';
+export type AwardLevel = 'gold' | 'silver' | 'bronze' | 'participation';
+
+/** 有比例的奖牌等级；participation 不参与金/银/铜比例分配。 */
+type MedalLevel = Exclude<AwardLevel, 'participation'>;
 
 /** 奖项口径：个人奖按正式榜，团队奖按团队榜。 */
 export type AwardScope = 'individual' | 'team';
+
+/**
+ * 奖项查询选项。`includeParticipation` 为 true 时，未获金/银/铜的正式榜行
+ * 会获得 `participation` 证书；默认 false，响应与之前完全一致。
+ */
+export interface AwardQueryOptions {
+  includeParticipation?: boolean;
+}
 
 export interface AwardRow {
   rank: number;
@@ -47,6 +58,9 @@ export interface AwardCounts {
   gold: number;
   silver: number;
   bronze: number;
+  /** 参赛证书数量（仅在 includeParticipation 时为非零）。 */
+  participation: number;
+  /** 获奖总人数/队数（金 + 银 + 铜，不含参赛证书）。 */
   total: number;
 }
 
@@ -166,7 +180,7 @@ export function computeAwardCounts(n: number, config: AwardConfig): AwardCounts 
   const gold = allocate(config.goldPercent, total);
   const silver = allocate(config.silverPercent, total - gold);
   const bronze = allocate(config.bronzePercent, total - gold - silver);
-  return { gold, silver, bronze, total: gold + silver + bronze };
+  return { gold, silver, bronze, participation: 0, total: gold + silver + bronze };
 }
 
 /** Stable across ranking recalculations because it only depends on identity. */
@@ -182,7 +196,7 @@ export function teamCertificateNo(contestId: number, teamId: number): string {
 function assignAward(
   rank: number,
   limits: { gold: number; silver: number; bronze: number },
-): AwardLevel | null {
+): MedalLevel | null {
   if (rank <= limits.gold) return 'gold';
   if (rank <= limits.silver) return 'silver';
   if (rank <= limits.bronze) return 'bronze';
@@ -199,6 +213,7 @@ export async function getContestAwards(
   db: DatabaseSync,
   contestId: number,
   dataDir = process.cwd(),
+  options: AwardQueryOptions = {},
 ): Promise<ContestAwards | null> {
   const ranking = await getOfficialRanking(db, contestId, dataDir);
   if (!ranking) return null;
@@ -211,12 +226,16 @@ export async function getContestAwards(
     bronze: thresholds.gold + thresholds.silver + thresholds.bronze,
   };
 
-  const counts: AwardCounts = { gold: 0, silver: 0, bronze: 0, total: 0 };
+  const counts: AwardCounts = { gold: 0, silver: 0, bronze: 0, participation: 0, total: 0 };
   const rows: AwardRow[] = ranking.rows.map((row) => {
-    const award = assignAward(row.rank, limits);
-    if (award) {
-      counts[award] += 1;
+    const medal = assignAward(row.rank, limits);
+    let award: AwardLevel | null = medal;
+    if (medal) {
+      counts[medal] += 1;
       counts.total += 1;
+    } else if (options.includeParticipation) {
+      award = 'participation';
+      counts.participation += 1;
     }
     return {
       rank: row.rank,
@@ -243,6 +262,7 @@ export async function getContestAwards(
 export function getTeamContestAwards(
   db: DatabaseSync,
   contestId: number,
+  options: AwardQueryOptions = {},
 ): TeamContestAwards | null {
   const ranking = getTeamRanking(db, contestId);
   if (!ranking) return null;
@@ -262,12 +282,16 @@ export function getTeamContestAwards(
     bronze: thresholds.gold + thresholds.silver + thresholds.bronze,
   };
 
-  const counts: AwardCounts = { gold: 0, silver: 0, bronze: 0, total: 0 };
+  const counts: AwardCounts = { gold: 0, silver: 0, bronze: 0, participation: 0, total: 0 };
   const rows: TeamAwardRow[] = ranking.rows.map((row) => {
-    const award = assignAward(row.rank, limits);
-    if (award) {
-      counts[award] += 1;
+    const medal = assignAward(row.rank, limits);
+    let award: AwardLevel | null = medal;
+    if (medal) {
+      counts[medal] += 1;
       counts.total += 1;
+    } else if (options.includeParticipation) {
+      award = 'participation';
+      counts.participation += 1;
     }
     return {
       rank: row.rank,

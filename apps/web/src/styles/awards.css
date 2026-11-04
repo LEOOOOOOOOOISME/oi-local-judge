@@ -34,6 +34,10 @@
   color: #b45309;
 }
 
+.award-stat-participation .ant-statistic-content {
+  color: #2f6f9f;
+}
+
 .award-stat-hint {
   display: block;
   margin-top: 4px;
@@ -88,6 +92,10 @@
 
 .award-certificate-none {
   --cert-accent: #8a94a0;
+}
+
+.award-certificate-participation {
+  --cert-accent: #2f6f9f;
 }
 
 .award-certificate-frame {

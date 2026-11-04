@@ -11,20 +11,27 @@ export function isTeamAwardRow(row: AwardRow | TeamAwardRow): row is TeamAwardRo
   return 'teamId' in row;
 }
 
-/** 奖项排序固定为金、银、铜，供统计与筛选项复用。 */
-export const AWARD_LEVELS: readonly AwardLevel[] = ['gold', 'silver', 'bronze'] as const;
+/** 奖项排序固定为金、银、铜、参赛，供统计与筛选项复用。 */
+export const AWARD_LEVELS: readonly AwardLevel[] = [
+  'gold',
+  'silver',
+  'bronze',
+  'participation',
+] as const;
 
 export const AWARD_LABELS: Record<AwardLevel, string> = {
   gold: '金牌',
   silver: '银牌',
   bronze: '铜牌',
+  participation: '参赛',
 };
 
-/** AntD Tag 颜色：金牌用 gold，银牌用默认，铜牌用 orange。 */
+/** AntD Tag 颜色：金牌用 gold，银牌用默认，铜牌用 orange，参赛用 blue。 */
 export const AWARD_COLORS: Record<AwardLevel, string> = {
   gold: 'gold',
   silver: 'default',
   bronze: 'orange',
+  participation: 'blue',
 };
 
 export function awardLabel(award: AwardLevel | null): string {
@@ -48,7 +55,7 @@ export function computeAwardCounts(n: number, config: AwardConfig): AwardCounts 
   const gold = allocate(config.goldPercent, total);
   const silver = allocate(config.silverPercent, total - gold);
   const bronze = allocate(config.bronzePercent, total - gold - silver);
-  return { gold, silver, bronze, total: gold + silver + bronze };
+  return { gold, silver, bronze, participation: 0, total: gold + silver + bronze };
 }
 
 /** 奖项配置是否合法：三项均在 0..100，且总和不超过 100。 */
