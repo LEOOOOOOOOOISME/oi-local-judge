@@ -137,7 +137,7 @@ function createPlan(
     startsAt?: number | null;
     endsAt?: number | null;
     items?: Array<{ problemId: number; targetScore?: number; dueAt?: number | null }>;
-    isAdmin?: boolean;
+    canManageAnyGroup?: boolean;
     now?: number;
   },
 ): number {
@@ -149,7 +149,7 @@ function createPlan(
     endsAt: input.endsAt,
     items: input.items ?? [],
     actorId: input.actorId,
-    isAdmin: input.isAdmin ?? false,
+    canManageAnyGroup: input.canManageAnyGroup ?? false,
     now: input.now,
   });
 }
@@ -196,7 +196,7 @@ describe('training plans service', () => {
     });
 
     const detail = requireDetail(
-      getTrainingPlan(db, { planId, userId: coach, isAdmin: false, now: 3000 }),
+      getTrainingPlan(db, { planId, userId: coach, canManageAnyGroup: false, now: 3000 }),
     );
     expect(detail).toMatchObject({
       id: planId,
@@ -237,7 +237,7 @@ describe('training plans service', () => {
           title: 'Student plan',
           items: [],
           actorId: alice,
-          isAdmin: false,
+          canManageAnyGroup: false,
         }),
       'TRAINING_PLAN_FORBIDDEN',
       403,
@@ -249,7 +249,7 @@ describe('training plans service', () => {
           title: 'Outsider plan',
           items: [],
           actorId: carol,
-          isAdmin: false,
+          canManageAnyGroup: false,
         }),
       'TRAINING_PLAN_FORBIDDEN',
       403,
@@ -261,7 +261,7 @@ describe('training plans service', () => {
           title: 'Missing group',
           items: [],
           actorId: coach,
-          isAdmin: false,
+          canManageAnyGroup: false,
         }),
       'TRAINING_PLAN_GROUP_NOT_FOUND',
       404,
@@ -274,7 +274,7 @@ describe('training plans service', () => {
       groupId: classId,
       actorId: admin,
       items: [{ problemId: problems.p1 }],
-      isAdmin: true,
+      canManageAnyGroup: true,
     });
 
     expectPlanError(
@@ -282,7 +282,7 @@ describe('training plans service', () => {
         updateTrainingPlan(db, {
           planId: byCoach,
           actorId: alice,
-          isAdmin: false,
+          canManageAnyGroup: false,
           patch: { title: 'Nope' },
         }),
       'TRAINING_PLAN_FORBIDDEN',
@@ -290,28 +290,28 @@ describe('training plans service', () => {
     );
     expectPlanError(
       () =>
-        deleteTrainingPlan(db, { planId: byCoach, actorId: alice, isAdmin: false }),
+        deleteTrainingPlan(db, { planId: byCoach, actorId: alice, canManageAnyGroup: false }),
       'TRAINING_PLAN_FORBIDDEN',
       403,
     );
     // An outsider cannot even read a plan.
-    expect(getTrainingPlan(db, { planId: byCoach, userId: carol, isAdmin: false })).toBeNull();
+    expect(getTrainingPlan(db, { planId: byCoach, userId: carol, canManageAnyGroup: false })).toBeNull();
     // Administrators can read any plan.
     expect(
-      getTrainingPlan(db, { planId: byCoach, userId: admin, isAdmin: true })?.memberProgress,
+      getTrainingPlan(db, { planId: byCoach, userId: admin, canManageAnyGroup: true })?.memberProgress,
     ).toBeDefined();
 
     updateTrainingPlan(db, {
       planId: byCoach,
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
       patch: { title: 'Updated', description: 'new', startsAt: 10, endsAt: 20 },
     });
     expect(
-      getTrainingPlan(db, { planId: byCoach, userId: coach, isAdmin: false })?.title,
+      getTrainingPlan(db, { planId: byCoach, userId: coach, canManageAnyGroup: false })?.title,
     ).toBe('Updated');
-    deleteTrainingPlan(db, { planId: byCoach, actorId: manager, isAdmin: false });
-    expect(getTrainingPlan(db, { planId: byCoach, userId: coach, isAdmin: false })).toBeNull();
+    deleteTrainingPlan(db, { planId: byCoach, actorId: manager, canManageAnyGroup: false });
+    expect(getTrainingPlan(db, { planId: byCoach, userId: coach, canManageAnyGroup: false })).toBeNull();
     expect(byOwner).toBeGreaterThan(0);
     expect(byAdmin).toBeGreaterThan(0);
   });
@@ -340,7 +340,7 @@ describe('training plans service', () => {
     addTeamMember(db, { teamId, actorId: alice, username: 'bob' });
     const teamPlan = createPlan(db, { groupId: teamId, actorId: alice, title: 'Team plan' });
     const teamDetail = requireDetail(
-      getTrainingPlan(db, { planId: teamPlan, userId: bob, isAdmin: false }),
+      getTrainingPlan(db, { planId: teamPlan, userId: bob, canManageAnyGroup: false }),
     );
     expect(teamDetail).toMatchObject({ groupId: teamId, groupKind: 'team', canManage: false });
     expect(listTrainingPlans(db, { userId: bob }).map((plan) => plan.title).sort()).toEqual([
@@ -408,7 +408,7 @@ describe('training plans service', () => {
     const progress = getTrainingPlanProgress(db, {
       planId,
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
       now: 5000,
     });
     const aliceProgress = member(progress.members, alice);
@@ -434,14 +434,14 @@ describe('training plans service', () => {
 
     // The detail exposes my own item progress; students do not get the roster.
     const detail = requireDetail(
-      getTrainingPlan(db, { planId, userId: alice, isAdmin: false, now: 5000 }),
+      getTrainingPlan(db, { planId, userId: alice, canManageAnyGroup: false, now: 5000 }),
     );
     expect(detail.myItems[0]).toMatchObject({ accepted: true, completed: true });
     expect(detail.memberProgress).toBeUndefined();
 
     // Only managers and administrators may read the whole progress table.
     expectPlanError(
-      () => getTrainingPlanProgress(db, { planId, actorId: alice, isAdmin: false }),
+      () => getTrainingPlanProgress(db, { planId, actorId: alice, canManageAnyGroup: false }),
       'TRAINING_PLAN_FORBIDDEN',
       403,
     );
@@ -478,7 +478,7 @@ describe('training plans service', () => {
     });
 
     const detail = requireDetail(
-      getTrainingPlan(db, { planId, userId: alice, isAdmin: false, now: 3000 }),
+      getTrainingPlan(db, { planId, userId: alice, canManageAnyGroup: false, now: 3000 }),
     );
     expect(detail.myItems[0]).toMatchObject({
       targetScore: 60,
@@ -526,7 +526,7 @@ describe('training plans service', () => {
     const progress = getTrainingPlanProgress(db, {
       planId,
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
       now: 5000,
     });
     const aliceProgress = member(progress.members, alice);
@@ -560,7 +560,7 @@ describe('training plans service', () => {
     const early = getTrainingPlanProgress(db, {
       planId,
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
       now: 1000,
     });
     expect(member(early.members, bob).items.every((item) => item.status === 'pending')).toBe(true);
@@ -577,7 +577,7 @@ describe('training plans service', () => {
     const second = addTrainingPlanItem(db, {
       planId,
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
       problemId: problems.p2,
       targetScore: 70,
       dueAt: 8000,
@@ -586,7 +586,7 @@ describe('training plans service', () => {
     const third = addTrainingPlanItem(db, {
       planId,
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
       problemId: problems.p3,
     });
     expectPlanError(
@@ -594,7 +594,7 @@ describe('training plans service', () => {
         addTrainingPlanItem(db, {
           planId,
           actorId: coach,
-          isAdmin: false,
+          canManageAnyGroup: false,
           problemId: problems.p1,
         }),
       'TRAINING_PLAN_ITEM_EXISTS',
@@ -605,7 +605,7 @@ describe('training plans service', () => {
         addTrainingPlanItem(db, {
           planId,
           actorId: alice,
-          isAdmin: false,
+          canManageAnyGroup: false,
           problemId: problems.p1,
         }),
       'TRAINING_PLAN_FORBIDDEN',
@@ -613,7 +613,7 @@ describe('training plans service', () => {
     );
 
     let detail = requireDetail(
-      getTrainingPlan(db, { planId, userId: coach, isAdmin: false }),
+      getTrainingPlan(db, { planId, userId: coach, canManageAnyGroup: false }),
     );
     expect(detail.items.map((item) => [item.problemId, item.ordinal])).toEqual([
       [problems.p1, 1],
@@ -628,9 +628,9 @@ describe('training plans service', () => {
       planId,
       itemIds: [itemIds[2], itemIds[0], itemIds[1]],
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
     });
-    detail = requireDetail(getTrainingPlan(db, { planId, userId: coach, isAdmin: false }));
+    detail = requireDetail(getTrainingPlan(db, { planId, userId: coach, canManageAnyGroup: false }));
     expect(detail.items.map((item) => [item.problemId, item.ordinal])).toEqual([
       [problems.p3, 1],
       [problems.p1, 2],
@@ -643,7 +643,7 @@ describe('training plans service', () => {
           planId,
           itemIds: [itemIds[0], itemIds[1]],
           actorId: coach,
-          isAdmin: false,
+          canManageAnyGroup: false,
         }),
       'TRAINING_PLAN_ITEM_INVALID',
       400,
@@ -654,7 +654,7 @@ describe('training plans service', () => {
           planId,
           itemIds: [itemIds[0], itemIds[0], itemIds[1]],
           actorId: coach,
-          isAdmin: false,
+          canManageAnyGroup: false,
         }),
       'TRAINING_PLAN_ITEM_INVALID',
       400,
@@ -665,7 +665,7 @@ describe('training plans service', () => {
           planId,
           itemIds: [itemIds[0], itemIds[1], 999999],
           actorId: coach,
-          isAdmin: false,
+          canManageAnyGroup: false,
         }),
       'TRAINING_PLAN_ITEM_NOT_FOUND',
       404,
@@ -676,9 +676,9 @@ describe('training plans service', () => {
       planId,
       itemId: itemIds[2],
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
     });
-    detail = requireDetail(getTrainingPlan(db, { planId, userId: coach, isAdmin: false }));
+    detail = requireDetail(getTrainingPlan(db, { planId, userId: coach, canManageAnyGroup: false }));
     expect(detail.items.map((item) => [item.problemId, item.ordinal])).toEqual([
       [problems.p1, 1],
       [problems.p2, 2],
@@ -689,7 +689,7 @@ describe('training plans service', () => {
           planId,
           itemId: 999999,
           actorId: coach,
-          isAdmin: false,
+          canManageAnyGroup: false,
         }),
       'TRAINING_PLAN_ITEM_NOT_FOUND',
       404,
@@ -699,7 +699,7 @@ describe('training plans service', () => {
     const readded = addTrainingPlanItem(db, {
       planId,
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
       problemId: problems.p3,
     });
     expect(readded).toBeGreaterThan(0);
@@ -714,12 +714,12 @@ describe('training plans service', () => {
       actorId: coach,
       items: [{ problemId: problems.p1 }, { problemId: problems.p2 }],
     });
-    deleteTrainingPlan(db, { planId, actorId: coach, isAdmin: false });
+    deleteTrainingPlan(db, { planId, actorId: coach, canManageAnyGroup: false });
 
-    expect(getTrainingPlan(db, { planId, userId: coach, isAdmin: false })).toBeNull();
+    expect(getTrainingPlan(db, { planId, userId: coach, canManageAnyGroup: false })).toBeNull();
     expect(listTrainingPlans(db, { userId: alice })).toEqual([]);
     expectPlanError(
-      () => getTrainingPlanProgress(db, { planId, actorId: coach, isAdmin: false }),
+      () => getTrainingPlanProgress(db, { planId, actorId: coach, canManageAnyGroup: false }),
       'TRAINING_PLAN_NOT_FOUND',
       404,
     );
@@ -790,7 +790,7 @@ describe('training plans service', () => {
         updateTrainingPlan(db, {
           planId,
           actorId: coach,
-          isAdmin: false,
+          canManageAnyGroup: false,
           patch: { startsAt: 9000 },
         }),
       'TRAINING_PLAN_TIME_INVALID',
@@ -799,11 +799,11 @@ describe('training plans service', () => {
     updateTrainingPlan(db, {
       planId,
       actorId: coach,
-      isAdmin: false,
+      canManageAnyGroup: false,
       patch: { endsAt: null },
     });
     expect(
-      getTrainingPlan(db, { planId, userId: coach, isAdmin: false })?.endsAt,
+      getTrainingPlan(db, { planId, userId: coach, canManageAnyGroup: false })?.endsAt,
     ).toBeNull();
   });
 });
