@@ -313,6 +313,54 @@ describe('team ranking service', () => {
     });
   });
 
+  it('counts only the students of a class in memberCount', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const classId = insertTeam(ctx.db, {
+      name: 'Class Alpha',
+      ownerId: ctx.users.alice,
+      kind: 'class',
+      createdAt: 1,
+    });
+    insertTeamMember(ctx.db, {
+      teamId: classId,
+      userId: ctx.users.alice,
+      role: 'coach',
+      joinedAt: 1,
+    });
+    insertTeamMember(ctx.db, {
+      teamId: classId,
+      userId: ctx.users.bob,
+      role: 'member',
+      joinedAt: 1,
+    });
+    insertTeamMember(ctx.db, {
+      teamId: classId,
+      userId: ctx.users.carol,
+      role: 'assistant',
+      joinedAt: 1,
+    });
+    registerTeam(ctx, contestId, classId);
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.bob,
+      teamId: classId,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 100,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({
+      teamId: classId,
+      teamName: 'Class Alpha',
+      memberCount: 1,
+      totalScore: 100,
+      solved: 1,
+    });
+  });
+
   it('scores ACM teams by the union of problems solved by different members', () => {
     const ctx = setup();
     const contestId = makeContest(ctx, {

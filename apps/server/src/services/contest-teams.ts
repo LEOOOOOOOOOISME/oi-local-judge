@@ -64,11 +64,14 @@ function isUniqueConstraintError(err: unknown, columns: string): boolean {
 /**
  * Registers a team for a contest. The actor must be the team captain, or an
  * administrator/contest manager (`isAdmin`). The contest must accept teams and
- * no team member may already represent another team in the same contest.
+ * no team member may already represent another team in the same contest; for a
+ * class only its students count, so a coach or assistant shared by two classes
+ * never blocks a registration.
  *
  * Registration also grants every current team member `accepted` contest
  * participation, so members pass the contest access check and can submit. Rows
  * that already exist are kept as-is (existing individual registration wins).
+ * A class only enrolls its students; coaches and assistants stay staff.
  */
 export function registerTeamForContest(
   db: DatabaseSync,

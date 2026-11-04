@@ -1,5 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
-import type { TeamRole } from './teams.js';
+import type { TeamKind, TeamRole } from './teams.js';
 
 export interface ContestTeamRow {
   contest_id: number;
@@ -19,9 +19,16 @@ export interface ContestTeamMemberDto {
 export interface TeamRegistrationDto {
   teamId: number;
   name: string;
+  kind: TeamKind;
   ownerId: number;
   registeredBy: number | null;
   registeredAt: number;
+  /**
+   * Contest roster of the registration: the team's whole roster for a
+   * `kind = 'team'` registration, but only the students (`role = 'member'`) for
+   * a `kind = 'class'` registration, because coaches and assistants are staff
+   * rather than contestants.
+   */
   members: ContestTeamMemberDto[];
 }
 
@@ -77,7 +84,7 @@ export function listContestTeamRegistrations(
   const rows = db
     .prepare(
       `SELECT ct.team_id, ct.registered_by, ct.registered_at,
-              t.name, t.owner_id,
+              t.name, t.owner_id, t.kind,
               tm.user_id, tm.role, u.username, u.real_name, u.class_name
        FROM contest_teams ct
        JOIN teams t ON t.id = ct.team_id
@@ -93,6 +100,7 @@ export function listContestTeamRegistrations(
     registered_at: number;
     name: string;
     owner_id: number;
+    kind: TeamKind;
     user_id: number | null;
     role: TeamRole | null;
     username: string | null;
@@ -107,6 +115,7 @@ export function listContestTeamRegistrations(
       registration = {
         teamId: row.team_id,
         name: row.name,
+        kind: row.kind,
         ownerId: row.owner_id,
         registeredBy: row.registered_by,
         registeredAt: row.registered_at,
@@ -114,15 +123,17 @@ export function listContestTeamRegistrations(
       };
       byTeam.set(row.team_id, registration);
     }
-    if (row.user_id !== null && row.username !== null && row.role !== null) {
-      registration.members.push({
-        userId: row.user_id,
-        username: row.username,
-        realName: row.real_name,
-        className: row.class_name,
-        role: row.role,
-      });
-    }
+    if (row.user_id === null || row.username === null || row.role === null) continue;
+    // A class competes as its students; coaches and assistants are staff and
+    // never part of the contest roster. A team keeps its whole roster.
+    if (row.kind === 'class' && row.role !== 'member') continue;
+    registration.members.push({
+      userId: row.user_id,
+      username: row.username,
+      realName: row.real_name,
+      className: row.class_name,
+      role: row.role,
+    });
   }
   return [...byTeam.values()];
 }
@@ -162,6 +173,11 @@ export function listContestIdsForTeam(db: DatabaseSync, teamId: number): number[
 /**
  * Returns the first member of `teamId` who is already registered for the same
  * contest with a different team, or null when the roster is conflict-free.
+ *
+ * Only students can conflict: a `kind = 'class'` group competes as its
+ * `role = 'member'` students, and coaches/assistants are staff, so sharing a
+ * teacher between two classes never blocks a registration. A `kind = 'team'`
+ * group keeps its whole roster (`captain`/`member`).
  */
 export function findContestTeamMemberConflict(
   db: DatabaseSync,
@@ -172,15 +188,17 @@ export function findContestTeamMemberConflict(
     .prepare(
       `SELECT tm.user_id, u.username, ct.team_id, t.name AS team_name
        FROM team_members tm
+       JOIN teams rt ON rt.id = tm.team_id
        JOIN users u ON u.id = tm.user_id
        JOIN contest_teams ct ON ct.contest_id = ?
        JOIN teams t ON t.id = ct.team_id
+       JOIN team_members other
+         ON other.team_id = ct.team_id AND other.user_id = tm.user_id
+       JOIN teams ot ON ot.id = other.team_id
        WHERE tm.team_id = ?
          AND ct.team_id <> ?
-         AND EXISTS (
-           SELECT 1 FROM team_members other
-           WHERE other.team_id = ct.team_id AND other.user_id = tm.user_id
-         )
+         AND (rt.kind = 'team' OR tm.role = 'member')
+         AND (ot.kind = 'team' OR other.role = 'member')
        ORDER BY tm.user_id, ct.team_id
        LIMIT 1`,
     )

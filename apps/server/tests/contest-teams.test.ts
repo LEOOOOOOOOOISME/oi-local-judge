@@ -22,7 +22,9 @@ import { createProblem } from '../src/storage/repos/problems.js';
 import { getSubmission } from '../src/storage/repos/submissions.js';
 import { createUser } from '../src/storage/repos/users.js';
 import {
+  addClassMember,
   addTeamMember,
+  createClass,
   createTeam,
   dissolveTeam,
   getTeam,
@@ -30,6 +32,7 @@ import {
   removeTeamMember,
   TeamError,
 } from '../src/services/teams.js';
+import { insertTeamMember } from '../src/storage/repos/teams.js';
 import { registerForContest } from '../src/services/contest-registrations.js';
 import {
   ContestTeamError,
@@ -133,6 +136,42 @@ function makeTeam(
     addTeamMember(ctx.db, { teamId, actorId: ownerId, username: member });
   }
   return teamId;
+}
+
+type ClassStaffRole = 'coach' | 'assistant';
+
+function makeClass(
+  ctx: Ctx,
+  input: {
+    name: string;
+    owner: Username;
+    staff?: Array<{ username: Username; role: ClassStaffRole }>;
+    students?: Username[];
+  },
+): number {
+  const classId = createClass(ctx.db, {
+    name: input.name,
+    ownerId: ctx.users[input.owner],
+    actorRole: 'admin',
+  });
+  for (const staff of input.staff ?? []) {
+    addClassMember(ctx.db, {
+      classId,
+      actorId: ctx.users[input.owner],
+      username: staff.username,
+      role: staff.role,
+      isAdmin: true,
+    });
+  }
+  for (const student of input.students ?? []) {
+    addClassMember(ctx.db, {
+      classId,
+      actorId: ctx.users[input.owner],
+      username: student,
+      isAdmin: true,
+    });
+  }
+  return classId;
 }
 
 function expectContestTeamError(fn: () => unknown, code: string, status: number): void {
@@ -507,6 +546,148 @@ describe('contest team registration service', () => {
       'TEAM_NOT_REGISTERED',
       404,
     );
+  });
+});
+
+describe('class contest rosters', () => {
+  it('lists only the students of a class in its contest registration', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const classId = makeClass(ctx, {
+      name: 'Class Alpha',
+      owner: 'manager',
+      staff: [{ username: 'alice', role: 'assistant' }],
+      students: ['bob', 'carol'],
+    });
+
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: classId,
+      actorId: ctx.users.admin,
+      isAdmin: true,
+      now: 1111,
+    });
+
+    const registrations = listContestTeams(ctx.db, contestId);
+    expect(registrations).toHaveLength(1);
+    expect(registrations[0]).toMatchObject({ teamId: classId, kind: 'class' });
+    expect(
+      registrations[0]?.members.map((member) => [member.username, member.role]),
+    ).toEqual([
+      ['bob', 'member'],
+      ['carol', 'member'],
+    ]);
+    // Staff are not contestants: no participant row, no contest roster entry.
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.manager)).toBeNull();
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.alice)).toBeNull();
+    expect(getRegistrationRow(ctx.db, contestId, ctx.users.bob)?.status).toBe('accepted');
+  });
+
+  it('ignores class staff when checking contest team conflicts', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    // Alpha and Beta share coach manager and assistant alice, but no student.
+    const alpha = makeClass(ctx, {
+      name: 'Class Alpha',
+      owner: 'manager',
+      staff: [{ username: 'alice', role: 'assistant' }],
+      students: ['bob'],
+    });
+    const beta = makeClass(ctx, {
+      name: 'Class Beta',
+      owner: 'dave',
+      staff: [
+        { username: 'manager', role: 'coach' },
+        { username: 'alice', role: 'assistant' },
+      ],
+      students: ['carol'],
+    });
+
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.admin,
+      isAdmin: true,
+      now: 1111,
+    });
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: beta,
+      actorId: ctx.users.admin,
+      isAdmin: true,
+      now: 2222,
+    });
+
+    expect(listContestTeams(ctx.db, contestId).map((row) => row.teamId)).toEqual([
+      alpha,
+      beta,
+    ]);
+    expect(
+      listContestTeams(ctx.db, contestId)[1]?.members.map((member) => member.username),
+    ).toEqual(['carol']);
+  });
+
+  it('still rejects a class whose student already represents another class', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeClass(ctx, {
+      name: 'Class Alpha',
+      owner: 'manager',
+      students: ['bob'],
+    });
+    const gamma = makeClass(ctx, {
+      name: 'Class Gamma',
+      owner: 'dave',
+      students: ['bob'],
+    });
+
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.admin,
+      isAdmin: true,
+    });
+    expectContestTeamError(
+      () =>
+        registerTeamForContest(ctx.db, {
+          contestId,
+          teamId: gamma,
+          actorId: ctx.users.admin,
+          isAdmin: true,
+        }),
+      'TEAM_MEMBER_CONFLICT',
+      409,
+    );
+    expect(listContestTeams(ctx.db, contestId).map((row) => row.teamId)).toEqual([alpha]);
+  });
+
+  it('keeps every member of a team-kind registration', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, 'alice', 'Alpha', ['bob']);
+    // A plain team may hold roles beyond captain/member in legacy data; a team
+    // registration keeps the whole roster (only classes filter staff out).
+    insertTeamMember(ctx.db, {
+      teamId: alpha,
+      userId: ctx.users.carol,
+      role: 'coach',
+      joinedAt: 1,
+    });
+
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: alpha,
+      actorId: ctx.users.admin,
+      isAdmin: true,
+    });
+
+    const [registration] = listContestTeams(ctx.db, contestId);
+    expect(registration).toMatchObject({ teamId: alpha, kind: 'team' });
+    expect([...(registration?.members.map((member) => member.username) ?? [])].sort()).toEqual([
+      'alice',
+      'bob',
+      'carol',
+    ]);
   });
 });
 
@@ -1399,6 +1580,40 @@ describe('contest team HTTP API', () => {
     expect((list.json() as { data: Array<{ teamId: number }> }).data).toEqual([
       expect.objectContaining({ teamId: alpha }),
     ]);
+  });
+
+  it('lists only students for a registered class over HTTP', async () => {
+    const ctx = setup();
+    const app = await buildCtxApp(ctx);
+    const contestId = makeContest(ctx);
+    const classId = makeClass(ctx, {
+      name: 'Http Class',
+      owner: 'manager',
+      staff: [{ username: 'alice', role: 'assistant' }],
+      students: ['bob', 'carol'],
+    });
+    registerTeamForContest(ctx.db, {
+      contestId,
+      teamId: classId,
+      actorId: ctx.users.admin,
+      isAdmin: true,
+    });
+
+    const response = await api(app, 'GET', `/api/contests/${contestId}/teams`, ctx, 'admin');
+    expect(response.statusCode, response.body).toBe(200);
+    const data = (
+      response.json() as {
+        data: Array<{
+          teamId: number;
+          kind: string;
+          members: Array<{ username: string; role: string }>;
+        }>;
+      }
+    ).data;
+    expect(data).toHaveLength(1);
+    expect(data[0]).toMatchObject({ teamId: classId, kind: 'class' });
+    expect(data[0]?.members.map((member) => member.username)).toEqual(['bob', 'carol']);
+    expect(data[0]?.members.every((member) => member.role === 'member')).toBe(true);
   });
 
   it('attributes HTTP submissions and rejects unregistered team-only submissions', async () => {
