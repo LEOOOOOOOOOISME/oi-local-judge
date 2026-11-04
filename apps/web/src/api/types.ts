@@ -1414,6 +1414,17 @@ export interface AdminTeamSummary {
   createdAt: number;
 }
 
+/** GET /api/admin/groups：全量班级/团队搜索项（管理员/比赛管理员）。 */
+export interface AdminGroupSummary {
+  id: number;
+  name: string;
+  kind: TrainingPlanGroupKind;
+  ownerId: number;
+  allowContest: boolean;
+  memberCount: number;
+  createdAt: number;
+}
+
 export interface TeamMember {
   userId: number;
   username: string;

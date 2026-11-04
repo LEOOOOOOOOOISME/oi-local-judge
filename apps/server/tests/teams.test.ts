@@ -357,6 +357,28 @@ describe('searchTeams', () => {
     expect(searchTeams(db, { query: '\\' })).toEqual([]);
   });
 
+  it('filters by kind so classes and teams stay separate', () => {
+    const { db, alice } = setup();
+    createTeam(db, { name: 'Alpha Team', ownerId: alice });
+    createTeam(db, { name: 'Beta Team', ownerId: alice });
+    createTeam(db, { name: 'Alpha Class', ownerId: alice, kind: 'class' });
+
+    expect(searchTeams(db, { kind: 'team' }).map((team) => team.name)).toEqual([
+      'Alpha Team',
+      'Beta Team',
+    ]);
+    expect(searchTeams(db, { kind: 'class' }).map((team) => team.name)).toEqual(['Alpha Class']);
+    expect(searchTeams(db, { kind: 'class', query: 'beta' })).toEqual([]);
+    expect(searchTeams(db, { kind: 'class', query: 'alpha' }).map((team) => team.name)).toEqual([
+      'Alpha Class',
+    ]);
+    expect(searchTeams(db).map((team) => team.name)).toEqual([
+      'Alpha Class',
+      'Alpha Team',
+      'Beta Team',
+    ]);
+  });
+
   it('defaults to 20 rows and clamps limit to 100', () => {
     const { db, alice } = setup();
     const insert = db.prepare('INSERT INTO teams(name, owner_id, created_at) VALUES (?, ?, ?)');
