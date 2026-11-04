@@ -22,6 +22,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ApiError, apiGet } from '../api/client';
 import type {
   StudentStats,
+  StudentSubmissionSummary,
   StudentTagStat,
   StudentWrongProblem,
   StudentWrongProblems,
@@ -30,13 +31,14 @@ import type {
 import { useAuth } from '../auth/AuthContext';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
-import { VerdictBadge } from '../components/VerdictBadge';
+import { SubmissionStatusBadge, VerdictBadge } from '../components/VerdictBadge';
 import { formatDateTime } from '../utils/format';
 import {
   formatPercent,
   parseClassId,
   sortTagsByMastery,
   studentStatsPath,
+  studentSubmissionsPath,
   studentWrongProblemsPath,
   tagMasteryRate,
 } from '../utils/learning';
@@ -96,12 +98,20 @@ export function StudentLearningPage() {
     enabled: validUserId,
   });
 
+  const submissionsQuery = useQuery({
+    queryKey: ['student-submissions', userId],
+    queryFn: () =>
+      apiGet<StudentSubmissionSummary[]>(studentSubmissionsPath(userId, { limit: 20 })),
+    enabled: validUserId,
+  });
+
   const stats = statsQuery.data;
   const tagRows = useMemo(() => sortTagsByMastery(stats?.tags ?? []), [stats?.tags]);
 
   const retry = () => {
     void statsQuery.refetch();
     void wrongQuery.refetch();
+    void submissionsQuery.refetch();
   };
 
   if (!validUserId) {
@@ -259,7 +269,65 @@ export function StudentLearningPage() {
     },
   ];
 
+  const submissionColumns: TableColumnsType<StudentSubmissionSummary> = [
+    {
+      title: '提交号',
+      dataIndex: 'id',
+      width: 90,
+      render: (value: number) => (
+        <Link className="mono" to={`/submissions/${value}`}>
+          #{value}
+        </Link>
+      ),
+    },
+    {
+      title: '题目',
+      dataIndex: 'problemId',
+      render: (value: number) => <Link to={`/problem/${value}`}>#{value}</Link>,
+    },
+    {
+      title: '比赛',
+      dataIndex: 'contestId',
+      width: 100,
+      render: (value: number | null) =>
+        value === null ? (
+          <span className="muted">练习</span>
+        ) : (
+          <Link to={`/contest/${value}`}>#{value}</Link>
+        ),
+    },
+    {
+      title: '状态',
+      width: 140,
+      render: (_value, row) => (
+        <SubmissionStatusBadge status={row.status} verdict={row.verdict} />
+      ),
+    },
+    {
+      title: '分数',
+      dataIndex: 'score',
+      width: 80,
+      align: 'right',
+      render: (value: number) => <span className="score-value">{value}</span>,
+    },
+    {
+      title: '提交时间',
+      dataIndex: 'createdAt',
+      width: 170,
+      render: (value: string) => <span className="mono">{formatDateTime(value)}</span>,
+    },
+    {
+      title: '',
+      width: 96,
+      align: 'center',
+      render: (_value, row) => (
+        <Link to={`/submissions/${row.id}`}>{isSelf ? '查看详情' : '查看源码'}</Link>
+      ),
+    },
+  ];
+
   const wrongRows = wrongQuery.data?.problems ?? [];
+  const submissionRows = submissionsQuery.data ?? [];
 
   return (
     <div>
@@ -386,6 +454,47 @@ export function StudentLearningPage() {
                       mode === 'never-ac' ? '没有从未 AC 的题目' : '最近一次提交均为 AC'
                     }
                   />
+                ),
+              }}
+            />
+          )}
+        </Card>
+
+        <Card
+          className="oij-card"
+          title="提交记录"
+          extra={
+            <span className="muted">
+              最近 20 条 · {isSelf ? '点击提交号查看详情' : '教师可点击查看源码'}
+            </span>
+          }
+        >
+          {submissionsQuery.isPending ? (
+            <PageLoading tip="正在加载提交记录…" />
+          ) : submissionsQuery.isError ? (
+            <Alert
+              type="error"
+              showIcon
+              message="提交记录加载失败"
+              description="请确认后端服务正常后重试。"
+              action={
+                <Button size="small" onClick={() => void submissionsQuery.refetch()}>
+                  重试
+                </Button>
+              }
+            />
+          ) : (
+            <Table<StudentSubmissionSummary>
+              className="oij-table"
+              rowKey="id"
+              size="small"
+              columns={submissionColumns}
+              dataSource={submissionRows}
+              scroll={{ x: 820 }}
+              pagination={{ pageSize: 10, hideOnSinglePage: true, showSizeChanger: false }}
+              locale={{
+                emptyText: (
+                  <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有提交记录" />
                 ),
               }}
             />

@@ -186,6 +186,50 @@ export function canTeachGroup(
   return team.kind === 'class' ? member.role === 'coach' : member.role === 'captain';
 }
 
+/** Actor whose source-code visibility is being checked. */
+export interface StudentSourceViewer {
+  userId: number;
+  /** Account role; omitted by service-level callers that only track `isAdmin`. */
+  role?: Role;
+  /** Legacy admin flag; equivalent to `role = 'admin'`. */
+  isAdmin?: boolean;
+}
+
+/** Roles that may read any student's submitted source. */
+const SOURCE_VIEW_ALL_ROLES: readonly Role[] = ['admin', 'setter', 'contestmanager'];
+
+/**
+ * Whether the actor may read the target student's submitted source code.
+ *
+ * - the student themself;
+ * - admins, setters and contest managers (platform-wide review);
+ * - a class coach/owner or team captain **while the target is a member of that
+ *   same group** — coaches may only inspect their own class/team.
+ *
+ * Assistants, ordinary class members and ordinary team members may not inspect
+ * anyone else's source.
+ */
+export function canViewStudentSource(
+  db: DatabaseSync,
+  actor: StudentSourceViewer,
+  targetUserId: number,
+): boolean {
+  if (actor.userId === targetUserId) return true;
+  if (actor.isAdmin) return true;
+  if (actor.role !== undefined && SOURCE_VIEW_ALL_ROLES.includes(actor.role)) return true;
+
+  for (const kind of ['class', 'team'] as const) {
+    for (const group of listTeamRowsForUser(db, actor.userId, kind)) {
+      const teaches =
+        group.ownerId === actor.userId ||
+        (kind === 'class' ? group.role === 'coach' : group.role === 'captain');
+      if (!teaches) continue;
+      if (getTeamMember(db, group.id, targetUserId)) return true;
+    }
+  }
+  return false;
+}
+
 /** Whether the actor may add or remove coaches. Only admins and the owner may. */
 export function canManageCoaches(
   db: DatabaseSync,
