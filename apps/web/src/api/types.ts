@@ -464,6 +464,8 @@ export interface TeamRankingRow {
   teamName: string;
   memberCount: number;
   totalScore: number;
+  /** CF-like：成功/失败 Hack 的分值（已计入 totalScore）。 */
+  hackScore?: number;
   solved: number;
   /** ACM/CF-like 罚时（分钟）；OI/IOI 为 0。 */
   penalty: number;

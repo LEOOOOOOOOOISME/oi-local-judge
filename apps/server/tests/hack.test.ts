@@ -8,11 +8,14 @@ import { submitSource } from '../src/services/submissions.js';
 import { hashPassword } from '../src/security/password.js';
 import { signSession } from '../src/security/session.js';
 import { upsertAsset } from '../src/storage/repos/assets.js';
+import { insertContestTeamRegistration } from '../src/storage/repos/contest-teams.js';
 import { createContest, getContest } from '../src/storage/repos/contests.js';
+import { getHack } from '../src/storage/repos/hacks.js';
 import { getOfficialRanking } from '../src/services/official-ranking.js';
 import { upsertOfficialScore, getOfficialScore } from '../src/storage/repos/official-scores.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import { createSubmission, getSubmission } from '../src/storage/repos/submissions.js';
+import { insertTeam, insertTeamMember } from '../src/storage/repos/teams.js';
 import { createUser } from '../src/storage/repos/users.js';
 import { migrate } from '../src/storage/migrate.js';
 import { openDatabase } from '../src/storage/db.js';
@@ -181,6 +184,8 @@ describe('contest hack', () => {
     }
     expect(hack?.status, JSON.stringify(hack)).toBe('success');
     expect(hack?.verdict).toBe('WA');
+    // No contest team registration exists yet, so this hack stays individual.
+    expect(getHack(db, hackId)?.team_id).toBeNull();
     const hacked = getSubmission(db, targetSubmissionId)!;
     expect(hacked.hacked_at).not.toBeNull();
     expect(hacked.hacked_by).toBe(hackerId);
@@ -192,6 +197,58 @@ describe('contest hack', () => {
     revertHack(db, hackId);
     expect(getSubmission(db, targetSubmissionId)!.hacked_at).toBeNull();
     expect(getOfficialScore(db, contestId, targetId, problemId)?.score).toBe(100);
+  }, 30_000);
+
+  it('attributes a hack to the registered team its hacker represents', async () => {
+    const teamId = insertTeam(db, { name: 'Hackers', ownerId: hackerId, createdAt: 1 });
+    insertTeamMember(db, { teamId, userId: hackerId, role: 'captain', joinedAt: 1 });
+    insertContestTeamRegistration(db, {
+      contestId,
+      teamId,
+      registeredBy: hackerId,
+      registeredAt: 1,
+    });
+
+    const target = createSubmission(db, {
+      contestId,
+      problemId,
+      userId: targetId,
+      language: 'cpp17',
+      sourcePath: 'subs/target.cpp',
+      sourceHash: 'team-target',
+    });
+    db.prepare("UPDATE submissions SET status='finished', verdict='AC', score=100 WHERE id=?").run(
+      target,
+    );
+
+    const locked = await app.inject({
+      method: 'POST',
+      url: `/api/contests/${contestId}/problems/${problemId}/lock`,
+      headers: { cookie: hackerCookie },
+    });
+    expect(locked.statusCode, locked.body).toBe(200);
+
+    const created = await app.inject({
+      method: 'POST',
+      url: `/api/contests/${contestId}/problems/${problemId}/hacks`,
+      headers: { cookie: hackerCookie },
+      payload: { targetSubmissionId: target, input: '3 3\n' },
+    });
+    expect(created.statusCode, created.body).toBe(201);
+    const hackId = (created.json() as { data: { id: number } }).data.id;
+
+    for (let i = 0; i < 100; i++) {
+      const response = await app.inject({
+        method: 'GET',
+        url: `/api/contests/${contestId}/hacks/${hackId}`,
+        headers: { cookie: hackerCookie },
+      });
+      const hack = (response.json() as { data: { status: string } }).data;
+      if (hack.status !== 'queued' && hack.status !== 'judging') break;
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
+
+    expect(getHack(db, hackId)?.team_id).toBe(teamId);
   }, 30_000);
 
   it('rejects invalid hack input before touching the target', async () => {

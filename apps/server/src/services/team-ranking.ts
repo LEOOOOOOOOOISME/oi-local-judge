@@ -6,6 +6,7 @@ import {
   type ContestRow,
 } from '../storage/repos/contests.js';
 import { listContestTeamRegistrations } from '../storage/repos/contest-teams.js';
+import { listHacks } from '../storage/repos/hacks.js';
 import { getProblem } from '../storage/repos/problems.js';
 import { listContestSubmissions } from '../storage/repos/submissions.js';
 import { parseRankingConfig } from './official-ranking.js';
@@ -31,6 +32,8 @@ export interface TeamRankingRow {
   teamName: string;
   memberCount: number;
   totalScore: number;
+  /** CF-like only: successful/failed hack points already included in totalScore. */
+  hackScore: number;
   solved: number;
   penalty: number;
   lastAcAt: number | null;
@@ -63,7 +66,9 @@ function presetForMode(mode: string): RankingPreset {
  *   team penalty is the first-AC minute plus 20 minutes per wrong attempt
  *   before that first AC.
  * - CF-like: shared CF-like scoring (time decay + penalty), using the
- *   `cfLike` settings from `ranking_rule_json`.
+ *   `cfLike` settings from `ranking_rule_json`. Hacks attributed to a team via
+ *   `contest_hacks.team_id` add/subtract points exactly like the individual
+ *   CF-like board; OI/IOI/ACM ignore hacks.
  *
  * The preset comes from the contest ranking config (the same one the official
  * ranking uses), falling back to `contest.mode`; a `plugin:` preset has no
@@ -128,11 +133,32 @@ export function getTeamRanking(
     freezeAt: contest.freeze_at,
   };
 
+  // Hack points belong to the team the hacker represented at creation time.
+  // `team_id` is null for individual hacks and for legacy rows written before
+  // team attribution existed, so those never reach the team board. `promoted`
+  // is the administrator-confirmed form of a successful hack, while `reverted`
+  // and unjudgeable states contribute nothing.
+  const hacks = listHacks(db, contestId)
+    .filter(
+      (hack) =>
+        hack.team_id !== null &&
+        teamIdSet.has(hack.team_id) &&
+        (hack.status === 'success' || hack.status === 'failed' || hack.status === 'promoted'),
+    )
+    .map((hack) => ({
+      hackerId: hack.team_id as number,
+      targetUserId: 0,
+      problemId: hack.problem_id,
+      status: (hack.status === 'failed' ? 'failed' : 'success') as 'success' | 'failed',
+      createdAt: hack.created_at,
+    }));
+
   const computed = computeRanking({
     config,
     problemIds,
     userIds: teamIds,
     submissions,
+    hacks,
     problemPoints: Object.fromEntries(problems.map((problem) => [problem.id, problem.points])),
     contestStartAt: contest.start_at,
     contestEndAt: contest.end_at,
@@ -146,6 +172,7 @@ export function getTeamRanking(
       teamName: registration.name,
       memberCount: registration.members.length,
       totalScore: row.totalScore,
+      hackScore: row.hackScore ?? 0,
       solved: row.solved,
       penalty: row.penalty,
       lastAcAt: row.lastAcAt,
