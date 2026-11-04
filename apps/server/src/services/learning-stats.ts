@@ -13,7 +13,12 @@ import {
   listTeamsForUser,
 } from '../storage/repos/teams.js';
 import { getUserById, type UserRow } from '../storage/repos/users.js';
-import { canTeachGroup } from './teams.js';
+import { listSubmissions } from '../storage/repos/submissions.js';
+import {
+  canTeachGroup,
+  canViewStudentSource,
+  type StudentSourceViewer,
+} from './teams.js';
 
 export const WRONG_PROBLEM_MODES = ['never-ac', 'latest-wrong'] as const;
 export type WrongProblemMode = (typeof WRONG_PROBLEM_MODES)[number];
@@ -30,9 +35,25 @@ export class LearningStatsError extends Error {
   }
 }
 
-export interface LearningStatsActor {
+export interface LearningStatsActor extends StudentSourceViewer {
   userId: number;
   isAdmin?: boolean;
+}
+
+/** One row of a student's submission history; never contains source code. */
+export interface StudentSubmissionSummary {
+  id: number;
+  problemId: number;
+  contestId: number | null;
+  status: string;
+  verdict: string | null;
+  score: number;
+  createdAt: string;
+}
+
+export interface StudentSubmissionsOptions {
+  limit?: number;
+  beforeId?: number;
 }
 
 export interface StudentProblemStat {
@@ -454,6 +475,37 @@ function assertCanViewStudent(
   if (actor.isAdmin || actor.userId === targetUserId) return target;
   if (teachesTarget(db, actor.userId, targetUserId)) return target;
   throw new LearningStatsError('STUDENT_FORBIDDEN', 403, 'you cannot view this student');
+}
+
+/**
+ * Lists a student's submissions (newest first) for students themself, staff and
+ * the coaches/captains who teach them. Only summary fields are returned; source
+ * code stays behind `GET /api/submissions/:id`, which audits every coach view.
+ */
+export function listStudentSubmissions(
+  db: DatabaseSync,
+  targetUserId: number,
+  actor: LearningStatsActor,
+  options: StudentSubmissionsOptions = {},
+): StudentSubmissionSummary[] {
+  requireStudent(db, targetUserId);
+  if (!canViewStudentSource(db, actor, targetUserId)) {
+    throw new LearningStatsError('STUDENT_FORBIDDEN', 403, 'you cannot view this student');
+  }
+  const limit = options.limit ?? 20;
+  return listSubmissions(db, {
+    userId: targetUserId,
+    beforeId: options.beforeId,
+    limit,
+  }).map((row) => ({
+    id: row.id,
+    problemId: row.problem_id,
+    contestId: row.contest_id,
+    status: row.status,
+    verdict: row.verdict,
+    score: row.score,
+    createdAt: new Date(row.created_at).toISOString(),
+  }));
 }
 
 export function getStudentStats(

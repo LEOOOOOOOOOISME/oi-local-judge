@@ -7,6 +7,7 @@ import {
   getStudentStats,
   getStudentWrongProblems,
   LearningStatsError,
+  listStudentSubmissions,
   type WrongProblemMode,
 } from '../services/learning-stats.js';
 
@@ -79,8 +80,50 @@ export function registerLearningStatsRoutes(
         data: getStudentStats(
           options.db,
           userId,
-          { userId: user.id, isAdmin: user.role === 'admin' },
+          { userId: user.id, isAdmin: user.role === 'admin', role: user.role },
           { classId, includeContest },
+        ),
+      };
+    } catch (err) {
+      return sendError(reply, err);
+    }
+  });
+
+  app.get<{
+    Params: { id: string };
+    Querystring: { limit?: string; beforeId?: string };
+  }>('/api/students/:id/submissions', { preHandler }, async (request, reply) => {
+    const userId = parsePositiveInt(request.params.id);
+    if (userId === null) {
+      return reply
+        .code(404)
+        .send({ ok: false, error: { code: 'STUDENT_NOT_FOUND', message: 'student not found' } });
+    }
+    let limit = 20;
+    if (request.query.limit !== undefined) {
+      const parsed = parsePositiveInt(request.query.limit);
+      if (parsed === null || parsed > 100) {
+        return badRequest(reply, 'limit must be an integer between 1 and 100');
+      }
+      limit = parsed;
+    }
+    let beforeId: number | undefined;
+    if (request.query.beforeId !== undefined) {
+      const parsed = parsePositiveInt(request.query.beforeId);
+      if (parsed === null) {
+        return badRequest(reply, 'beforeId must be a positive integer');
+      }
+      beforeId = parsed;
+    }
+    const user = request.user!;
+    try {
+      return {
+        ok: true,
+        data: listStudentSubmissions(
+          options.db,
+          userId,
+          { userId: user.id, isAdmin: user.role === 'admin', role: user.role },
+          { limit, beforeId },
         ),
       };
     } catch (err) {
