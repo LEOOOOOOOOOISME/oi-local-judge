@@ -10,6 +10,7 @@ import {
   listTeamMembers,
   listTeamsForUser as listTeamRowsForUser,
   removeTeamMemberRow,
+  searchTeams as searchTeamRows,
   updateTeamMemberRole,
   updateTeamOwner,
   type TeamDetail,
@@ -19,6 +20,15 @@ import {
 import { getUserById, getUserByUsername } from '../storage/repos/users.js';
 
 export type { TeamDetail, TeamDto, TeamMemberDto, TeamRole } from '../storage/repos/teams.js';
+
+/** 管理员团队搜索返回项：与当前用户是否在团队中无关。 */
+export interface AdminTeamDto {
+  id: number;
+  name: string;
+  ownerId: number;
+  memberCount: number;
+  createdAt: number;
+}
 
 export class TeamError extends Error {
   readonly code: string;
@@ -111,6 +121,25 @@ export function createTeam(
 
 export function listTeamsForUser(db: DatabaseSync, userId: number): TeamDto[] {
   return listTeamRowsForUser(db, userId);
+}
+
+/**
+ * 管理员/比赛管理员的全量团队搜索。
+ *
+ * 与 {@link listTeamsForUser} 的“只返回我加入的团队”语义完全隔离；
+ * `query` 按团队名模糊匹配，`limit` 默认 20、最大 100。
+ */
+export function searchTeams(
+  db: DatabaseSync,
+  filter: { query?: string; limit?: number } = {},
+): AdminTeamDto[] {
+  return searchTeamRows(db, filter).map((row) => ({
+    id: row.id,
+    name: row.name,
+    ownerId: row.owner_id,
+    memberCount: Number(row.member_count),
+    createdAt: row.created_at,
+  }));
 }
 
 export function getTeam(db: DatabaseSync, teamId: number): TeamDetail | null {

@@ -4,6 +4,7 @@ import {
   buildTeamRankingCsv,
   captainTeams,
   findTeamByIdOrName,
+  parseTeamIdInput,
   resolveTeamMode,
   teamModeLabel,
 } from './teamContest';
@@ -101,6 +102,23 @@ describe('findTeamByIdOrName', () => {
     expect(findTeamByIdOrName(teams, '')).toBeNull();
     expect(findTeamByIdOrName(teams, '   ')).toBeNull();
     expect(findTeamByIdOrName(teams, '99')).toBeNull();
+  });
+});
+
+describe('parseTeamIdInput', () => {
+  it('parses a positive integer team id', () => {
+    expect(parseTeamIdInput('9')).toBe(9);
+    expect(parseTeamIdInput('  42 ')).toBe(42);
+  });
+
+  it('rejects names, empty values, zero, negatives and non-integers', () => {
+    expect(parseTeamIdInput('Gamma')).toBeNull();
+    expect(parseTeamIdInput('')).toBeNull();
+    expect(parseTeamIdInput('   ')).toBeNull();
+    expect(parseTeamIdInput('0')).toBeNull();
+    expect(parseTeamIdInput('-3')).toBeNull();
+    expect(parseTeamIdInput('9.5')).toBeNull();
+    expect(parseTeamIdInput('9abc')).toBeNull();
   });
 });
 

@@ -43,13 +43,13 @@ import type {
   RegistrationStatus,
   TeamMode,
   TeamRegistration,
-  TeamSummary,
   UpdateContestRequest,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useContestAnnouncements } from '../components/ContestAnnouncements';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
+import { TeamSearchSelect } from '../components/TeamSearchSelect';
 import { formatDateTime } from '../utils/format';
 import {
   computeAwardCounts,
@@ -57,7 +57,7 @@ import {
 } from '../utils/awards';
 import { fetchOfficialRanking, presetLabel } from '../utils/officialRanking';
 import {
-  findTeamByIdOrName,
+  parseTeamIdInput,
   resolveTeamMode,
   TEAM_MODE_OPTIONS,
   teamModeLabel,
@@ -146,6 +146,7 @@ export function AdminContestConsolePage() {
   const [addingParticipants, setAddingParticipants] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<number | null>(null);
   const [teamIdentifier, setTeamIdentifier] = useState('');
+  const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [addingTeam, setAddingTeam] = useState(false);
   const [removingTeamId, setRemovingTeamId] = useState<number | null>(null);
   const [extraDraft, setExtraDraft] = useState<Record<number, number>>({});
@@ -216,11 +217,6 @@ export function AdminContestConsolePage() {
     queryFn: () => apiGet<TeamRegistration[]>(`/api/contests/${contestId}/teams`),
     enabled: validId,
     staleTime: 10_000,
-  });
-  const myTeamsQuery = useQuery({
-    queryKey: ['teams'],
-    queryFn: () => apiGet<TeamSummary[]>('/api/teams'),
-    staleTime: 30_000,
   });
   const classStatsQuery = useQuery({
     queryKey: ['admin-class-stats', contestId],
@@ -293,24 +289,6 @@ export function AdminContestConsolePage() {
     registrationFilter === 'all'
       ? registrations
       : registrations.filter((row) => row.status === registrationFilter);
-  // 后端没有“列出全部团队”的接口：名称解析只在当前管理员可见团队 + 已报名团队内进行，
-  // 其余情况由管理员直接输入团队 ID（提交后后端校验）。
-  const knownTeams = useMemo(() => {
-    const byId = new Map<number, TeamSummary>();
-    for (const team of myTeamsQuery.data ?? []) byId.set(team.id, team);
-    for (const registration of contestTeamsQuery.data ?? []) {
-      if (byId.has(registration.teamId)) continue;
-      byId.set(registration.teamId, {
-        id: registration.teamId,
-        name: registration.name,
-        ownerId: registration.ownerId,
-        createdAt: registration.registeredAt,
-        memberCount: registration.members.length,
-        role: 'member',
-      });
-    }
-    return [...byId.values()];
-  }, [myTeamsQuery.data, contestTeamsQuery.data]);
   const archived = Boolean(contest?.archived_at) || contest?.status === 'archived';
   const officialFrozenUntil =
     contest?.official_frozen_until ?? officialQuery.data?.officialFrozenUntil ?? null;
@@ -597,16 +575,9 @@ export function AdminContestConsolePage() {
   };
 
   const addTeamRegistration = async () => {
-    const raw = teamIdentifier.trim();
-    if (raw === '') {
-      message.error('请输入团队 ID 或团队名称');
-      return;
-    }
-    const known = findTeamByIdOrName(knownTeams, raw);
-    // 未知的纯数字直接交给后端校验；未知名称无法解析（后端没有全量团队搜索接口）。
-    const teamId = known?.id ?? (/^\d+$/.test(raw) ? Number(raw) : null);
+    const teamId = selectedTeamId ?? parseTeamIdInput(teamIdentifier);
     if (teamId === null) {
-      message.error('未找到该团队；请检查团队名称，或直接输入团队 ID');
+      message.error('请从搜索结果选择团队，或直接输入团队 ID');
       return;
     }
     setAddingTeam(true);
@@ -614,6 +585,7 @@ export function AdminContestConsolePage() {
       await apiPost<null>(`/api/admin/contests/${contestId}/teams`, { teamId });
       message.success('团队已报名');
       setTeamIdentifier('');
+      setSelectedTeamId(null);
       void queryClient.invalidateQueries({ queryKey: ['admin-contest-teams', contestId] });
       void queryClient.invalidateQueries({ queryKey: ['contest-teams', contestId] });
       void queryClient.invalidateQueries({ queryKey: ['team-ranking', contestId] });
@@ -2109,24 +2081,36 @@ export function AdminContestConsolePage() {
               />
             ) : null}
             <Space wrap>
+              <TeamSearchSelect
+                value={selectedTeamId}
+                onChange={setSelectedTeamId}
+                enabled={teamRegistrationEnabled}
+                allowIdInput
+                placeholder="搜索团队名称（支持纯数字 ID）"
+                disabled={!teamRegistrationEnabled}
+                style={{ width: 320 }}
+              />
               <Input
-                placeholder="团队 ID 或团队名称"
+                placeholder="或手动输入团队 ID"
                 value={teamIdentifier}
                 disabled={!teamRegistrationEnabled}
                 onChange={(event) => setTeamIdentifier(event.target.value)}
                 onPressEnter={() => void addTeamRegistration()}
-                style={{ width: 280 }}
+                style={{ width: 180 }}
               />
               <Button
                 type="primary"
                 loading={addingTeam}
-                disabled={!teamRegistrationEnabled || teamIdentifier.trim() === ''}
+                disabled={
+                  !teamRegistrationEnabled ||
+                  (selectedTeamId === null && teamIdentifier.trim() === '')
+                }
                 onClick={() => void addTeamRegistration()}
               >
                 添加团队
               </Button>
               <span className="muted">
-                支持精确团队名；不在当前可见团队列表中的团队请直接输入团队 ID。
+                可按团队名搜索任意团队；也可直接输入团队 ID（提交后由后端校验）。
               </span>
             </Space>
             {contestTeamsQuery.isPending ? (

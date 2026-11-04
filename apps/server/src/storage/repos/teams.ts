@@ -42,6 +42,49 @@ export interface TeamDetail {
   members: TeamMemberDto[];
 }
 
+/** 管理员全量团队搜索行（不含 viewerRole，与成员身份无关）。 */
+export interface AdminTeamRow {
+  id: number;
+  name: string;
+  owner_id: number;
+  created_at: number;
+  member_count: number;
+}
+
+/** 转义 LIKE 通配符，避免用户输入的 % / _ 被当成模式匹配。 */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
+/**
+ * 管理员全量团队搜索：按团队名模糊匹配（大小写不敏感），按名称排序。
+ * `limit` 会被夹在 1–100 之间，默认 20。
+ */
+export function searchTeams(
+  db: DatabaseSync,
+  filter: { query?: string; limit?: number } = {},
+): AdminTeamRow[] {
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+  const query = filter.query?.trim() ?? '';
+  if (query !== '') {
+    clauses.push("t.name LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLike(query)}%`);
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+  const limit = Math.min(Math.max(Math.floor(filter.limit ?? 20), 1), 100);
+  return db
+    .prepare(
+      `SELECT t.id, t.name, t.owner_id, t.created_at,
+              (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS member_count
+       FROM teams t
+       ${where}
+       ORDER BY t.name COLLATE NOCASE, t.id
+       LIMIT ?`,
+    )
+    .all(...params, limit) as unknown as AdminTeamRow[];
+}
+
 export function getTeamRow(db: DatabaseSync, teamId: number): TeamRow | null {
   return (db.prepare('SELECT * FROM teams WHERE id = ?').get(teamId) as unknown as TeamRow) ?? null;
 }
