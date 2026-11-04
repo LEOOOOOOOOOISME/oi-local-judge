@@ -22,6 +22,7 @@ import type {
   DiagnosticCheck,
   DiagnosticsReport,
   DiagnosticStatus,
+  LearningStatsRebuildResult,
   RestoreRequestResult,
   RuntimeMetrics,
   SlowRequest,
@@ -398,6 +399,63 @@ function MetricsPanel() {
           />
         </>
       )}
+    </Card>
+  );
+}
+
+function LearningStatsPanel() {
+  const { message } = App.useApp();
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null,
+  );
+
+  const rebuildMutation = useMutation({
+    mutationFn: () =>
+      apiPost<LearningStatsRebuildResult>('/api/admin/system/learning-stats/rebuild'),
+    onSuccess: (result) => {
+      const text = `学习统计已重建：${result.users} 名学生，${result.problems} 条题目记录、${result.tags} 条标签记录、${result.days} 条每日记录，用时 ${formatMetricsMs(result.durationMs)}。`;
+      setFeedback({ type: 'success', text });
+      message.success('学习统计已重建');
+    },
+    onError: (error) => {
+      const text = error instanceof Error ? error.message : '学习统计重建失败';
+      setFeedback({ type: 'error', text });
+      message.error(text);
+    },
+  });
+
+  return (
+    <Card
+      className="oij-card"
+      title="学习统计"
+      extra={
+        <Button
+          type="primary"
+          icon={<ReloadOutlined />}
+          loading={rebuildMutation.isPending}
+          onClick={() => rebuildMutation.mutate()}
+        >
+          重建学习统计
+        </Button>
+      }
+    >
+      <Alert
+        className="system-settings-note"
+        type="info"
+        showIcon
+        message="学习统计缓存会定时重建"
+        description="服务启动约 2 分钟后首次重建，之后每 6 小时自动重建一次（可用 OIJ_STATS_REBUILD=0 关闭）。这里可以立即手动重建；重建是同步操作，数据量大时会短暂占用服务进程。"
+      />
+      {feedback ? (
+        <Alert
+          className="system-settings-note"
+          type={feedback.type}
+          showIcon
+          message={feedback.text}
+          closable
+          onClose={() => setFeedback(null)}
+        />
+      ) : null}
     </Card>
   );
 }
@@ -930,6 +988,7 @@ export function AdminSystemPage() {
         items={[
           { key: 'diagnostics', label: '诊断', children: <DiagnosticsPanel /> },
           { key: 'metrics', label: '指标', children: <MetricsPanel /> },
+          { key: 'learning-stats', label: '学习统计', children: <LearningStatsPanel /> },
           { key: 'settings', label: '设置', children: <SettingsPanel /> },
           { key: 'backups', label: '备份', children: <BackupsPanel /> },
         ]}
