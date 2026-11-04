@@ -5,7 +5,6 @@ import {
   Button,
   Card,
   Descriptions,
-  Empty,
   Form,
   Input,
   Modal,
@@ -13,9 +12,7 @@ import {
   Result,
   Select,
   Space,
-  Statistic,
   Table,
-  Tabs,
   Tag,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
@@ -26,6 +23,7 @@ import { ApiError, apiDelete, apiGet, apiPost } from '../api/client';
 import type { ClassDetail, ClassMember, ClassRole } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { AllowContestTag, ClassRoleTag } from '../components/ClassTags';
+import { ClassWorkbench } from '../components/ClassWorkbench';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import {
@@ -37,6 +35,7 @@ import {
   describeClassError,
 } from '../utils/classes';
 import { formatDateTime } from '../utils/format';
+import { canViewClassLearning, studentLearningPath } from '../utils/learning';
 import '../styles/classes.css';
 
 interface AddMemberFormValues {
@@ -167,6 +166,7 @@ export function ClassDetailPage() {
   const canManageStudents = canManageClassStudents(permissionInput);
   const canManageCoaches = canManageClassCoaches(permissionInput);
   const canAddMembers = canManageStudents || canManageCoaches;
+  const canViewLearning = canViewClassLearning({ viewerRole, isAdmin });
   const counts = detail.members ? countClassMembers(detail.members) : null;
   const owner = detail.members?.find((member) => member.userId === detail.ownerId) ?? null;
   const ownerLabel = owner?.username ?? `用户 #${detail.ownerId}`;
@@ -210,6 +210,20 @@ export function ClassDetailPage() {
       dataIndex: 'joinedAt',
       width: 170,
       render: (value: number) => <span className="mono">{formatDateTime(value)}</span>,
+    },
+    {
+      title: '学习',
+      width: 80,
+      render: (_value, row) =>
+        canViewLearning || row.userId === user?.id ? (
+          <Link to={studentLearningPath(row.userId, classId)}>
+            <Button size="small" type="link">
+              学习
+            </Button>
+          </Link>
+        ) : (
+          <span className="muted">—</span>
+        ),
     },
   ];
 
@@ -263,7 +277,7 @@ export function ClassDetailPage() {
             {isAdmin ? <Tag color="red">管理员</Tag> : null}
           </>
         }
-        subtitle="班级详情：教练可以添加/移出学生与助教；班级创建者或管理员可以添加/移除教练。"
+        subtitle="班级详情：教练可以查看学习统计与错题本，并添加/移出学生与助教；班级创建者或管理员可以添加/移除教练。"
         extra={
           <Space wrap>
             <Button icon={<ReloadOutlined />} loading={detailQuery.isFetching} onClick={retry}>
@@ -327,46 +341,7 @@ export function ClassDetailPage() {
           />
         </Card>
 
-        <Card
-          className="oij-card"
-          title="教练工作台"
-          extra={<Tag color="blue">建设中</Tag>}
-        >
-          <div className="class-workbench-note">
-            本页先提供班级统计占位；训练与错题分析将在后续版本接入。
-          </div>
-          <div className="class-workbench-stats">
-            <Statistic title="成员数" value={counts ? counts.memberCount : '—'} />
-            <Statistic title="教练数" value={counts ? counts.coachCount : '—'} />
-            <Statistic title="助教数" value={counts ? counts.assistantCount : '—'} />
-            <Statistic title="最近训练" value="暂未接入" />
-          </div>
-          <Tabs
-            className="class-workbench-tabs"
-            items={[
-              {
-                key: 'training',
-                label: '训练',
-                children: (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="训练功能将在后续版本接入"
-                  />
-                ),
-              },
-              {
-                key: 'mistakes',
-                label: '错题本',
-                children: (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="错题本将在后续版本接入"
-                  />
-                ),
-              },
-            ]}
-          />
-        </Card>
+        {canViewLearning ? <ClassWorkbench classId={classId} /> : null}
 
         <Card
           className="oij-card"

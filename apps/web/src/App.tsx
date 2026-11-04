@@ -80,6 +80,11 @@ const ClassesPage = lazy(() =>
 const ClassDetailPage = lazy(() =>
   import('./pages/ClassDetailPage').then((module) => ({ default: module.ClassDetailPage })),
 );
+const StudentLearningPage = lazy(() =>
+  import('./pages/StudentLearningPage').then((module) => ({
+    default: module.StudentLearningPage,
+  })),
+);
 const ProblemSetsPage = lazy(() =>
   import('./pages/ProblemSetsPage').then((module) => ({ default: module.ProblemSetsPage })),
 );
@@ -268,6 +273,14 @@ export function AppRoutes() {
           element={
             <ProtectedRoute>
               <ClassDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/students/:id/learning"
+          element={
+            <ProtectedRoute>
+              <StudentLearningPage />
             </ProtectedRoute>
           }
         />
