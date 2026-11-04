@@ -38,7 +38,7 @@ export interface DiagnosticsReport {
 }
 
 /** How a backup was triggered; recorded in the backup manifest. */
-export type BackupKind = 'manual' | 'auto' | 'pre-restore';
+export type BackupKind = 'manual' | 'auto' | 'pre-restore' | 'pre-upgrade';
 
 export interface BackupEntry {
   id: string;
@@ -380,7 +380,9 @@ export function listBackups(config: Config): BackupEntry[] {
 
 /** Normalizes a manifest kind; backups written before `kind` existed are manual. */
 function normalizeBackupKind(value: unknown): BackupKind {
-  return value === 'auto' || value === 'pre-restore' ? value : 'manual';
+  return value === 'auto' || value === 'pre-restore' || value === 'pre-upgrade'
+    ? value
+    : 'manual';
 }
 
 /**
@@ -722,7 +724,8 @@ function directorySize(directory: string): number {
   return total;
 }
 
-function appVersion(): string {
+/** Reads the running app version from package.json (used by update checks). */
+export function appVersion(): string {
   const candidates = [
     join(process.cwd(), 'package.json'),
     join(process.cwd(), 'apps', 'server', 'package.json'),
