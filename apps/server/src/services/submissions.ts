@@ -19,6 +19,7 @@ import {
   createJudgeTask,
   enqueueRejudge,
   getJudgeTaskBySubmission,
+  getQueuePosition,
 } from '../storage/repos/judge.js';
 import { transaction } from '../storage/db.js';
 import { abortSubmission } from '../judge/cancellation.js';
@@ -373,6 +374,9 @@ export function getSubmissionDetail(
   if (!row) return null;
   return {
     ...toSubmissionDto(db, row),
+    // Only a queued submission has a queue position; a claimed/terminal task
+    // (or a submission whose worker already moved on) exposes null.
+    queuePosition: row.status === 'queued' ? getQueuePosition(db, id) : null,
     results: getTestResults(db, id).map(toResultDto),
   };
 }

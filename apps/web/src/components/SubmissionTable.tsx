@@ -62,6 +62,9 @@ export function SubmissionTable({
       render: (_value, record) => (
         <span className="submission-status-cell">
           <SubmissionStatusBadge status={record.status} verdict={record.verdict} />
+          {record.status === 'queued' && record.queuePosition != null ? (
+            <span className="queue-position-tag">排队第 {record.queuePosition} 位</span>
+          ) : null}
           {record.hackedAt ? (
             <Tooltip title="已被 Hack">
               <span className="hacked-submission-tag">HACKED</span>
