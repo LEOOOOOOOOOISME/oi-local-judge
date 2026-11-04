@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import type { ParticipantSource } from './contests.js';
 
 export const REGISTRATION_STATUSES = ['accepted', 'pending', 'rejected'] as const;
 export type RegistrationStatus = (typeof REGISTRATION_STATUSES)[number];
@@ -19,6 +20,8 @@ export interface RegistrationRow {
   checked_in_at: number | null;
   reviewed_at: number | null;
   reviewed_by: number | null;
+  /** Provenance: `manual` (admin), `self` (self-registration) or `team`. */
+  source: string;
 }
 
 export interface RegistrationWithUserRow extends RegistrationRow {
@@ -87,12 +90,13 @@ export function insertRegistration(
     userId: number;
     status: RegistrationStatus;
     now: number;
+    source?: ParticipantSource;
   },
 ): void {
   db.prepare(
-    `INSERT INTO contest_participants(contest_id, user_id, status, registered_at)
-     VALUES (?, ?, ?, ?)`,
-  ).run(input.contestId, input.userId, input.status, input.now);
+    `INSERT INTO contest_participants(contest_id, user_id, status, registered_at, source)
+     VALUES (?, ?, ?, ?, ?)`,
+  ).run(input.contestId, input.userId, input.status, input.now, input.source ?? 'self');
 }
 
 export interface RegistrationPatch {
@@ -101,6 +105,7 @@ export interface RegistrationPatch {
   checkedInAt?: number | null;
   reviewedAt?: number | null;
   reviewedBy?: number | null;
+  source?: ParticipantSource;
 }
 
 export function updateRegistration(
@@ -121,6 +126,7 @@ export function updateRegistration(
   add('checked_in_at', patch.checkedInAt);
   add('reviewed_at', patch.reviewedAt);
   add('reviewed_by', patch.reviewedBy);
+  add('source', patch.source);
   if (sets.length === 0) return;
   db.prepare(
     `UPDATE contest_participants SET ${sets.join(', ')} WHERE contest_id = ? AND user_id = ?`,
