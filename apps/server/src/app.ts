@@ -26,6 +26,7 @@ import { registerHackRoutes } from './http/hacks.js';
 import { registerTeamRoutes } from './http/teams.js';
 import { registerAdminTeamRoutes } from './http/admin-teams.js';
 import { registerClassRoutes } from './http/classes.js';
+import { registerLearningStatsRoutes } from './http/learning-stats.js';
 import { registerProblemSetRoutes } from './http/problem-sets.js';
 import { registerTrainingPlanRoutes } from './http/training-plans.js';
 import { recordAudit } from './storage/repos/audit.js';
@@ -152,6 +153,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     auth,
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
   });
+  registerLearningStatsRoutes(app, { db, config, auth });
   registerProblemSetRoutes(app, { db, config, auth });
   registerTrainingPlanRoutes(app, { db, config, auth });
 

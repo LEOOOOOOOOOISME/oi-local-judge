@@ -276,6 +276,38 @@ CREATE TABLE IF NOT EXISTS training_plan_items(
 );
 CREATE INDEX IF NOT EXISTS idx_training_plan_items_plan
   ON training_plan_items(plan_id, ordinal);
+CREATE TABLE IF NOT EXISTS student_problem_stats(
+  user_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  best_score INTEGER NOT NULL DEFAULT 0,
+  best_verdict TEXT,
+  first_ac_at INTEGER,
+  last_submit_at INTEGER NOT NULL,
+  wrong_attempts INTEGER NOT NULL DEFAULT 0,
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(user_id, problem_id)
+);
+CREATE INDEX IF NOT EXISTS idx_student_problem_stats_problem
+  ON student_problem_stats(problem_id);
+CREATE TABLE IF NOT EXISTS student_tag_stats(
+  user_id INTEGER NOT NULL,
+  tag TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  solved INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at INTEGER,
+  PRIMARY KEY(user_id, tag)
+);
+CREATE TABLE IF NOT EXISTS student_daily_stats(
+  user_id INTEGER NOT NULL,
+  date TEXT NOT NULL,
+  submissions INTEGER NOT NULL DEFAULT 0,
+  ac_count INTEGER NOT NULL DEFAULT 0,
+  points INTEGER NOT NULL DEFAULT 0,
+  active_seconds INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(user_id, date)
+);
 `;
 
 export function migrate(db: DatabaseSync): void {
