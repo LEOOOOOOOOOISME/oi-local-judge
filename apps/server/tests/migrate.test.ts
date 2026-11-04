@@ -74,6 +74,45 @@ describe('migrations and repositories', () => {
     db.close();
   });
 
+  it('adds kind and allow_contest to a legacy teams table, defaulting to team and allowed', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oij-migrate-legacy-teams-'));
+    dirs.push(dir);
+    const db = openDatabase(join(dir, 'test.db'));
+    db.exec(
+      `CREATE TABLE teams(
+         id INTEGER PRIMARY KEY,
+         name TEXT NOT NULL UNIQUE,
+         owner_id INTEGER NOT NULL,
+         created_at INTEGER NOT NULL
+       )`,
+    );
+    db.prepare('INSERT INTO teams(name, owner_id, created_at) VALUES (?, ?, ?)').run(
+      'Legacy',
+      1,
+      1,
+    );
+    migrate(db);
+
+    const columns = db.prepare('PRAGMA table_info(teams)').all() as Array<{
+      name: string;
+      dflt_value: string | null;
+      notnull: number;
+    }>;
+    expect(columns.find((column) => column.name === 'kind')).toMatchObject({
+      dflt_value: "'team'",
+      notnull: 1,
+    });
+    expect(columns.find((column) => column.name === 'allow_contest')).toMatchObject({
+      dflt_value: '1',
+      notnull: 1,
+    });
+    const row = db
+      .prepare("SELECT kind, allow_contest FROM teams WHERE name = 'Legacy'")
+      .get() as { kind: string; allow_contest: number };
+    expect(row).toEqual({ kind: 'team', allow_contest: 1 });
+    db.close();
+  });
+
   it('round-trips user, problem, submission and judge task', () => {
     const db = freshDb();
     const userId = createUser(db, {
