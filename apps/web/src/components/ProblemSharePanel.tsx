@@ -21,6 +21,7 @@ import type {
   TeamSummary,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
+import { TeamSearchSelect } from './TeamSearchSelect';
 import {
   PROBLEM_GRANTEE_TYPE_LABEL,
   PROBLEM_SHARE_PERMISSION_LABEL,
@@ -57,6 +58,7 @@ export function ProblemSharePanel({
   const { user } = useAuth();
   const { message } = App.useApp();
   const queryClient = useQueryClient();
+  const canSearchAllTeams = user?.role === 'admin' || user?.role === 'contestmanager';
   const [granteeType, setGranteeType] = useState<ProblemGranteeType>('user');
   const [granteeId, setGranteeId] = useState<number | null>(null);
   const [permission, setPermission] = useState<ProblemSharePermission>('read');
@@ -165,7 +167,7 @@ export function ProblemSharePanel({
           options={GRANTEE_OPTIONS}
         />
         {granteeType === 'team' ? (
-          teams.length === 0 ? (
+          teams.length === 0 && !canSearchAllTeams ? (
             <Alert
               type="warning"
               showIcon
@@ -177,12 +179,18 @@ export function ProblemSharePanel({
               }
             />
           ) : (
-            <Select<number>
+            <TeamSearchSelect
               value={granteeId}
               onChange={(value) => setGranteeId(value)}
-              placeholder="选择团队"
-              allowClear
-              options={teams.map((team) => ({ value: team.id, label: team.name }))}
+              enabled={canSearchAllTeams}
+              fallbackOptions={teams.map((team) => ({
+                value: team.id,
+                label: team.name,
+              }))}
+              selectedLabel={
+                granteeId !== null ? teamNames.get(granteeId) ?? null : null
+              }
+              placeholder={canSearchAllTeams ? '搜索团队名称' : '选择团队'}
             />
           )
         ) : (

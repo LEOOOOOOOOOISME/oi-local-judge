@@ -1255,6 +1255,15 @@ export interface TeamSummary {
   role: TeamRole;
 }
 
+/** GET /api/admin/teams 全量团队搜索项（管理员/比赛管理员）。 */
+export interface AdminTeamSummary {
+  id: number;
+  name: string;
+  ownerId: number;
+  memberCount: number;
+  createdAt: number;
+}
+
 export interface TeamMember {
   userId: number;
   username: string;

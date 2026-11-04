@@ -68,6 +68,14 @@ export function findTeamByIdOrName(
   return teams.find((team) => team.name === raw) ?? null;
 }
 
+/** 管理端手动 ID 兜底：纯数字（且为正整数）才解析为团队 ID，否则返回 null。 */
+export function parseTeamIdInput(input: string): number | null {
+  const raw = input.trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 function csvCell(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }

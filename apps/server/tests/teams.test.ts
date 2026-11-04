@@ -14,6 +14,7 @@ import {
   leaveTeam,
   listTeamsForUser,
   removeTeamMember,
+  searchTeams,
   transferCaptain,
   TeamError,
 } from '../src/services/teams.js';
@@ -317,5 +318,60 @@ describe('teams service', () => {
     const { db } = setup();
     expect(listTeamsForUser(db, 999999)).toEqual([]);
     expect(getTeam(db, 999999)).toBeNull();
+  });
+});
+
+describe('searchTeams', () => {
+  it('matches team names case-insensitively and sorts by name', () => {
+    const { db, alice, bob } = setup();
+    createTeam(db, { name: 'Beta', ownerId: alice });
+    createTeam(db, { name: 'alpha', ownerId: alice });
+    const gamma = createTeam(db, { name: 'Gamma', ownerId: alice });
+    addTeamMember(db, { teamId: gamma, actorId: alice, username: 'bob' });
+
+    const all = searchTeams(db);
+    expect(all.map((team) => team.name)).toEqual(['alpha', 'Beta', 'Gamma']);
+    expect(all[1]).toMatchObject({ ownerId: alice, memberCount: 1 });
+    expect(all.find((team) => team.name === 'Gamma')?.memberCount).toBe(2);
+    expect(all.find((team) => team.name === 'Gamma')?.ownerId).toBe(alice);
+    expect(all.find((team) => team.name === 'Gamma')?.createdAt).toBeGreaterThan(0);
+    expect(all.map((team) => team.id)).toContain(gamma);
+
+    const matched = searchTeams(db, { query: 'ALP' });
+    expect(matched.map((team) => team.name)).toEqual(['alpha']);
+
+    const missing = searchTeams(db, { query: 'nothing-here' });
+    expect(missing).toEqual([]);
+    // 去掉首尾空白后再匹配。
+    expect(searchTeams(db, { query: '  Beta  ' }).map((team) => team.name)).toEqual(['Beta']);
+  });
+
+  it('treats SQL LIKE wildcards in the query as literal characters', () => {
+    const { db, alice } = setup();
+    createTeam(db, { name: '100% Pure', ownerId: alice });
+    createTeam(db, { name: 'under_score', ownerId: alice });
+    createTeam(db, { name: '100x Pure', ownerId: alice });
+
+    expect(searchTeams(db, { query: '%' }).map((team) => team.name)).toEqual(['100% Pure']);
+    expect(searchTeams(db, { query: '_' }).map((team) => team.name)).toEqual(['under_score']);
+    expect(searchTeams(db, { query: '\\' })).toEqual([]);
+  });
+
+  it('defaults to 20 rows and clamps limit to 100', () => {
+    const { db, alice } = setup();
+    const insert = db.prepare('INSERT INTO teams(name, owner_id, created_at) VALUES (?, ?, ?)');
+    for (let i = 0; i < 105; i += 1) {
+      insert.run(`Team ${String(i).padStart(3, '0')}`, alice, i + 1);
+    }
+
+    expect(searchTeams(db)).toHaveLength(20);
+    expect(searchTeams(db, { limit: 5 })).toHaveLength(5);
+    expect(searchTeams(db, { limit: 500 })).toHaveLength(100);
+    expect(searchTeams(db, { limit: 0 })).toHaveLength(1);
+    expect(searchTeams(db, { limit: 3 }).map((team) => team.name)).toEqual([
+      'Team 000',
+      'Team 001',
+      'Team 002',
+    ]);
   });
 });
