@@ -8,6 +8,7 @@ import { registerContestRoutes } from '../src/http/contests.js';
 import { getTeamRanking } from '../src/services/team-ranking.js';
 import { insertContestTeamRegistration } from '../src/storage/repos/contest-teams.js';
 import { createContest } from '../src/storage/repos/contests.js';
+import { createHack } from '../src/storage/repos/hacks.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import { createSubmission } from '../src/storage/repos/submissions.js';
 import { insertTeam, insertTeamMember } from '../src/storage/repos/teams.js';
@@ -170,6 +171,33 @@ function addSubmission(
       input.hackedAt ?? null,
       id,
     );
+  return id;
+}
+
+function addHack(
+  ctx: Ctx,
+  input: {
+    contestId: number;
+    problemId: number;
+    hackerId: number;
+    targetSubmissionId: number;
+    teamId?: number | null;
+    status?: string;
+    createdAt?: number;
+  },
+): number {
+  const id = createHack(ctx.db, {
+    contestId: input.contestId,
+    problemId: input.problemId,
+    hackerId: input.hackerId,
+    targetSubmissionId: input.targetSubmissionId,
+    teamId: input.teamId ?? null,
+    inputPath: 'hacks/h.in',
+  });
+  const createdAt = input.createdAt ?? 100;
+  ctx.db
+    .prepare('UPDATE contest_hacks SET status = ?, created_at = ?, judged_at = ? WHERE id = ?')
+    .run(input.status ?? 'success', createdAt, createdAt, id);
   return id;
 }
 
@@ -519,6 +547,221 @@ describe('team ranking service', () => {
     expect(row.totalScore).toBe(175);
     expect(row.penalty).toBe(50);
     expect(row.cells.map((cell) => cell.score)).toEqual([100, 75]);
+  });
+
+  it('adds successful CF-like team hacks, subtracts failed ones and ignores individual hacks', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 100 * 60 * 1000,
+    });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5, hackPoints: 100, failedHackPenalty: 50 },
+    });
+    // Beta is created first so it has the lower team id and wins the
+    // pre-hack tie-break; Alpha's hack must flip the order.
+    const beta = makeTeam(ctx, { name: 'Beta', ownerId: ctx.users.carol });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, beta);
+    registerTeam(ctx, contestId, alpha);
+
+    const alphaSubmission = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+    const betaSubmission = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.carol,
+      teamId: beta,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+
+    const before = getTeamRanking(ctx.db, contestId)!;
+    expect(before.rows.map((row) => [row.teamName, row.rank, row.totalScore])).toEqual([
+      ['Beta', 1, 100],
+      ['Alpha', 1, 100],
+    ]);
+
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: betaSubmission,
+      teamId: alpha,
+      status: 'success',
+    });
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: betaSubmission,
+      teamId: alpha,
+      status: 'failed',
+    });
+    // Bob represents no team: his success must not reach any team row.
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.bob,
+      targetSubmissionId: alphaSubmission,
+      teamId: null,
+      status: 'success',
+    });
+
+    const after = getTeamRanking(ctx.db, contestId)!;
+    expect(after.rows.map((row) => row.teamName)).toEqual(['Alpha', 'Beta']);
+    expect(after.rows[0]).toMatchObject({
+      rank: 1,
+      teamId: alpha,
+      totalScore: 150,
+      hackScore: 50,
+      solved: 1,
+    });
+    expect(after.rows[1]).toMatchObject({
+      rank: 2,
+      teamId: beta,
+      totalScore: 100,
+      hackScore: 0,
+      solved: 1,
+    });
+  });
+
+  it('treats promoted hacks as successful CF-like team hacks', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, { startAt: 0, endAt: 100 * 60 * 1000 });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5 },
+    });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'promoted',
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 200, hackScore: 100, solved: 1 });
+  });
+
+  it('ignores legacy hacks whose team attribution is null', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, { startAt: 0, endAt: 100 * 60 * 1000 });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5 },
+    });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+
+    // Simulates a row created before contest_hacks.team_id existed: no value
+    // for the column, so it reads back as NULL.
+    ctx.db
+      .prepare(
+        `INSERT INTO contest_hacks
+           (contest_id, problem_id, hacker_id, target_submission_id, input_path, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'success', 100)`,
+      )
+      .run(contestId, ctx.p1, ctx.users.alice, submissionId, 'hacks/legacy.in');
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 100, hackScore: 0 });
+  });
+
+  it('does not add hack scores to OI team rankings', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 100,
+    });
+
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'success',
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 100, hackScore: 0, solved: 1 });
+  });
+
+  it('does not add hack scores to ACM team rankings', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 60_000,
+    });
+
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'success',
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 1, hackScore: 0, solved: 1, penalty: 1 });
   });
 
   it('ignores hacked, post-freeze, non-contest and unfinished submissions', () => {
