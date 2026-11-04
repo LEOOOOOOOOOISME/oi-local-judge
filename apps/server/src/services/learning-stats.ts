@@ -695,6 +695,43 @@ export function rebuildStudentStats(
   };
 }
 
+export interface LearningStatsRebuildSummary {
+  /** Number of students whose cache was rebuilt. */
+  users: number;
+  /** Rows written to `student_problem_stats`. */
+  problems: number;
+  /** Rows written to `student_tag_stats`. */
+  tags: number;
+  /** Rows written to `student_daily_stats`. */
+  days: number;
+  durationMs: number;
+}
+
+/**
+ * Runs `rebuildAllStats` and reports how many rows each cache table received.
+ * Counts are read back from the cache tables so they match what was written;
+ * the aggregate rules themselves are untouched.
+ */
+export function rebuildAllStatsWithSummary(db: DatabaseSync): LearningStatsRebuildSummary {
+  const startedAt = Date.now();
+  const users = rebuildAllStats(db);
+  const counts = db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM student_problem_stats) AS problems,
+         (SELECT COUNT(*) FROM student_tag_stats) AS tags,
+         (SELECT COUNT(*) FROM student_daily_stats) AS days`,
+    )
+    .get() as { problems: number; tags: number; days: number };
+  return {
+    users,
+    problems: counts.problems,
+    tags: counts.tags,
+    days: counts.days,
+    durationMs: Date.now() - startedAt,
+  };
+}
+
 /**
  * Rebuilds the cache for every student that has any counted submission.
  * Stale rows for students who no longer qualify are dropped first.

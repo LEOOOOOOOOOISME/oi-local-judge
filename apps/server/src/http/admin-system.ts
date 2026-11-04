@@ -9,7 +9,11 @@ import {
 } from '../services/settings.js';
 import { createBackup, getDiagnostics, listBackups, requestRestore, RestoreError } from '../services/system-ops.js';
 import { getRuntimeMetrics } from '../services/metrics.js';
-import { listAuditLogs } from '../storage/repos/audit.js';
+import {
+  LearningStatsRebuildBusyError,
+  rebuildLearningStatsNow,
+} from '../services/learning-stats-scheduler.js';
+import { listAuditLogs, recordAudit } from '../storage/repos/audit.js';
 
 export function registerAdminSystemRoutes(
   app: FastifyInstance,
@@ -45,6 +49,35 @@ export function registerAdminSystemRoutes(
     '/api/admin/system/metrics',
     { preHandler: options.adminGuard },
     async () => ({ ok: true, data: getRuntimeMetrics(options.db, options.config) }),
+  );
+
+  // Manual rebuild of the learning-analytics cache tables. The rebuild is
+  // synchronous; while it runs the event loop is blocked (reported by the
+  // scheduler as a slow run). A concurrent request is rejected by the guard.
+  app.post(
+    '/api/admin/system/learning-stats/rebuild',
+    { preHandler: options.adminGuard },
+    async (request, reply) => {
+      try {
+        const result = rebuildLearningStatsNow(options.db);
+        recordAudit(options.db, {
+          actorId: request.user?.id ?? null,
+          action: 'learning_stats.rebuild',
+          targetType: 'learning_stats',
+          detail: result,
+          ip: request.ip,
+        });
+        return { ok: true, data: result };
+      } catch (error) {
+        if (error instanceof LearningStatsRebuildBusyError) {
+          return reply.code(error.status).send({
+            ok: false,
+            error: { code: error.code, message: error.message },
+          });
+        }
+        throw error;
+      }
+    },
   );
 
   app.get(
