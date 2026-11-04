@@ -1249,6 +1249,55 @@ export interface DiagnosticsReport {
   queue: { queued: number; running: number; failed: number };
 }
 
+/** 本地监控指标（GET /api/admin/system/metrics）。 */
+export interface RequestMetrics {
+  total: number;
+  serverErrors: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number;
+}
+
+/** 慢请求样本：url 只包含路径，不含查询串。 */
+export interface SlowRequest {
+  method: string;
+  url: string;
+  status: number;
+  durationMs: number;
+  at: number;
+}
+
+export interface ProcessMetrics {
+  startedAt: number;
+  uptimeSec: number;
+  rssBytes: number;
+  heapUsedBytes: number;
+  heapTotalBytes: number;
+  externalBytes: number;
+  cpu: {
+    userMs: number;
+    systemMs: number;
+    percent: number;
+  };
+}
+
+export interface EventLoopDelayMetrics {
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  maxMs: number;
+}
+
+export interface RuntimeMetrics {
+  generatedAt: number;
+  requests: RequestMetrics;
+  slowRequests: SlowRequest[];
+  process: ProcessMetrics;
+  eventLoopDelay: EventLoopDelayMetrics;
+  queue: { queued: number; running: number; failed: number };
+  /** 数据目录不可读时为 null。 */
+  disk: { freeBytes: number; totalBytes: number } | null;
+}
+
 export interface BackupEntry {
   id: string;
   path: string;
