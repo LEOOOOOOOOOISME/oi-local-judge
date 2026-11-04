@@ -9,6 +9,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e:browser": "playwright test tests/e2e/browser.spec.ts",
     "typecheck": "tsc -b",
     "build:help": "node tools/build-help-docs.mjs",
     "build:runner": "node tools/build-runner.mjs",
