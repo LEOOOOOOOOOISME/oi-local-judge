@@ -6,6 +6,7 @@ import { ensureAdmin } from './services/bootstrap.js';
 import { applyPendingRestore } from './services/system-ops.js';
 import { recoverInterruptedJudgeTasks } from './storage/repos/judge.js';
 import { startScheduler } from './judge/scheduler.js';
+import { startBackupScheduler } from './services/backup-scheduler.js';
 import { startContestClock } from './services/contest-clock.js';
 import { buildApp } from './app.js';
 import { join } from 'node:path';
@@ -42,6 +43,19 @@ if (recoveredTasks > 0) {
   app.log.info({ recoveredTasks }, 'requeued interrupted judge tasks');
 }
 const scheduler = startScheduler({ db, config, events: hub });
+// Automatic backups run on their own timer (initial delay + hourly check), so
+// they do not share timers or state with the judge scheduler.
+const backupScheduler = startBackupScheduler({
+  db,
+  config,
+  onError: (error) => app.log.warn({ err: error }, '自动备份失败'),
+  onSlow: (elapsedMs) => app.log.warn({ elapsedMs }, '自动备份阻塞事件循环时间过长'),
+  onRun: (result) => {
+    if (result.created) {
+      app.log.info({ id: result.id, pruned: result.pruned }, '已创建自动备份');
+    }
+  },
+});
 const contestClock = startContestClock(db);
 const port = config.port;
 const host = config.host;
@@ -59,6 +73,7 @@ const parentPort = (
 parentPort?.postMessage({ type: 'ready', port: actualPort });
 
 async function shutdown() {
+  backupScheduler.stop();
   contestClock.stop();
   await scheduler.stop();
   await app.close();
