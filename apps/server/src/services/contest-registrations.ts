@@ -127,6 +127,7 @@ export function registerForContest(
       checkedInAt: null,
       reviewedAt: null,
       reviewedBy: null,
+      source: 'self',
     });
   } else {
     insertRegistration(db, {
@@ -134,6 +135,7 @@ export function registerForContest(
       userId: input.userId,
       status,
       now,
+      source: 'self',
     });
   }
   return status;

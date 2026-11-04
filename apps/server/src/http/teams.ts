@@ -118,13 +118,16 @@ export function registerTeamRoutes(app: FastifyInstance, options: TeamRouteOptio
       }
       const user = request.user!;
       try {
-        addTeamMember(options.db, {
+        const sync = addTeamMember(options.db, {
           teamId,
           actorId: user.id,
           username,
           isAdmin: user.role === 'admin',
         });
-        return reply.code(201).send({ ok: true, data: null });
+        // Contest participation granted by this membership, plus contests that
+        // were deliberately skipped because the user already represents
+        // another registered team.
+        return reply.code(201).send({ ok: true, data: { sync } });
       } catch (err) {
         return sendTeamError(reply, err);
       }
