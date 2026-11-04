@@ -703,8 +703,20 @@ export interface OfficialRanking {
   config: OfficialRankingConfig;
   archived: boolean;
   preset: string;
+  /** 后端快照版本；旧后端/旧接口回退时可能没有该字段。 */
+  version?: number;
   pluginError?: string;
   officialFrozenUntil?: number | null;
+}
+
+/** WebSocket `ranking.delta` 载荷：只含变化行、全部名次与移除用户。 */
+export interface RankingDelta {
+  contestId: number;
+  /** 生成该增量所基于的快照版本（大于客户端的旧快照版本）。 */
+  version: number;
+  changed: OfficialRankingRow[];
+  ranks: Array<{ userId: number; rank: number }>;
+  removed: number[];
 }
 
 /** Phase B：独立订正榜。 */

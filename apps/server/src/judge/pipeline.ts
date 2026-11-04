@@ -41,7 +41,12 @@ import {
 import { parseOutputAnswers, writeAnswerFiles } from './output-only.js';
 import { runInteractive } from './interactive.js';
 import { syncOnlineOfficialScore } from './official-score.js';
-import { invalidateOfficialRanking } from '../services/official-ranking.js';
+import {
+  diffOfficialRanking,
+  getOfficialRanking,
+  invalidateOfficialRanking,
+  type OfficialRankingResult,
+} from '../services/official-ranking.js';
 import { getAsset } from '../storage/repos/assets.js';
 import { runChecker, type CheckerMode } from './checker.js';
 import { runSandboxed } from './runner.js';
@@ -477,7 +482,7 @@ export async function judgeTestcase(args: {
  * submission row. Internal failures are recorded as failed + SE instead of
  * rejecting, so a scheduler can keep processing.
  */
-export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<void> {
+async function judgeSubmissionInternal(options: JudgeSubmissionOptions): Promise<void> {
   const { db, config, submissionId, signal } = options;
   const events = options.events ?? options.hub;
 
@@ -844,5 +849,71 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
     }
   } finally {
     rmSync(workdir, { recursive: true, force: true });
+  }
+}
+
+/** Publishes one compact ranking delta to the contest room. */
+function publishRankingDelta(
+  events: EventPublisher | undefined,
+  contestId: number,
+  before: OfficialRankingResult,
+  after: OfficialRankingResult,
+): void {
+  if (!events) return;
+  const delta = diffOfficialRanking(before, after);
+  if (!delta) return;
+  try {
+    // `hub.publish` also delivers room events to admin subscribers, and a
+    // client that joined no contest room never receives another contest's
+    // standings. The payload is one rows subset, never the whole board.
+    events.publish({
+      type: WS_EVENTS.rankingDelta,
+      data: delta,
+      room: `contest:${contestId}`,
+    });
+  } catch {
+    // A broken event sink must never break judging.
+  }
+}
+
+/**
+ * Judges one submission, then pushes a `ranking.delta` for contest submissions.
+ *
+ * The board snapshot is taken before judging starts and again in `finally`.
+ * `persistJudged` invalidates the ranking cache, so the second snapshot is a
+ * fresh computation that carries a bumped version; diffing the two produces
+ * only the changed rows. Non-contest submissions and unchanged boards publish
+ * nothing. This wrapper never adds a second `submission.updated` event.
+ */
+export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<void> {
+  const { db, config, submissionId } = options;
+  const events = options.events ?? options.hub;
+
+  let contestId: number | null = null;
+  let before: OfficialRankingResult | null = null;
+  try {
+    const submission = getSubmission(db, submissionId);
+    contestId = submission?.contest_id ?? null;
+    // Without an event sink there is nothing to publish, so skip the snapshots
+    // entirely (tests and internal callers pass no hub).
+    if (events && contestId !== null) {
+      before = await getOfficialRanking(db, contestId, config.dataDir);
+    }
+  } catch {
+    // Ranking snapshots are best effort; they must never block judging.
+    before = null;
+  }
+
+  try {
+    await judgeSubmissionInternal(options);
+  } finally {
+    if (contestId !== null && before !== null) {
+      try {
+        const after = await getOfficialRanking(db, contestId, config.dataDir);
+        if (after) publishRankingDelta(events, contestId, before, after);
+      } catch {
+        // A failed snapshot/diff/publish must never break judging.
+      }
+    }
   }
 }
