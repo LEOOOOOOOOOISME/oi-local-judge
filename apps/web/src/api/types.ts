@@ -1404,6 +1404,120 @@ export interface AddClassCoachRequest {
   username: string;
 }
 
+/** Learning analytics：错题模式（与后端 learning-stats service 对齐）。 */
+export type WrongProblemMode = 'never-ac' | 'latest-wrong';
+
+/** 单个学生在某题上的聚合；bestVerdict 为最好一次提交的评测结果。 */
+export interface StudentProblemStat {
+  problemId: number;
+  title: string;
+  difficulty: number | null;
+  tags: string[];
+  attempts: number;
+  wrongAttempts: number;
+  bestScore: number;
+  bestVerdict: Verdict | null;
+  firstAcAt: number | null;
+  lastSubmitAt: number;
+}
+
+/** 错题列表项：在题目聚合基础上附带最新一次提交的评测结果。 */
+export interface StudentWrongProblem extends StudentProblemStat {
+  lastVerdict: Verdict | null;
+}
+
+export interface StudentTagStat {
+  tag: string;
+  attempts: number;
+  solved: number;
+  totalProblems: number;
+  lastAttemptAt: number;
+}
+
+export interface StudentDailyStat {
+  date: string;
+  submissions: number;
+  acCount: number;
+  points: number;
+  /** 预留字段：当前后端没有活跃时长来源，固定为 0。 */
+  activeSeconds: number;
+}
+
+/** GET /api/students/:id/stats 返回结构。 */
+export interface StudentStats {
+  userId: number;
+  username: string;
+  generatedAt: number;
+  includeContest: boolean;
+  summary: {
+    attemptedProblems: number;
+    solvedProblems: number;
+    totalSubmissions: number;
+    acSubmissions: number;
+    wrongSubmissions: number;
+    firstAcAt: number | null;
+    lastActiveAt: number | null;
+  };
+  problems: StudentProblemStat[];
+  tags: StudentTagStat[];
+  daily: StudentDailyStat[];
+}
+
+/** GET /api/students/:id/wrong-problems 返回结构。 */
+export interface StudentWrongProblems {
+  userId: number;
+  mode: WrongProblemMode;
+  generatedAt: number;
+  includeContest: boolean;
+  problems: StudentWrongProblem[];
+}
+
+export interface ClassStudentSummary {
+  userId: number;
+  username: string;
+  attemptedProblems: number;
+  solvedProblems: number;
+  totalSubmissions: number;
+  lastActiveAt: number | null;
+}
+
+export interface ClassWeakTag {
+  tag: string;
+  attempts: number;
+  solved: number;
+  solveRate: number;
+}
+
+export interface ClassInactiveMember {
+  userId: number;
+  username: string;
+  lastActiveAt: number | null;
+}
+
+export interface ClassWrongProblem {
+  problemId: number;
+  title: string;
+  studentCount: number;
+  attempts: number;
+}
+
+/** GET /api/classes/:id/learning-stats 返回结构；仅班级教练与管理员可读。 */
+export interface ClassLearningStats {
+  classId: number;
+  className: string;
+  generatedAt: number;
+  includeContest: boolean;
+  studentCount: number;
+  activeStudentCount: number;
+  completedProblems: number;
+  attemptedProblems: number;
+  totalSubmissions: number;
+  students: ClassStudentSummary[];
+  weakTags: ClassWeakTag[];
+  inactiveMembers: ClassInactiveMember[];
+  topWrongProblems: ClassWrongProblem[];
+}
+
 export interface AddTeamMemberRequest {
   username: string;
 }
