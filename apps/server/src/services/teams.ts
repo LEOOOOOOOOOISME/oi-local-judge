@@ -13,11 +13,13 @@ import {
   searchTeams as searchTeamRows,
   updateTeamMemberRole,
   updateTeamOwner,
+  updateTeamSettings,
   type TeamDetail,
   type TeamDto,
   type TeamRow,
 } from '../storage/repos/teams.js';
 import { getUserById, getUserByUsername, type Role } from '../storage/repos/users.js';
+import { recordAudit } from '../storage/repos/audit.js';
 import {
   syncMemberJoinedTeam,
   syncMemberLeftTeam,
@@ -481,19 +483,24 @@ export function dissolveTeam(
   input: { teamId: number; actorId: number; isAdmin: boolean },
 ): void {
   const team = requireTeam(db, input.teamId);
+  const isClass = team.kind === 'class';
   if (!input.isAdmin && team.owner_id !== input.actorId) {
-    throw new TeamError('TEAM_FORBIDDEN', 403, 'only the team owner or an admin can dissolve it');
+    throw new TeamError(
+      isClass ? 'CLASS_FORBIDDEN' : 'TEAM_FORBIDDEN',
+      403,
+      isClass
+        ? 'only the class owner or an admin can delete it'
+        : 'only the team owner or an admin can dissolve it',
+    );
   }
   transaction(db, () => {
-    db.prepare(
-      `INSERT INTO audit_logs(actor_id, action, target_type, target_id, detail_json, created_at)
-       VALUES (?, 'team.dissolve', 'team', ?, ?, ?)`,
-    ).run(
-      input.actorId,
-      String(input.teamId),
-      JSON.stringify({ name: team.name, admin: input.isAdmin }),
-      Date.now(),
-    );
+    recordAudit(db, {
+      actorId: input.actorId,
+      action: isClass ? 'class.dissolve' : 'team.dissolve',
+      targetType: isClass ? 'class' : 'team',
+      targetId: input.teamId,
+      detail: { name: team.name, admin: input.isAdmin },
+    });
     // Snapshot the roster before deleting any membership row: the contest sync
     // can only revoke participation while the members are still known.
     const memberIds = listTeamMembers(db, input.teamId).map((member) => member.userId);
@@ -648,5 +655,68 @@ export function removeClassCoach(
   transaction(db, () => {
     removeTeamMemberRow(db, input.classId, input.userId);
     syncMemberLeftTeam(db, { teamId: input.classId, userId: input.userId });
+  });
+}
+
+/**
+ * Updates a class's editable settings (display name and the contest switch).
+ *
+ * Only the class owner and administrators may edit a class; other coaches are
+ * rejected. The new name is validated with the same 2–40 character rule as
+ * class creation and shares the `teams.name` unique index with ordinary teams,
+ * so a clash with either kind returns 409.
+ */
+export function updateClass(
+  db: DatabaseSync,
+  input: {
+    classId: number;
+    actorId: number;
+    name?: string;
+    allowContest?: boolean;
+    isAdmin?: boolean;
+  },
+): void {
+  const group = requireClass(db, input.classId);
+  if (!input.isAdmin && group.owner_id !== input.actorId) {
+    throw new TeamError(
+      'CLASS_FORBIDDEN',
+      403,
+      'only the class owner or an admin can update it',
+    );
+  }
+  if (input.name === undefined && input.allowContest === undefined) {
+    throw new TeamError('BAD_REQUEST', 400, 'name or allowContest is required');
+  }
+  const name = input.name === undefined ? group.name : normalizeTeamName(input.name);
+  if (name !== group.name && getTeamByName(db, name)) {
+    throw new TeamError('TEAM_NAME_TAKEN', 409, 'team name is already taken');
+  }
+  try {
+    updateTeamSettings(db, input.classId, { name, allowContest: input.allowContest });
+  } catch (err) {
+    if (isUniqueConstraintError(err, 'teams.name')) {
+      throw new TeamError('TEAM_NAME_TAKEN', 409, 'team name is already taken');
+    }
+    throw err;
+  }
+}
+
+/**
+ * Deletes a class. Only the owner or an administrator may do this.
+ *
+ * Cleanup is delegated to {@link dissolveTeam}, which removes every membership,
+ * revokes team-sourced contest participation (preserving administrator imports
+ * and self-registrations), drops the class's contest registrations and writes an
+ * audit record — all in one transaction.
+ */
+export function deleteClass(
+  db: DatabaseSync,
+  input: { classId: number; actorId: number; isAdmin: boolean },
+): void {
+  requireClass(db, input.classId);
+  dissolveTeam(db, {
+    teamId: input.classId,
+    actorId: input.actorId,
+    isAdmin: input.isAdmin,
   });
 }

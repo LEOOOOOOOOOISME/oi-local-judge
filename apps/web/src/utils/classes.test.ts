@@ -4,6 +4,7 @@ import type { ClassMember } from '../api/types';
 import {
   addableClassRoles,
   canManageClassCoaches,
+  canManageClassSettings,
   canManageClassStudents,
   classRoleLabel,
   countClassMembers,
@@ -127,6 +128,32 @@ describe('canManageClassCoaches', () => {
     ).toBe(false);
     expect(
       canManageClassCoaches({ viewerRole: 'member', ownerId: 7, currentUserId: 8 }),
+    ).toBe(false);
+  });
+});
+
+describe('canManageClassSettings', () => {
+  it('allows admins and the class owner', () => {
+    expect(
+      canManageClassSettings({ viewerRole: null, ownerId: 7, currentUserId: 9, isAdmin: true }),
+    ).toBe(true);
+    expect(
+      canManageClassSettings({ viewerRole: 'coach', ownerId: 7, currentUserId: 7 }),
+    ).toBe(true);
+  });
+
+  it('rejects other coaches, assistants and students', () => {
+    expect(
+      canManageClassSettings({ viewerRole: 'coach', ownerId: 7, currentUserId: 8 }),
+    ).toBe(false);
+    expect(
+      canManageClassSettings({ viewerRole: 'assistant', ownerId: 7, currentUserId: 8 }),
+    ).toBe(false);
+    expect(
+      canManageClassSettings({ viewerRole: 'member', ownerId: 7, currentUserId: 8 }),
+    ).toBe(false);
+    expect(
+      canManageClassSettings({ viewerRole: null, ownerId: 7, currentUserId: 8 }),
     ).toBe(false);
   });
 });

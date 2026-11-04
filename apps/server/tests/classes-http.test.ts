@@ -91,7 +91,7 @@ afterAll(async () => {
 });
 
 async function api(
-  method: 'GET' | 'POST' | 'DELETE',
+  method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
   url: string,
   username: string | null,
   payload?: unknown,
@@ -122,9 +122,11 @@ async function createClass(
 
 describe('class HTTP API', () => {
   it('requires authentication on every class route', async () => {
-    const routes: Array<['GET' | 'POST' | 'DELETE', string, unknown?]> = [
+    const routes: Array<['GET' | 'POST' | 'PATCH' | 'DELETE', string, unknown?]> = [
       ['GET', '/api/classes'],
       ['GET', '/api/classes/1'],
+      ['PATCH', '/api/classes/1', { name: 'Anonymous' }],
+      ['DELETE', '/api/classes/1'],
       ['POST', '/api/admin/classes', { name: 'Anonymous' }],
       ['POST', '/api/classes/1/members', { username: 'bob' }],
       ['DELETE', '/api/classes/1/members/2'],
@@ -310,5 +312,119 @@ describe('class HTTP API', () => {
     const coachGone = await api('DELETE', `/api/classes/${classId}/coaches/${ids.alice}`, 'manager');
     expect(coachGone.statusCode).toBe(404);
     expect(errorCode(coachGone.json())).toBe('CLASS_NOT_COACH');
+  });
+
+  it('lets the owner and admins edit class settings and validates the payload', async () => {
+    const classId = await createClass('manager', 'Settings Class');
+    await api('POST', `/api/classes/${classId}/coaches`, 'manager', { username: 'alice' });
+
+    const forbidden = await api('PATCH', `/api/classes/${classId}`, 'alice', {
+      name: 'Coach Renamed',
+    });
+    expect(forbidden.statusCode).toBe(403);
+    expect(errorCode(forbidden.json())).toBe('CLASS_FORBIDDEN');
+
+    const renamed = await api('PATCH', `/api/classes/${classId}`, 'manager', {
+      name: 'Renamed Class',
+      allowContest: false,
+    });
+    expect(renamed.statusCode, renamed.body).toBe(200);
+
+    const detail = await api('GET', `/api/classes/${classId}`, 'manager');
+    expect((detail.json() as ClassDetailBody).data).toMatchObject({
+      name: 'Renamed Class',
+      allowContest: false,
+    });
+
+    // An admin may flip the switch without owning the class.
+    const byAdmin = await api('PATCH', `/api/classes/${classId}`, 'admin', {
+      allowContest: true,
+    });
+    expect(byAdmin.statusCode, byAdmin.body).toBe(200);
+    const afterAdmin = await api('GET', `/api/classes/${classId}`, 'manager');
+    expect((afterAdmin.json() as ClassDetailBody).data.allowContest).toBe(true);
+
+    const tooShort = await api('PATCH', `/api/classes/${classId}`, 'manager', { name: 'A' });
+    expect(tooShort.statusCode).toBe(400);
+    expect(errorCode(tooShort.json())).toBe('TEAM_NAME_INVALID');
+
+    const badSwitch = await api('PATCH', `/api/classes/${classId}`, 'manager', {
+      allowContest: 'yes',
+    });
+    expect(badSwitch.statusCode).toBe(400);
+    expect(errorCode(badSwitch.json())).toBe('BAD_REQUEST');
+
+    const empty = await api('PATCH', `/api/classes/${classId}`, 'manager', {});
+    expect(empty.statusCode).toBe(400);
+    expect(errorCode(empty.json())).toBe('BAD_REQUEST');
+
+    await createClass('manager', 'Taken Name Class');
+    const duplicate = await api('PATCH', `/api/classes/${classId}`, 'manager', {
+      name: 'Taken Name Class',
+    });
+    expect(duplicate.statusCode).toBe(409);
+    expect(errorCode(duplicate.json())).toBe('TEAM_NAME_TAKEN');
+
+    // Ordinary teams are not reachable through the class routes.
+    const teamResponse = await api('POST', '/api/teams', 'bob', { name: 'Patch Team' });
+    expect(teamResponse.statusCode).toBe(201);
+    const teamId = (teamResponse.json() as { data: { id: number } }).data.id;
+    const teamPatch = await api('PATCH', `/api/classes/${teamId}`, 'admin', {
+      name: 'Team Renamed',
+    });
+    expect(teamPatch.statusCode).toBe(404);
+    expect(errorCode(teamPatch.json())).toBe('CLASS_NOT_FOUND');
+
+    const missing = await api('PATCH', '/api/classes/999999', 'admin', { name: 'Ghost Class' });
+    expect(missing.statusCode).toBe(404);
+    expect(errorCode(missing.json())).toBe('CLASS_NOT_FOUND');
+  });
+
+  it('deletes a class for the owner or an admin and writes an audit record', async () => {
+    const classId = await createClass('manager', 'Delete Class');
+    await api('POST', `/api/classes/${classId}/coaches`, 'manager', { username: 'alice' });
+
+    const forbidden = await api('DELETE', `/api/classes/${classId}`, 'alice');
+    expect(forbidden.statusCode).toBe(403);
+    expect(errorCode(forbidden.json())).toBe('CLASS_FORBIDDEN');
+    const stillThere = await api('GET', `/api/classes/${classId}`, 'manager');
+    expect(stillThere.statusCode).toBe(200);
+
+    const deleted = await api('DELETE', `/api/classes/${classId}`, 'manager');
+    expect(deleted.statusCode, deleted.body).toBe(200);
+    const gone = await api('GET', `/api/classes/${classId}`, 'manager');
+    expect(gone.statusCode).toBe(404);
+    expect(errorCode(gone.json())).toBe('CLASS_NOT_FOUND');
+
+    const audit = db
+      .prepare(
+        "SELECT actor_id, action, target_type, target_id FROM audit_logs WHERE action = 'class.dissolve' AND target_id = ?",
+      )
+      .get(String(classId)) as
+      | { actor_id: number; action: string; target_type: string; target_id: string }
+      | undefined;
+    expect(audit).toMatchObject({
+      actor_id: ids.manager,
+      action: 'class.dissolve',
+      target_type: 'class',
+      target_id: String(classId),
+    });
+
+    // An admin may delete any class.
+    const adminClass = await createClass('manager', 'Admin Delete Class');
+    const adminDeleted = await api('DELETE', `/api/classes/${adminClass}`, 'admin');
+    expect(adminDeleted.statusCode, adminDeleted.body).toBe(200);
+
+    // Ordinary teams are not reachable through the class routes.
+    const teamResponse = await api('POST', '/api/teams', 'bob', { name: 'Delete Team' });
+    expect(teamResponse.statusCode).toBe(201);
+    const teamId = (teamResponse.json() as { data: { id: number } }).data.id;
+    const teamDelete = await api('DELETE', `/api/classes/${teamId}`, 'admin');
+    expect(teamDelete.statusCode).toBe(404);
+    expect(errorCode(teamDelete.json())).toBe('CLASS_NOT_FOUND');
+
+    const missing = await api('DELETE', '/api/classes/999999', 'admin');
+    expect(missing.statusCode).toBe(404);
+    expect(errorCode(missing.json())).toBe('CLASS_NOT_FOUND');
   });
 });
