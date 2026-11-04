@@ -1,8 +1,49 @@
-import { app, BrowserWindow, dialog, utilityProcess } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  clipboard,
+  dialog,
+  Menu,
+  nativeImage,
+  Tray,
+  utilityProcess,
+} from 'electron';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 
+/**
+ * Embedded 16x16 PNG for the tray icon: a blue rounded square with a white
+ * "O". Keeping it inline means the desktop app needs no image asset next to
+ * `main.js` and the portable build has nothing extra to copy.
+ */
+const TRAY_ICON_DATA_URL =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAAX0lEQVR42mNkQAKqya//MxABbs8VZYSxGUnRiM0gJgYKASMu22/NEUHhq6W8Ic4AdI3oAN0gFmIV4jKYCZsibM6FiaEbRHEgDjIDcPkTX/jgjAVC0Um9hDTweYHS7AwAee0w/ptds84AAAAASUVORK5CYII=';
+
+/** Login-item flag: start with the tray (and server) but no visible window. */
+const HIDDEN_START_FLAG = '--hidden';
+
+interface DesktopSettings {
+  openAtLogin: boolean;
+}
+
+const DEFAULT_SETTINGS: DesktopSettings = { openAtLogin: false };
+
+/** Parsed once: the flag only ever comes from the command line. */
+const hiddenStart = process.argv.includes(HIDDEN_START_FLAG);
+
 let win: BrowserWindow | null = null;
+let tray: Tray | null = null;
+let serverProcess: ReturnType<typeof utilityProcess.fork> | null = null;
+let serverPort: number | null = null;
+let settings: DesktopSettings = { ...DEFAULT_SETTINGS };
+/**
+ * Set as soon as quitting starts. BrowserWindow's `close` handler uses it to
+ * tell a user close (hide to tray) from a real quit.
+ */
+let quitting = false;
+/** Second-instance/activate arrived before the window existed. */
+let pendingShow = false;
 
 /**
  * Root directory that contains `apps/`, `native/`, `vendor/` and
@@ -31,6 +72,69 @@ function lanAddress(): string | null {
   return null;
 }
 
+/** `http://<lan-ip>:<port>/` once the server is up, otherwise null. */
+function lanUrl(): string | null {
+  const lan = lanAddress();
+  if (!lan || serverPort === null) return null;
+  return `http://${lan}:${serverPort}/`;
+}
+
+function settingsFile(): string {
+  return join(app.getPath('userData'), 'desktop-settings.json');
+}
+
+/**
+ * Reads the persisted desktop preferences. A missing, unreadable or malformed
+ * file falls back to the defaults so it can never block startup; autostart
+ * defaults to off so a fresh install never registers itself silently.
+ */
+function readSettings(): DesktopSettings {
+  try {
+    const raw = readFileSync(settingsFile(), 'utf8').replace(/^\uFEFF/, '');
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed !== null && typeof parsed === 'object') {
+      const openAtLogin = (parsed as { openAtLogin?: unknown }).openAtLogin;
+      if (typeof openAtLogin === 'boolean') return { openAtLogin };
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') {
+      console.warn('无法读取桌面设置，使用默认值：', error);
+    }
+  }
+  return { ...DEFAULT_SETTINGS };
+}
+
+/** Best-effort persistence; a failed write only loses the preference. */
+function saveSettings(next: DesktopSettings): void {
+  settings = next;
+  try {
+    mkdirSync(app.getPath('userData'), { recursive: true });
+    writeFileSync(settingsFile(), `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  } catch (error) {
+    console.error('无法保存桌面设置：', error);
+  }
+}
+
+/**
+ * Mirrors the stored preference into the OS login item. Packaged OiJudge.exe
+ * understands `--hidden` directly; an unpackaged Electron also needs the main
+ * script in front of the flag.
+ */
+function applyLoginItemSettings(openAtLogin: boolean): void {
+  try {
+    app.setLoginItemSettings({
+      openAtLogin,
+      path: process.execPath,
+      args: app.isPackaged
+        ? [HIDDEN_START_FLAG]
+        : [join(__dirname, 'main.js'), HIDDEN_START_FLAG],
+    });
+  } catch (error) {
+    console.error('无法更新开机自启设置：', error);
+  }
+}
+
+/** Starts the local judge server and resolves with the port it bound to. */
 async function startServer(root: string): Promise<number> {
   // The server resolves data, web assets and native helpers relative to its
   // working directory, so pin it to the application root for both layouts.
@@ -47,6 +151,7 @@ async function startServer(root: string): Promise<number> {
       OIJ_INTERACT_RUNNER: join(root, 'native/interact/out/ojinteract.exe'),
     },
   });
+  serverProcess = child;
   return await new Promise<number>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('server start timeout')), 15000);
     child.on('message', (msg: { type?: string; port?: number }) => {
@@ -56,39 +161,183 @@ async function startServer(root: string): Promise<number> {
       }
     });
     child.on('exit', (code) => {
+      if (serverProcess === child) serverProcess = null;
       clearTimeout(timer);
       reject(new Error(`server exited with code ${code}`));
     });
   });
 }
 
-app
-  .whenReady()
-  .then(async () => {
-    const root = appRoot();
-    process.chdir(root);
-    const port = await startServer(root);
-    const lan = lanAddress();
-    if (lan) console.log(`LAN: http://${lan}:${port}/`);
-    win = new BrowserWindow({
-      width: 1280,
-      height: 800,
-      title: 'OiJudge',
-      webPreferences: {
-        preload: join(__dirname, 'preload.js'),
-        contextIsolation: true,
-        nodeIntegration: false,
+/** Stops the utility process during quit; never blocks the app from exiting. */
+function stopServer(): void {
+  const child = serverProcess;
+  serverProcess = null;
+  if (!child) return;
+  try {
+    child.kill();
+  } catch (error) {
+    console.error('无法停止本地服务：', error);
+  }
+}
+
+/** Rebuilds the tray menu from the current port, LAN address and settings. */
+function buildTrayMenu(): void {
+  if (!tray) return;
+  const url = lanUrl();
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: '显示主窗口', click: () => showMainWindow() },
+      {
+        label: url ? `复制局域网地址（${url}）` : '复制局域网地址',
+        enabled: url !== null,
+        click: () => {
+          const current = lanUrl();
+          if (!current) {
+            void dialog.showMessageBox({
+              type: 'warning',
+              title: 'OiJudge',
+              message: '未检测到局域网地址',
+              detail: '请确认本机已连接局域网后再试。',
+            });
+            return;
+          }
+          clipboard.writeText(current);
+        },
       },
-    });
-    await win.loadURL(`http://127.0.0.1:${port}/`);
-  })
-  .catch((error: unknown) => {
-    const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-    console.error(message);
-    dialog.showErrorBox('OiJudge 启动失败', message);
-    app.quit();
+      { type: 'separator' },
+      {
+        label: '开机自启',
+        type: 'checkbox',
+        checked: settings.openAtLogin,
+        click: (item) => {
+          saveSettings({ ...settings, openAtLogin: item.checked });
+          applyLoginItemSettings(settings.openAtLogin);
+        },
+      },
+      { type: 'separator' },
+      {
+        label: '退出',
+        click: () => {
+          quitting = true;
+          app.quit();
+        },
+      },
+    ]),
+  );
+}
+
+/** Creates the tray icon; failure falls back to a normal window-only app. */
+function createTray(): void {
+  try {
+    const icon = nativeImage.createFromDataURL(TRAY_ICON_DATA_URL);
+    if (icon.isEmpty()) console.warn('内嵌托盘图标无效，将使用空图标。');
+    tray = new Tray(icon);
+    tray.setToolTip('OiJudge — 本地判题服务');
+    tray.on('double-click', () => showMainWindow());
+    buildTrayMenu();
+  } catch (error) {
+    tray = null;
+    console.error('无法创建托盘图标：', error);
+  }
+}
+
+/** Shows and focuses the main window; safe to call before it exists. */
+function showMainWindow(): void {
+  if (quitting) return;
+  const current = win;
+  if (!current || current.isDestroyed()) {
+    pendingShow = true;
+    return;
+  }
+  pendingShow = false;
+  if (current.isMinimized()) current.restore();
+  current.show();
+  current.focus();
+}
+
+async function createWindow(port: number): Promise<BrowserWindow> {
+  const created = new BrowserWindow({
+    width: 1280,
+    height: 800,
+    title: 'OiJudge',
+    show: false,
+    webPreferences: {
+      preload: join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+    },
+  });
+  created.on('close', (event) => {
+    // Plain window close hides the app to the tray instead of ending the
+    // background server. A real quit sets `quitting` first; without a tray
+    // there would be no way back, so allow the close then.
+    if (quitting || !tray) return;
+    event.preventDefault();
+    created.hide();
+  });
+  created.on('closed', () => {
+    if (win === created) win = null;
+  });
+  await created.loadURL(`http://127.0.0.1:${port}/`);
+  return created;
+}
+
+async function bootstrap(): Promise<void> {
+  const root = appRoot();
+  process.chdir(root);
+
+  settings = readSettings();
+  // Re-apply on every launch so an install path change (or a stale registry
+  // entry) matches the stored preference. Default false never self-starts.
+  applyLoginItemSettings(settings.openAtLogin);
+
+  const port = await startServer(root);
+  serverPort = port;
+  const lan = lanAddress();
+  if (lan) console.log(`LAN: http://${lan}:${port}/`);
+
+  createTray();
+  win = await createWindow(port);
+  // `--hidden` (login item) keeps the window on the tray only; a second
+  // instance or a failed tray creation still brings it up.
+  if (!hiddenStart || pendingShow || !tray) showMainWindow();
+}
+
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
+
+if (!hasSingleInstanceLock) {
+  // The running instance receives `second-instance` and focuses its window.
+  app.quit();
+} else {
+  app.on('second-instance', () => showMainWindow());
+  app.on('activate', () => showMainWindow());
+
+  app.on('before-quit', () => {
+    // Must run before windows close so their `close` handlers let the quit
+    // through, and so the utility process is not left behind.
+    quitting = true;
+    stopServer();
   });
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+  app.on('window-all-closed', () => {
+    // The tray keeps the local judge serving in the background. Only quit when
+    // there is no tray to restore from.
+    if (!tray) app.quit();
+  });
+
+  app.on('will-quit', () => {
+    tray?.destroy();
+    tray = null;
+  });
+
+  app
+    .whenReady()
+    .then(bootstrap)
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+      console.error(message);
+      dialog.showErrorBox('OiJudge 启动失败', message);
+      quitting = true;
+      app.quit();
+    });
+}
