@@ -18,9 +18,11 @@ import {
   getStudentStats,
   getStudentWrongProblems,
   LearningStatsError,
+  listStudentSubmissions,
   rebuildAllStats,
   rebuildStudentStats,
 } from '../src/services/learning-stats.js';
+import { addProblemShare } from '../src/services/problem-acl.js';
 
 const dirs: string[] = [];
 const dbs: DatabaseSync[] = [];
@@ -60,7 +62,13 @@ function setup() {
 
 function makeProblem(
   db: DatabaseSync,
-  input: { title: string; tags?: string[]; visibility?: 'public' | 'hidden' },
+  input: {
+    title: string;
+    tags?: string[];
+    visibility?: 'public' | 'hidden';
+    ownerType?: 'system' | 'user' | 'team';
+    ownerId?: number | null;
+  },
 ): number {
   return createProblem(db, {
     title: input.title,
@@ -68,6 +76,8 @@ function makeProblem(
     difficulty: 2,
     tags: input.tags ?? [],
     visibility: input.visibility ?? 'public',
+    ownerType: input.ownerType ?? 'system',
+    ownerId: input.ownerId ?? null,
     timeMs: 1000,
     memoryMb: 64,
     testcases: [{ inputPath: '1.in', outputPath: '1.out', points: 100 }],
@@ -88,9 +98,9 @@ function addSubmission(
     status?: string;
     hacked?: boolean;
   },
-): void {
+): number {
   submissionSeq += 1;
-  db.prepare(
+  const result = db.prepare(
     `INSERT INTO submissions(contest_id, problem_id, user_id, language, source_path,
        source_hash, status, verdict, score, created_at, judged_at, hacked_at, phase)
      VALUES (?, ?, ?, 'cpp17', ?, 'hash', ?, ?, ?, ?, ?, ?, 'contest')`,
@@ -106,6 +116,7 @@ function addSubmission(
     input.createdAt,
     input.hacked ? input.createdAt + 1 : null,
   );
+  return Number(result.lastInsertRowid);
 }
 
 function expectLearningError(fn: () => unknown, code: string, status: number): void {
@@ -737,5 +748,185 @@ describe('class learning stats', () => {
     );
     expect(practiceOnly.includeContest).toBe(false);
     expect(practiceOnly.totalSubmissions).toBe(4);
+  });
+});
+
+describe('student submission list visibility', () => {
+  /**
+   * Bob is a class member taught by Alice. There are four problems:
+   * - `shown`: public, readable by everyone;
+   * - `systemHidden`: hidden and system-owned, admin-only;
+   * - `ownHidden`: hidden but owned by Bob, so Bob themself may read it;
+   * - `sharedHidden`: hidden, owned by Bob and shared with Alice, so both Bob
+   *   and Alice may read it while other non-admins may not.
+   */
+  function hiddenSetup() {
+    const ctx = setup();
+    const { db, admin, manager, alice, bob } = ctx;
+    const classId = createClass(db, {
+      name: 'Hidden List Class',
+      ownerId: manager,
+      actorRole: 'contestmanager',
+    });
+    addClassCoach(db, { classId, actorId: manager, username: 'alice' });
+    addClassMember(db, { classId, actorId: manager, username: 'bob' });
+    const shown = makeProblem(db, { title: 'Shown' });
+    const systemHidden = makeProblem(db, { title: 'System Hidden', visibility: 'hidden' });
+    const ownHidden = makeProblem(db, {
+      title: 'Bob Hidden',
+      visibility: 'hidden',
+      ownerType: 'user',
+      ownerId: bob,
+    });
+    const sharedHidden = makeProblem(db, {
+      title: 'Shared Hidden',
+      visibility: 'hidden',
+      ownerType: 'user',
+      ownerId: bob,
+    });
+    addProblemShare(db, {
+      problemId: sharedHidden,
+      granteeType: 'user',
+      granteeId: alice,
+      permission: 'read',
+      actorId: admin,
+      isAdmin: true,
+    });
+    return { ...ctx, classId, shown, systemHidden, ownHidden, sharedHidden };
+  }
+
+  it('filters hidden problems the viewer cannot read, using the problem ACL', () => {
+    const { db, admin, alice, bob, shown, systemHidden, ownHidden, sharedHidden } =
+      hiddenSetup();
+    addSubmission(db, {
+      userId: bob,
+      problemId: shown,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 1_000,
+    });
+    // Hidden contest submissions follow the same problem visibility/ACL rule.
+    addSubmission(db, {
+      userId: bob,
+      problemId: systemHidden,
+      verdict: 'WA',
+      createdAt: 2_000,
+      contestId: 7,
+    });
+    addSubmission(db, {
+      userId: bob,
+      problemId: ownHidden,
+      verdict: 'WA',
+      createdAt: 3_000,
+    });
+    addSubmission(db, {
+      userId: bob,
+      problemId: sharedHidden,
+      verdict: 'WA',
+      createdAt: 4_000,
+    });
+
+    // The coach keeps the public problem and the one shared with her; the
+    // system-hidden and Bob-owned hidden problems are filtered out entirely.
+    const coachRows = listStudentSubmissions(db, bob, { userId: alice });
+    expect(coachRows.map((row) => row.problemId)).toEqual([sharedHidden, shown]);
+
+    // The student keeps the hidden problems they may read themself (owned or
+    // otherwise granted), but not the system-hidden problem.
+    const selfRows = listStudentSubmissions(db, bob, { userId: bob });
+    expect(selfRows.map((row) => row.problemId)).toEqual([
+      sharedHidden,
+      ownHidden,
+      shown,
+    ]);
+
+    // Admins may read every hidden problem.
+    const adminRows = listStudentSubmissions(db, bob, { userId: admin, isAdmin: true });
+    expect(adminRows.map((row) => row.problemId)).toEqual([
+      sharedHidden,
+      ownHidden,
+      systemHidden,
+      shown,
+    ]);
+
+    // A summary never carries problem titles or source code.
+    for (const row of [...coachRows, ...selfRows, ...adminRows]) {
+      expect(row).not.toHaveProperty('code');
+      expect(row).not.toHaveProperty('title');
+    }
+  });
+
+  it('filters before applying limit and keeps beforeId pagination correct', () => {
+    const { db, admin, alice, bob, shown, systemHidden, ownHidden } = hiddenSetup();
+    // Newest first: shown(5), ownHidden(4), shown(3), systemHidden(2), shown(1).
+    const first = addSubmission(db, {
+      userId: bob,
+      problemId: shown,
+      verdict: 'WA',
+      createdAt: 1_000,
+    });
+    const hiddenPractice = addSubmission(db, {
+      userId: bob,
+      problemId: systemHidden,
+      verdict: 'WA',
+      createdAt: 2_000,
+    });
+    const second = addSubmission(db, {
+      userId: bob,
+      problemId: shown,
+      verdict: 'WA',
+      createdAt: 3_000,
+    });
+    const ownHiddenRow = addSubmission(db, {
+      userId: bob,
+      problemId: ownHidden,
+      verdict: 'WA',
+      createdAt: 4_000,
+    });
+    const third = addSubmission(db, {
+      userId: bob,
+      problemId: shown,
+      verdict: 'WA',
+      createdAt: 5_000,
+    });
+
+    // `limit` counts visible rows: Alice sees 5, 3 and 1, so the first page of
+    // two still has two rows even though rows 4 and 2 are filtered out.
+    const coachPageOne = listStudentSubmissions(db, bob, { userId: alice }, { limit: 2 });
+    expect(coachPageOne.map((row) => row.id)).toEqual([third, second]);
+    const coachPageTwo = listStudentSubmissions(
+      db,
+      bob,
+      { userId: alice },
+      { limit: 2, beforeId: second },
+    );
+    expect(coachPageTwo.map((row) => row.id)).toEqual([first]);
+
+    // Bob keeps his own hidden submission, so his pages are 5,4 and 3,1.
+    const selfPageOne = listStudentSubmissions(db, bob, { userId: bob }, { limit: 2 });
+    expect(selfPageOne.map((row) => row.id)).toEqual([third, ownHiddenRow]);
+    const selfPageTwo = listStudentSubmissions(
+      db,
+      bob,
+      { userId: bob },
+      { limit: 2, beforeId: ownHiddenRow },
+    );
+    expect(selfPageTwo.map((row) => row.id)).toEqual([second, first]);
+
+    // Admin pages include every row, hidden or not.
+    const adminPageOne = listStudentSubmissions(
+      db,
+      bob,
+      { userId: admin, isAdmin: true },
+      { limit: 2 },
+    );
+    expect(adminPageOne.map((row) => row.id)).toEqual([third, ownHiddenRow]);
+    const adminPageTwo = listStudentSubmissions(
+      db,
+      bob,
+      { userId: admin, isAdmin: true },
+      { limit: 2, beforeId: ownHiddenRow },
+    );
+    expect(adminPageTwo.map((row) => row.id)).toEqual([second, hiddenPractice]);
   });
 });
