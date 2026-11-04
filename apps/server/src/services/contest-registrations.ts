@@ -77,6 +77,11 @@ function requireRegistration(db: DatabaseSync, contestId: number, userId: number
  * Registers a user for an open/approval contest. Open contests accept the user
  * immediately; approval contests create a pending registration. A previously
  * rejected user may register again.
+ *
+ * Team-only contests (`team_mode = 'team'`) never accept individual
+ * self-registration: participation is granted when the team captain registers
+ * the team. Administrator imports are unaffected because they do not go through
+ * this function.
  */
 export function registerForContest(
   db: DatabaseSync,
@@ -84,6 +89,13 @@ export function registerForContest(
 ): 'accepted' | 'pending' {
   const now = input.now ?? Date.now();
   const contest = requireContest(db, input.contestId);
+  if (contest.team_mode === 'team') {
+    throw new ContestRegistrationError(
+      'TEAM_REGISTRATION_REQUIRED',
+      403,
+      'this contest only accepts team registration; the team captain must register the team',
+    );
+  }
   if (contest.registration_mode === 'manual') {
     throw new ContestRegistrationError(
       'REGISTRATION_DISABLED',

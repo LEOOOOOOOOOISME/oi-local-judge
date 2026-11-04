@@ -19,7 +19,9 @@ import {
   updateContest,
   updateParticipant,
   type RegistrationMode,
+  type TeamMode,
 } from '../src/storage/repos/contests.js';
+import { insertRegistration } from '../src/storage/repos/contest-registrations.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import { createSubmission } from '../src/storage/repos/submissions.js';
 import { openDatabase } from '../src/storage/db.js';
@@ -120,9 +122,11 @@ function makeContest(
     registrationOpenAt?: number | null;
     registrationCloseAt?: number | null;
   } = {},
+  teamMode: TeamMode = 'individual',
 ): number {
   return createContest(ctx.db, {
     name: `Contest-${mode}`,
+    teamMode,
     registrationMode: mode,
     startAt: times.startAt ?? 1000,
     endAt: times.endAt ?? null,
@@ -239,6 +243,49 @@ describe('contest registration service', () => {
       'CONTEST_NOT_FOUND',
       404,
     );
+  });
+
+  it('rejects individual self-registration in team-only contests', () => {
+    const ctx = setup();
+    for (const mode of ['open', 'approval', 'manual'] as const) {
+      const contestId = makeContest(ctx, mode, {}, 'team');
+      expectRegistrationError(
+        () => registerForContest(ctx.db, { contestId, userId: ctx.users.alice, now: 5000 }),
+        'TEAM_REGISTRATION_REQUIRED',
+        403,
+      );
+      expect(getMyRegistration(ctx.db, contestId, ctx.users.alice)).toBeNull();
+    }
+
+    // Administrator imports do not go through self-registration and stay valid.
+    const importedContest = makeContest(ctx, 'open', {}, 'team');
+    addParticipant(ctx.db, importedContest, ctx.users.bob, 4321);
+    expect(getMyRegistration(ctx.db, importedContest, ctx.users.bob)).toMatchObject({
+      status: 'accepted',
+      registeredAt: 4321,
+    });
+  });
+
+  it('still accepts individual self-registration in both and individual contests', () => {
+    const ctx = setup();
+    const bothOpen = makeContest(ctx, 'open', {}, 'both');
+    expect(
+      registerForContest(ctx.db, { contestId: bothOpen, userId: ctx.users.alice, now: 5000 }),
+    ).toBe('accepted');
+
+    const bothApproval = makeContest(ctx, 'approval', {}, 'both');
+    expect(
+      registerForContest(ctx.db, { contestId: bothApproval, userId: ctx.users.bob, now: 5001 }),
+    ).toBe('pending');
+
+    const individualOpen = makeContest(ctx, 'open', {}, 'individual');
+    expect(
+      registerForContest(ctx.db, {
+        contestId: individualOpen,
+        userId: ctx.users.carol,
+        now: 5002,
+      }),
+    ).toBe('accepted');
   });
 
   it('rejects registration after the contest has ended', () => {
@@ -843,6 +890,60 @@ describe('contest registration HTTP API', () => {
     const disabled = await api(app, 'POST', `/api/contests/${manualId}/register`, ctx, 'carol');
     expect(disabled.statusCode).toBe(403);
     expect(errorCode(disabled.json())).toBe('REGISTRATION_DISABLED');
+  });
+
+  it('rejects team-only individual registration while keeping admin imports and reviews available', async () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, 'open', {}, 'team');
+    const app = await buildCtxApp(ctx);
+
+    const rejected = await api(app, 'POST', `/api/contests/${contestId}/register`, ctx, 'alice');
+    expect(rejected.statusCode, rejected.body).toBe(403);
+    expect(errorCode(rejected.json())).toBe('TEAM_REGISTRATION_REQUIRED');
+
+    const status = await api(
+      app,
+      'GET',
+      `/api/contests/${contestId}/registration`,
+      ctx,
+      'alice',
+    );
+    expect(status.json()).toMatchObject({ data: { mode: 'open', registration: null } });
+
+    const imported = await api(
+      app,
+      'POST',
+      `/api/admin/contests/${contestId}/participants`,
+      ctx,
+      'manager',
+      { userIds: [ctx.users.bob] },
+    );
+    expect(imported.statusCode, imported.body).toBe(200);
+    expect(getMyRegistration(ctx.db, contestId, ctx.users.bob)?.status).toBe('accepted');
+
+    // A legacy pending registration (created before the team-only rule) can still
+    // be reviewed and approved by a manager.
+    insertRegistration(ctx.db, {
+      contestId,
+      userId: ctx.users.carol,
+      status: 'pending',
+      now: 1000,
+    });
+    const approved = await api(
+      app,
+      'POST',
+      `/api/admin/contests/${contestId}/registrations/${ctx.users.carol}/approve`,
+      ctx,
+      'manager',
+    );
+    expect(approved.statusCode, approved.body).toBe(200);
+    expect(getMyRegistration(ctx.db, contestId, ctx.users.carol)?.status).toBe('accepted');
+
+    // both mode keeps individual self-registration.
+    const bothId = makeContest(ctx, 'open', {}, 'both');
+    const both = await api(app, 'POST', `/api/contests/${bothId}/register`, ctx, 'alice');
+    expect(both.statusCode, both.body).toBe(200);
+    expect((both.json() as { data: { status: string } }).data.status).toBe('accepted');
   });
 
   it('lets managers review, check in and see pending participants but blocks them from submitting', async () => {
