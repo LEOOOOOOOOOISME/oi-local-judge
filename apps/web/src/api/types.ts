@@ -1521,6 +1521,17 @@ export interface StudentWrongProblems {
   problems: StudentWrongProblem[];
 }
 
+/** GET /api/students/:id/submissions 返回的提交摘要；不含源码。 */
+export interface StudentSubmissionSummary {
+  id: number;
+  problemId: number;
+  contestId: number | null;
+  status: SubmissionStatus;
+  verdict: Verdict | null;
+  score: number;
+  createdAt: string;
+}
+
 export interface ClassStudentSummary {
   userId: number;
   username: string;

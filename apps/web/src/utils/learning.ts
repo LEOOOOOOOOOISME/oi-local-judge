@@ -44,6 +44,18 @@ export function studentWrongProblemsPath(
   return `/api/students/${userId}/wrong-problems?${params.toString()}`;
 }
 
+/** `GET /api/students/:id/submissions` 的请求路径（提交摘要，不含源码）。 */
+export function studentSubmissionsPath(
+  userId: number,
+  options: { limit?: number; beforeId?: number } = {},
+): string {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set('limit', String(options.limit));
+  if (options.beforeId !== undefined) params.set('beforeId', String(options.beforeId));
+  const query = params.toString();
+  return `/api/students/${userId}/submissions${query ? `?${query}` : ''}`;
+}
+
 /** 学生学习统计页路径；带班级编号时由后端校验“教练 + 本班学生”的可见性。 */
 export function studentLearningPath(userId: number, classId?: number | null): string {
   return classId ? `/students/${userId}/learning?classId=${classId}` : `/students/${userId}/learning`;
