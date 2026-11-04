@@ -7,7 +7,16 @@ import {
   writePersistedSettings,
   type PersistedSettings,
 } from '../services/settings.js';
-import { createBackup, getDiagnostics, listBackups, requestRestore, RestoreError } from '../services/system-ops.js';
+import {
+  appVersion,
+  createBackup,
+  getDiagnostics,
+  listBackups,
+  requestRestore,
+  RestoreError,
+  type BackupEntry,
+} from '../services/system-ops.js';
+import { checkForUpdate } from '../services/update-check.js';
 import { getRuntimeMetrics } from '../services/metrics.js';
 import {
   LearningStatsRebuildBusyError,
@@ -84,6 +93,45 @@ export function registerAdminSystemRoutes(
     '/api/admin/system/backups',
     { preHandler: options.adminGuard },
     async () => ({ ok: true, data: listBackups(options.config) }),
+  );
+
+  // Read-only version check. Network failures are returned inside the envelope
+  // (HTTP 200) so the admin page can show a friendly message instead of a 500.
+  app.get(
+    '/api/admin/system/update-check',
+    { preHandler: options.adminGuard },
+    async () => ({ ok: true, data: await checkForUpdate({ currentVersion: appVersion() }) }),
+  );
+
+  // Preparation only: snapshot the data directory with kind `pre-upgrade`.
+  // Nothing is downloaded or installed here.
+  app.post(
+    '/api/admin/system/update/prepare',
+    { preHandler: options.adminGuard },
+    async (request, reply) => {
+      const currentVersion = appVersion();
+      let backup: BackupEntry;
+      try {
+        backup = createBackup(options.db, options.config, Date.now(), 'pre-upgrade');
+      } catch (error) {
+        return reply.code(500).send({
+          ok: false,
+          error: {
+            code: 'UPDATE_PREPARE_FAILED',
+            message: `创建升级前备份失败：${error instanceof Error ? error.message : String(error)}`,
+          },
+        });
+      }
+      recordAudit(options.db, {
+        actorId: request.user?.id ?? null,
+        action: 'update.prepare',
+        targetType: 'backup',
+        targetId: backup.id,
+        detail: { backupId: backup.id, currentVersion },
+        ip: request.ip,
+      });
+      return reply.code(201).send({ ok: true, data: { backup, currentVersion } });
+    },
   );
 
   app.get(

@@ -1298,12 +1298,44 @@ export interface RuntimeMetrics {
   disk: { freeBytes: number; totalBytes: number } | null;
 }
 
+/** 备份触发方式；pre-upgrade 由升级前备份接口创建。 */
+export type BackupKind = 'manual' | 'auto' | 'pre-restore' | 'pre-upgrade';
+
 export interface BackupEntry {
   id: string;
   path: string;
   createdAt: number;
   sizeBytes: number;
+  kind: BackupKind;
   manifest: Record<string, unknown>;
+}
+
+/** GET /api/admin/system/update-check：检查成功。 */
+export interface UpdateCheckSuccess {
+  current: string;
+  latest: string;
+  updateAvailable: boolean;
+  /** Release 页面地址（不是安装包直链）。 */
+  url: string | null;
+  /** Release 发布时间（毫秒时间戳）；缺失时为 null。 */
+  publishedAt: number | null;
+  notes: string;
+  checkedAt: number;
+}
+
+/** GET /api/admin/system/update-check：网络/接口失败（HTTP 仍为 200）。 */
+export interface UpdateCheckFailure {
+  error: string;
+  current: string;
+  checkedAt: number;
+}
+
+export type UpdateCheckResult = UpdateCheckSuccess | UpdateCheckFailure;
+
+/** POST /api/admin/system/update/prepare：只创建升级前备份，不下载、不安装。 */
+export interface UpdatePrepareResult {
+  backup: BackupEntry;
+  currentVersion: string;
 }
 
 /** Settings Center v1.1：运行时设置（GET/PUT /api/admin/system/settings）。 */
