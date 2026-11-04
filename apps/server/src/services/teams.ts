@@ -294,6 +294,19 @@ export function transferCaptain(
   });
 }
 
+/**
+ * Dissolves a team and everything the membership granted.
+ *
+ * Inside one transaction this writes the audit record, removes every team
+ * membership together with the contest participation it granted, drops the
+ * contest registrations and finally deletes the team.
+ *
+ * Revocation reuses {@link syncMemberLeftTeam}: each membership row is deleted
+ * first so the dissolving team no longer counts as a registered team for its
+ * member, then the sync removes only `source = 'team'` participant rows that no
+ * other registered team justifies. Administrator imports (`manual`) and
+ * self-registrations (`self`) are never touched.
+ */
 export function dissolveTeam(
   db: DatabaseSync,
   input: { teamId: number; actorId: number; isAdmin: boolean },
@@ -312,6 +325,17 @@ export function dissolveTeam(
       JSON.stringify({ name: team.name, admin: input.isAdmin }),
       Date.now(),
     );
+    // Snapshot the roster before deleting any membership row: the contest sync
+    // can only revoke participation while the members are still known.
+    const memberIds = listTeamMembers(db, input.teamId).map((member) => member.userId);
+    for (const userId of memberIds) {
+      // Delete first so `syncMemberLeftTeam` no longer sees this team as a
+      // standing affiliation; otherwise it would keep every `team` row.
+      removeTeamMemberRow(db, input.teamId, userId);
+      syncMemberLeftTeam(db, { teamId: input.teamId, userId });
+    }
+    // Also drops contest_teams registrations, then any leftover members and
+    // the team itself.
     deleteTeamWithMembers(db, input.teamId);
   });
 }
