@@ -1,8 +1,9 @@
-import { Alert, Button, Card, Empty, Table, Tag } from 'antd';
+import { Alert, App, Button, Card, Empty, Space, Table, Tag } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { Link, useParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { apiGet } from '../api/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { apiPost, apiGet } from '../api/client';
+import { useAuth } from '../auth/AuthContext';
 import type { AnswerFile, Contest, ProblemDetail, Submission, TestResult } from '../api/types';
 import { CodeBlock } from '../components/CodeBlock';
 import { MetaList } from '../components/MetaList';
@@ -32,6 +33,9 @@ export function SubmissionDetailPage() {
   const { submissionId: submissionIdParam } = useParams();
   const submissionId = Number(submissionIdParam);
   const validId = Number.isInteger(submissionId) && submissionId > 0;
+  const { user } = useAuth();
+  const { message, modal } = App.useApp();
+  const queryClient = useQueryClient();
 
   const submissionQuery = useQuery({
     queryKey: ['submission', submissionId],
@@ -40,6 +44,21 @@ export function SubmissionDetailPage() {
     refetchInterval: (query) => {
       const current = query.state.data;
       return current && isPendingStatus(current.status) ? 1_500 : false;
+    },
+  });
+
+  const cancelMutation = useMutation({
+    mutationFn: () =>
+      apiPost<{ id: number; status: string; taskId: number | null }>(
+        `/api/admin/submissions/${submissionId}/cancel`,
+      ),
+    onSuccess: () => {
+      message.success('评测已取消');
+      void queryClient.invalidateQueries({ queryKey: ['submission', submissionId] });
+      void queryClient.invalidateQueries({ queryKey: ['submissions'] });
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '取消评测失败');
     },
   });
 
@@ -77,6 +96,23 @@ export function SubmissionDetailPage() {
   }
 
   const pending = isPendingStatus(submission.status);
+  const canCancel = pending && (user?.role === 'admin' || user?.role === 'contestmanager');
+  const requestCancel = () => {
+    modal.confirm({
+      title: '取消评测',
+      content: `确定要取消提交 #${submission.id} 的评测吗？取消后可以重新评测。`,
+      okText: '取消评测',
+      okButtonProps: { danger: true },
+      cancelText: '返回',
+      onOk: async () => {
+        try {
+          await cancelMutation.mutateAsync();
+        } catch {
+          // The mutation's onError already reported the failure.
+        }
+      },
+    });
+  };
   const contest =
     submission.contestId !== null
       ? (contestsQuery.data?.find((item) => item.id === submission.contestId) ?? null)
@@ -275,9 +311,16 @@ export function SubmissionDetailPage() {
           </span>
         }
         extra={
-          <Link to={backPath}>
-            <Button>返回题目</Button>
-          </Link>
+          <Space>
+            {canCancel ? (
+              <Button danger loading={cancelMutation.isPending} onClick={requestCancel}>
+                取消评测
+              </Button>
+            ) : null}
+            <Link to={backPath}>
+              <Button>返回题目</Button>
+            </Link>
+          </Space>
         }
       />
 

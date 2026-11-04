@@ -8,8 +8,11 @@ import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import {
+  cancelSubmission,
   rejudgeSubmission,
   SubmissionBusyError,
+  SubmissionCancelForbiddenError,
+  SubmissionCannotCancelError,
 } from '../services/submissions.js';
 import { getContest } from '../storage/repos/contests.js';
 import { getProblem } from '../storage/repos/problems.js';
@@ -62,6 +65,47 @@ export function registerAdminJudgeRoutes(
       } catch (err) {
         if (err instanceof SubmissionBusyError) {
           return reply.code(409).send({
+            ok: false,
+            error: { code: err.code, message: err.message },
+          });
+        }
+        throw err;
+      }
+    },
+  );
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/submissions/:id/cancel',
+    { preHandler: options.adminGuard },
+    async (request, reply) => {
+      const id = parseId(request.params.id);
+      if (id === null) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      if (!request.user) {
+        return reply.code(401).send({
+          ok: false,
+          error: { code: 'UNAUTHORIZED', message: 'authentication required' },
+        });
+      }
+      try {
+        const result = cancelSubmission(options.db, id, request.user);
+        if (!result) {
+          return reply.code(404).send({
+            ok: false,
+            error: { code: 'NOT_FOUND', message: `submission ${id} not found` },
+          });
+        }
+        return { ok: true, data: result };
+      } catch (err) {
+        if (err instanceof SubmissionCannotCancelError) {
+          return reply.code(409).send({
+            ok: false,
+            error: { code: err.code, message: err.message },
+          });
+        }
+        if (err instanceof SubmissionCancelForbiddenError) {
+          return reply.code(403).send({
             ok: false,
             error: { code: err.code, message: err.message },
           });

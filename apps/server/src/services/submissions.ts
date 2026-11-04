@@ -11,6 +11,7 @@ import {
   getLatestSubmissionAt,
   getSubmission,
   getTestResults,
+  cancelSubmissionState,
   resetSubmissionForRejudge,
   type SubmissionRow,
 } from '../storage/repos/submissions.js';
@@ -20,6 +21,7 @@ import {
   getJudgeTaskBySubmission,
 } from '../storage/repos/judge.js';
 import { transaction } from '../storage/db.js';
+import { abortSubmission } from '../judge/cancellation.js';
 import { resolveContestSubmission } from './contest-access.js';
 import { resolveSubmissionTeam } from './contest-teams.js';
 import { canViewProblem, ProblemAclError } from './problem-acl.js';
@@ -54,6 +56,45 @@ export class SubmissionBusyError extends Error {
     this.name = 'SubmissionBusyError';
   }
 }
+
+/** Thrown when a submission is already terminal and can no longer be canceled. */
+export class SubmissionCannotCancelError extends Error {
+  readonly status = 409;
+  readonly code = 'CANNOT_CANCEL';
+
+  constructor(status: string) {
+    super(`submission cannot be canceled (status: ${status})`);
+    this.name = 'SubmissionCannotCancelError';
+  }
+}
+
+/** Thrown when the caller has no permission to cancel submissions. */
+export class SubmissionCancelForbiddenError extends Error {
+  readonly status = 403;
+  readonly code = 'FORBIDDEN';
+
+  constructor() {
+    super('insufficient permission to cancel this submission');
+    this.name = 'SubmissionCancelForbiddenError';
+  }
+}
+
+/** Actor allowed to cancel a queued/running judge task. */
+export interface CancellationActor {
+  id: number;
+  role: string;
+}
+
+export interface CancelSubmissionResult {
+  id: number;
+  status: 'canceled';
+  taskId: number | null;
+}
+
+/** Roles the cancel endpoint is exposed to. */
+const CANCEL_ROLES = new Set(['admin', 'setter', 'contestmanager']);
+/** Statuses a cancel request may interrupt. */
+const CANCELABLE_STATUSES = new Set(['queued', 'compiling', 'running']);
 
 const ACTIVE_JUDGE_STATUSES = new Set(['running', 'compiling']);
 
@@ -223,6 +264,65 @@ export function rejudgeSubmission(
     resetSubmissionForRejudge(db, submissionId);
     const taskId = enqueueRejudge(db, submissionId, REJUDGE_PRIORITY);
     return { id: submissionId, taskId };
+  });
+}
+
+/**
+ * Cancels a queued, compiling or running judge task.
+ *
+ * - queued: the task row is finished as `canceled` immediately (no worker owns
+ *   it), and the submission becomes `canceled`;
+ * - compiling/running: the submission becomes `canceled` and the in-flight
+ *   runner is aborted; the scheduler then finishes the task as `canceled`.
+ *
+ * Returns `null` when the submission does not exist. Terminal submissions
+ * (finished/failed/canceled) raise `SubmissionCannotCancelError` (409) and a
+ * caller without a cancel-capable role raises `SubmissionCancelForbiddenError`
+ * (403).
+ */
+export function cancelSubmission(
+  db: DatabaseSync,
+  submissionId: number,
+  actor: CancellationActor,
+): CancelSubmissionResult | null {
+  if (!CANCEL_ROLES.has(actor.role)) {
+    throw new SubmissionCancelForbiddenError();
+  }
+  return transaction(db, () => {
+    const submission = getSubmission(db, submissionId);
+    if (!submission) return null;
+    if (!CANCELABLE_STATUSES.has(submission.status)) {
+      throw new SubmissionCannotCancelError(submission.status);
+    }
+
+    const task = getJudgeTaskBySubmission(db, submissionId);
+    const taskId = task?.id ?? null;
+    const now = Date.now();
+
+    cancelSubmissionState(db, submissionId, now);
+
+    if (submission.status === 'queued') {
+      // No worker has claimed the task yet, so it can be closed here. Abort a
+      // controller anyway in case a worker claimed it in the same tick.
+      if (taskId !== null) {
+        db.prepare(
+          "UPDATE judge_tasks SET status = 'canceled', worker = NULL, heartbeat_at = ? WHERE id = ?",
+        ).run(now, taskId);
+      }
+      abortSubmission(submissionId);
+      return { id: submissionId, status: 'canceled', taskId };
+    }
+
+    // A worker owns the task: signal it to stop and let the scheduler record the
+    // task outcome. Without a live controller there is nothing to wait for, so
+    // close the task here as well.
+    const aborted = abortSubmission(submissionId);
+    if (!aborted && taskId !== null) {
+      db.prepare(
+        "UPDATE judge_tasks SET status = 'canceled', worker = NULL, heartbeat_at = ? WHERE id = ?",
+      ).run(now, taskId);
+    }
+    return { id: submissionId, status: 'canceled', taskId };
   });
 }
 

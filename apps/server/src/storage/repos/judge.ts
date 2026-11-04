@@ -82,7 +82,11 @@ export function claimNextTask(db: DatabaseSync, worker: string): JudgeTaskRow | 
   }
 }
 
-export function finishJudgeTask(db: DatabaseSync, taskId: number, status: 'done' | 'failed'): void {
+export function finishJudgeTask(
+  db: DatabaseSync,
+  taskId: number,
+  status: 'done' | 'failed' | 'canceled',
+): void {
   db.prepare('UPDATE judge_tasks SET status = ?, heartbeat_at = ? WHERE id = ?').run(
     status,
     Date.now(),
@@ -98,8 +102,11 @@ export function requeueTask(db: DatabaseSync, taskId: number): void {
  * Resets judge tasks left in `running`/`compiling` by an interrupted process
  * (crash, force-kill) back to `queued` and re-queues their submissions.
  *
- * Only interrupted tasks are touched: completed/failed tasks and all result
- * rows are left intact. Returns the number of recovered tasks.
+ * A task whose submission was already canceled is closed as `canceled` instead:
+ * a crash between the cancel request and the scheduler bookkeeping must not
+ * resurrect the run. Only interrupted tasks are touched: completed/failed
+ * tasks and all result rows are left intact. Returns the number of interrupted
+ * tasks that were recovered (requeued or closed as canceled).
  */
 export function recoverInterruptedJudgeTasks(db: DatabaseSync, now = Date.now()): number {
   const interruptedStatuses = "('running', 'compiling')";
@@ -112,6 +119,13 @@ export function recoverInterruptedJudgeTasks(db: DatabaseSync, now = Date.now())
       db.exec('COMMIT');
       return 0;
     }
+    // The submission was canceled before the crash: finish the orphaned task
+    // instead of granting it another run.
+    db.prepare(
+      `UPDATE judge_tasks SET status = 'canceled', worker = NULL, heartbeat_at = ?
+       WHERE status IN ${interruptedStatuses}
+         AND submission_id IN (SELECT id FROM submissions WHERE status = 'canceled')`,
+    ).run(now);
     db.prepare(
       `UPDATE submissions SET status = 'queued' WHERE id IN
          (SELECT submission_id FROM judge_tasks WHERE status IN ${interruptedStatuses})`,
