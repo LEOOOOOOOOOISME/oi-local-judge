@@ -1,9 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
-import { createConnection } from 'node:net';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { startTestServer, type TestServer } from './server-harness';
 
 /**
  * 浏览器验收：不依赖 Electron，直接启动真实 server，用 Chromium 走一遍
@@ -17,175 +13,25 @@ const PORT = 8899;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
 const ADMIN_USERNAME = 'admin';
 const ADMIN_PASSWORD = 'admin123';
-const SERVER_ENTRY = join(process.cwd(), 'apps/server/dist/cli.js');
 
 test.use({ browserName: 'chromium' });
 
-let server: ChildProcess | null = null;
-let dataDir: string | null = null;
-let serverLog = '';
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-/** 尝试连接端口：连得上说明被占用。 */
-function isPortInUse(port: number): Promise<boolean> {
-  return new Promise((resolve) => {
-    const socket = createConnection({ port, host: '127.0.0.1' });
-    let settled = false;
-    const finish = (inUse: boolean) => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      resolve(inUse);
-    };
-    socket.once('connect', () => finish(true));
-    socket.once('error', () => finish(false));
-    socket.setTimeout(1500, () => finish(false));
-  });
-}
-
-/** Windows 下查出监听端口的 PID，便于报告占用者。 */
-function findWindowsPortOwners(port: number): number[] {
-  if (process.platform !== 'win32') return [];
-  const result = spawnSync('netstat', ['-ano', '-p', 'TCP'], {
-    encoding: 'utf8',
-    windowsHide: true,
-  });
-  if (result.status !== 0 || !result.stdout) return [];
-  const pids = new Set<number>();
-  for (const line of result.stdout.split(/\r?\n/)) {
-    if (!line.includes(`:${port}`) || !line.toUpperCase().includes('LISTENING')) continue;
-    const parts = line.trim().split(/\s+/);
-    const pid = Number(parts[parts.length - 1]);
-    if (Number.isInteger(pid) && pid > 0) pids.add(pid);
-  }
-  return [...pids];
-}
-
-async function waitForHealth(timeoutMs: number): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  let lastError = 'no response yet';
-  while (Date.now() < deadline) {
-    if (server && server.exitCode !== null) {
-      throw new Error(
-        `server exited with code ${server.exitCode} before /api/health was ready.\n${serverLog}`,
-      );
-    }
-    try {
-      const response = await fetch(`${BASE_URL}/api/health`);
-      if (response.ok) {
-        const body = (await response.json()) as { ok?: boolean };
-        if (body.ok === true) return;
-      }
-      lastError = `GET /api/health responded ${response.status}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-    await delay(200);
-  }
-  throw new Error(
-    `server did not become healthy within ${timeoutMs}ms (${lastError}).\n${serverLog}`,
-  );
-}
-
-async function waitForPortFree(port: number, timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!(await isPortInUse(port))) return true;
-    await delay(200);
-  }
-  return false;
-}
-
-function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
-  if (child.exitCode !== null) return Promise.resolve();
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, timeoutMs);
-    child.once('exit', () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
-}
-
-/** Windows 上文件可能短时间被占用，删除临时数据目录时重试。 */
-async function removeDataDir(dir: string): Promise<void> {
-  for (let attempt = 0; attempt < 10; attempt += 1) {
-    try {
-      rmSync(dir, { recursive: true, force: true });
-      return;
-    } catch {
-      await delay(200);
-    }
-  }
-}
-
-async function stopServer(): Promise<void> {
-  const child = server;
-  server = null;
-  if (!child || child.exitCode !== null) return;
-  if (process.platform === 'win32' && child.pid) {
-    // node 会派生子进程（评测/定时任务），必须连同进程树一起结束。
-    spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true });
-  } else {
-    child.kill('SIGTERM');
-    await waitForExit(child, 5000);
-    if (child.exitCode === null) child.kill('SIGKILL');
-  }
-  await waitForExit(child, 10_000);
-}
+let server: TestServer | null = null;
 
 test.beforeAll(async () => {
-  expect(
-    existsSync(SERVER_ENTRY),
-    `missing ${SERVER_ENTRY}; run "npm run build" before the browser E2E test`,
-  ).toBe(true);
-
-  if (await isPortInUse(PORT)) {
-    const owners = findWindowsPortOwners(PORT);
-    const ownerText = owners.length > 0 ? ` (pid ${owners.join(', ')})` : '';
-    throw new Error(
-      `port ${PORT} is already in use${ownerText}; ` +
-        `stop that process (taskkill /PID <pid> /T /F) or free the port before running the browser E2E test`,
-    );
-  }
-
-  dataDir = mkdtempSync(join(tmpdir(), 'oij-browser-e2e-'));
-  server = spawn(process.execPath, [SERVER_ENTRY], {
-    cwd: process.cwd(),
+  server = await startTestServer({
+    port: PORT,
+    dataDirPrefix: 'oij-browser-e2e-',
     env: {
-      ...process.env,
-      OIJ_DATA_DIR: dataDir,
-      OIJ_HOST: '127.0.0.1',
-      OIJ_PORT: String(PORT),
       OIJ_ADMIN_USERNAME: ADMIN_USERNAME,
       OIJ_ADMIN_PASSWORD: ADMIN_PASSWORD,
     },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
   });
-  server.stdout?.on('data', (chunk: Buffer) => {
-    serverLog += chunk.toString();
-  });
-  server.stderr?.on('data', (chunk: Buffer) => {
-    serverLog += chunk.toString();
-  });
-  server.on('error', (error) => {
-    serverLog += `\n[spawn error] ${error.message}`;
-  });
-
-  await waitForHealth(30_000);
 });
 
 test.afterAll(async () => {
-  await stopServer();
-  await waitForPortFree(PORT, 10_000);
-  if (dataDir) {
-    await removeDataDir(dataDir);
-    dataDir = null;
-  }
+  await server?.stop();
+  server = null;
 });
 
 test('admin can log in and open help, system, class, training and learning pages', async ({
