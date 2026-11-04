@@ -174,6 +174,8 @@ export function getTeamRanking(
       rank: row.rank,
       teamId: row.userId,
       teamName: registration.name,
+      // `members` is the contest roster: a team's whole roster, but only the
+      // students of a class. Coaches and assistants never inflate the count.
       memberCount: registration.members.length,
       totalScore: row.totalScore,
       hackScore: row.hackScore ?? 0,
