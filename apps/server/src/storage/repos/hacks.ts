@@ -13,6 +13,8 @@ export interface ContestHackRow {
   problem_id: number;
   hacker_id: number;
   target_submission_id: number;
+  /** Team the hacker represented when creating the hack; null for individual hacks. */
+  team_id: number | null;
   input_path: string;
   status: string;
   verdict: string | null;
@@ -87,19 +89,22 @@ export function createHack(
     hackerId: number;
     targetSubmissionId: number;
     inputPath: string;
+    /** Registered team the hacker represents, or null for an individual hack. */
+    teamId?: number | null;
   },
 ): number {
   const result = db
     .prepare(
       `INSERT INTO contest_hacks
-         (contest_id, problem_id, hacker_id, target_submission_id, input_path, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+         (contest_id, problem_id, hacker_id, target_submission_id, team_id, input_path, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.contestId,
       input.problemId,
       input.hackerId,
       input.targetSubmissionId,
+      input.teamId ?? null,
       input.inputPath,
       Date.now(),
     );
