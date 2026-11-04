@@ -1,0 +1,60 @@
+/* Learning analytics：学生学习统计、班级学习统计与教练工作台。 */
+
+.learning-filter-label {
+  font-size: 12px;
+}
+
+.learning-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-top: 12px;
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.learning-stat-suffix {
+  margin-left: 6px;
+  color: var(--text-3);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+.learning-note {
+  margin-bottom: 12px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.learning-problem-link {
+  font-weight: 500;
+}
+
+.learning-problem-id {
+  margin-left: 6px;
+  font-size: 12px;
+}
+
+.learning-tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.learning-tag-list .ant-tag {
+  margin-inline-end: 0;
+}
+
+.class-workbench-row {
+  margin-top: 16px;
+}
+
+.class-workbench-empty {
+  line-height: 1.8;
+}
+
+.class-workbench-empty .muted {
+  margin-top: 4px;
+  font-size: 12px;
+}
