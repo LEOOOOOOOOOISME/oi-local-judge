@@ -23,6 +23,8 @@ import type {
   DiagnosticsReport,
   DiagnosticStatus,
   RestoreRequestResult,
+  RuntimeMetrics,
+  SlowRequest,
   SystemSettings,
   SystemSettingsEffective,
   SystemSettingsPatch,
@@ -30,7 +32,7 @@ import type {
 } from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
-import { formatBytes, formatDateTime } from '../utils/format';
+import { formatBytes, formatDateTime, formatDuration } from '../utils/format';
 import '../styles/admin.css';
 
 const CHECK_STATUS_META: Record<DiagnosticStatus, { label: string; color: string }> = {
@@ -233,6 +235,166 @@ function DiagnosticsPanel() {
             dataSource={report.checks}
             pagination={false}
             locale={{ emptyText: '暂无诊断项' }}
+          />
+        </>
+      )}
+    </Card>
+  );
+}
+
+/** 毫秒的紧凑展示：小于 10 ms 保留两位，其余保留一位。 */
+function formatMetricsMs(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return '—';
+  if (value >= 1000) return `${(value / 1000).toFixed(2)} s`;
+  return `${value < 10 ? value.toFixed(2) : value.toFixed(1)} ms`;
+}
+
+const SLOW_REQUEST_COLUMNS: TableColumnsType<SlowRequest> = [
+  {
+    title: '时间',
+    dataIndex: 'at',
+    width: 170,
+    render: (value: number) => <span className="mono">{formatDateTime(value)}</span>,
+  },
+  {
+    title: '方法',
+    dataIndex: 'method',
+    width: 90,
+    render: (value: string) => <span className="mono">{value}</span>,
+  },
+  {
+    title: '路径',
+    dataIndex: 'url',
+    render: (value: string) => (
+      <span className="mono system-metrics-path" title={value}>
+        {value}
+      </span>
+    ),
+  },
+  {
+    title: '状态',
+    dataIndex: 'status',
+    width: 90,
+    render: (value: number) => (
+      <Tag color={value >= 500 ? 'red' : value >= 400 ? 'gold' : 'green'}>{value}</Tag>
+    ),
+  },
+  {
+    title: '耗时',
+    dataIndex: 'durationMs',
+    width: 110,
+    render: (value: number) => (
+      <span className="mono system-metrics-duration">{formatMetricsMs(value)}</span>
+    ),
+  },
+];
+
+function MetricsPanel() {
+  const metricsQuery = useQuery({
+    queryKey: ['admin-system-metrics'],
+    queryFn: () => apiGet<RuntimeMetrics>('/api/admin/system/metrics'),
+  });
+  const metrics = metricsQuery.data;
+  const hasServerErrors = (metrics?.requests.serverErrors ?? 0) > 0;
+
+  return (
+    <Card
+      className="oij-card"
+      title="运行指标"
+      extra={
+        <Button
+          icon={<ReloadOutlined />}
+          loading={metricsQuery.isFetching}
+          onClick={() => void metricsQuery.refetch()}
+        >
+          刷新
+        </Button>
+      }
+    >
+      {metricsQuery.isError ? (
+        <ErrorResult error={metricsQuery.error} onRetry={() => void metricsQuery.refetch()} />
+      ) : !metrics ? (
+        <PageLoading tip="正在读取运行指标…" />
+      ) : (
+        <>
+          <Alert
+            className="system-overall"
+            type="info"
+            showIcon
+            message="进程内本地指标，仅统计本次启动以来的数据"
+            description={`生成时间：${formatDateTime(metrics.generatedAt)} · 进程启动：${formatDateTime(
+              metrics.process.startedAt,
+            )} · 数据目录剩余：${metrics.disk ? formatBytes(metrics.disk.freeBytes) : '未知'}`}
+          />
+          <div className="system-stat-grid">
+            <div className="system-stat">
+              <div className="system-stat-label">请求总数</div>
+              <div className="system-stat-value mono">{metrics.requests.total}</div>
+            </div>
+            <div className={`system-stat ${hasServerErrors ? 'system-stat-bad' : ''}`}>
+              <div className="system-stat-label">5xx 响应</div>
+              <div className="system-stat-value mono">{metrics.requests.serverErrors}</div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">平均延迟</div>
+              <div className="system-stat-value mono">
+                {formatMetricsMs(metrics.requests.avgLatencyMs)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">p95 延迟</div>
+              <div className="system-stat-value mono">
+                {formatMetricsMs(metrics.requests.p95LatencyMs)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">事件循环 p95</div>
+              <div className="system-stat-value mono">
+                {formatMetricsMs(metrics.eventLoopDelay.p95Ms)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">常驻内存 RSS</div>
+              <div className="system-stat-value system-stat-value-text mono">
+                {formatBytes(metrics.process.rssBytes)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">堆内存</div>
+              <div className="system-stat-value system-stat-value-text mono">
+                {formatBytes(metrics.process.heapUsedBytes)} /{' '}
+                {formatBytes(metrics.process.heapTotalBytes)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">CPU 使用率</div>
+              <div className="system-stat-value mono">
+                {metrics.process.cpu.percent.toFixed(1)}%
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">运行时长</div>
+              <div className="system-stat-value system-stat-value-text mono">
+                {formatDuration(metrics.process.uptimeSec * 1000)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">评测队列</div>
+              <div className="system-stat-value system-stat-value-text mono">
+                排队 {metrics.queue.queued} · 运行 {metrics.queue.running} · 失败{' '}
+                {metrics.queue.failed}
+              </div>
+            </div>
+          </div>
+          <div className="system-metrics-title">慢请求（≥ 500 ms，最近 50 条）</div>
+          <Table<SlowRequest>
+            className="oij-table"
+            rowKey={(row) => `${row.at}-${row.method}-${row.url}`}
+            size="small"
+            columns={SLOW_REQUEST_COLUMNS}
+            dataSource={metrics.slowRequests}
+            pagination={false}
+            locale={{ emptyText: '暂无慢请求' }}
           />
         </>
       )}
@@ -767,6 +929,7 @@ export function AdminSystemPage() {
         defaultActiveKey="diagnostics"
         items={[
           { key: 'diagnostics', label: '诊断', children: <DiagnosticsPanel /> },
+          { key: 'metrics', label: '指标', children: <MetricsPanel /> },
           { key: 'settings', label: '设置', children: <SettingsPanel /> },
           { key: 'backups', label: '备份', children: <BackupsPanel /> },
         ]}

@@ -8,6 +8,7 @@ import {
   type PersistedSettings,
 } from '../services/settings.js';
 import { createBackup, getDiagnostics, listBackups, requestRestore, RestoreError } from '../services/system-ops.js';
+import { getRuntimeMetrics } from '../services/metrics.js';
 import { listAuditLogs } from '../storage/repos/audit.js';
 
 export function registerAdminSystemRoutes(
@@ -38,6 +39,12 @@ export function registerAdminSystemRoutes(
     '/api/admin/system/diagnostics',
     { preHandler: options.adminGuard },
     async () => ({ ok: true, data: getDiagnostics(options.db, options.config) }),
+  );
+
+  app.get(
+    '/api/admin/system/metrics',
+    { preHandler: options.adminGuard },
+    async () => ({ ok: true, data: getRuntimeMetrics(options.db, options.config) }),
   );
 
   app.get(
