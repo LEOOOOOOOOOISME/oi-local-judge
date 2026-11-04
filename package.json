@@ -17,6 +17,7 @@
     "bench": "node tools/bench/run-all.mjs",
     "bench:compile": "node tools/bench-compile.mjs",
     "bench:concurrency": "tsx tools/bench/concurrency.mjs",
+    "bench:online": "tsx tools/bench/online.mjs",
     "seed": "tsx tools/seed/seed.ts",
     "seed:batch": "node tools/seed/make-batch-zip.mjs",
     "seed:batch:multi": "node tools/seed/make-batch-multi-zip.mjs",
