@@ -338,14 +338,15 @@ export function listClassesForUser(db: DatabaseSync, userId: number): TeamDto[] 
 }
 
 /**
- * 管理员/比赛管理员的全量团队搜索。
+ * 管理员/比赛管理员的全量组搜索（班级与团队共用 `teams` 表）。
  *
- * 与 {@link listTeamsForUser} 的“只返回我加入的团队”语义完全隔离；
- * `query` 按团队名模糊匹配，`limit` 默认 20、最大 100。
+ * 与 {@link listTeamsForUser} 的“只返回我加入的组”语义完全隔离；
+ * `query` 按名称模糊匹配，`kind` 可只返回班级或团队，
+ * `limit` 默认 20、最大 100。
  */
 export function searchTeams(
   db: DatabaseSync,
-  filter: { query?: string; limit?: number } = {},
+  filter: { query?: string; limit?: number; kind?: 'team' | 'class' } = {},
 ): AdminTeamDto[] {
   return searchTeamRows(db, filter).map((row) => ({
     id: row.id,

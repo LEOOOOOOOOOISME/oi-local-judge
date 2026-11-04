@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api/client';
 import type {
+  AdminGroupSummary,
   ClassSummary,
   TeamSummary,
   TrainingPlanItemProgress,
   TrainingPlanSummary,
 } from '../api/types';
 import {
+  adminGroupOptionLabel,
+  adminGroupsPath,
   buildItemProgressMap,
+  canSearchAllGroups,
   describeTrainingPlanError,
   filterTrainingPlans,
   isTrainingPlanOrderDirty,
@@ -40,6 +44,19 @@ function makeTeam(overrides: Partial<TeamSummary>): TeamSummary {
     createdAt: 0,
     memberCount: 1,
     role: 'member',
+    ...overrides,
+  };
+}
+
+function makeAdminGroup(overrides: Partial<AdminGroupSummary>): AdminGroupSummary {
+  return {
+    id: 1,
+    name: 'Class A',
+    kind: 'class',
+    ownerId: 1,
+    allowContest: true,
+    memberCount: 1,
+    createdAt: 0,
     ...overrides,
   };
 }
@@ -128,6 +145,39 @@ describe('manageableGroups', () => {
     );
 
     expect(groups.map((group) => group.id)).toEqual([1, 10]);
+  });
+});
+
+describe('canSearchAllGroups', () => {
+  it('is enabled for admins and contest managers only', () => {
+    expect(canSearchAllGroups('admin')).toBe(true);
+    expect(canSearchAllGroups('contestmanager')).toBe(true);
+    expect(canSearchAllGroups('setter')).toBe(false);
+    expect(canSearchAllGroups('contestant')).toBe(false);
+    expect(canSearchAllGroups(undefined)).toBe(false);
+    expect(canSearchAllGroups(null)).toBe(false);
+  });
+});
+
+describe('adminGroupOptionLabel', () => {
+  it('prefixes the group kind', () => {
+    expect(adminGroupOptionLabel(makeAdminGroup({ kind: 'class', name: '高一(1)班' }))).toBe(
+      '班级 · 高一(1)班',
+    );
+    expect(adminGroupOptionLabel(makeAdminGroup({ kind: 'team', name: 'Alpha' }))).toBe(
+      '团队 · Alpha',
+    );
+  });
+});
+
+describe('adminGroupsPath', () => {
+  it('builds the search path with encoded query and optional kind/limit', () => {
+    expect(adminGroupsPath({})).toBe('/api/admin/groups');
+    expect(adminGroupsPath({ kind: 'class', query: ' alpha ', limit: 20 })).toBe(
+      '/api/admin/groups?kind=class&query=alpha&limit=20',
+    );
+    expect(adminGroupsPath({ query: 'a&b' })).toBe('/api/admin/groups?query=a%26b');
+    expect(adminGroupsPath({ query: '  ' })).toBe('/api/admin/groups');
   });
 });
 

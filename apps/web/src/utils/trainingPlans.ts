@@ -1,6 +1,8 @@
 import { ApiError } from '../api/client';
 import type {
+  AdminGroupSummary,
   ClassSummary,
+  Role,
   TeamSummary,
   TrainingPlanGroupKind,
   TrainingPlanItem,
@@ -101,6 +103,38 @@ export function manageableGroups(
       label: `${TRAINING_PLAN_GROUP_KIND_LABEL.team} · ${item.name}`,
     }));
   return [...classGroups, ...teamGroups];
+}
+
+/**
+ * 管理员/比赛管理员可搜索全量班级与团队。
+ *
+ * 与后端 `GET /api/admin/groups` 的守卫保持一致；普通教练/队长仍然只使用
+ * `/api/classes` 与 `/api/teams` 返回的“我可管理的组”。
+ */
+export function canSearchAllGroups(role: Role | undefined | null): boolean {
+  return role === 'admin' || role === 'contestmanager';
+}
+
+/** 全量组搜索结果的展示标签，例如“班级 · 高一(1)班”。 */
+export function adminGroupOptionLabel(
+  group: Pick<AdminGroupSummary, 'kind' | 'name'>,
+): string {
+  return `${TRAINING_PLAN_GROUP_KIND_LABEL[group.kind]} · ${group.name}`;
+}
+
+/** 构造 `GET /api/admin/groups` 的路径；`query` 会做 URL 编码。 */
+export function adminGroupsPath(params: {
+  kind?: TrainingPlanGroupKind;
+  query?: string;
+  limit?: number;
+}): string {
+  const search = new URLSearchParams();
+  if (params.kind !== undefined) search.set('kind', params.kind);
+  const query = params.query?.trim() ?? '';
+  if (query !== '') search.set('query', query);
+  if (params.limit !== undefined) search.set('limit', String(params.limit));
+  const suffix = search.toString();
+  return suffix === '' ? '/api/admin/groups' : `/api/admin/groups?${suffix}`;
 }
 
 /** 完成度百分比（0~100，四舍五入）；没有题目时为 0。 */
