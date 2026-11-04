@@ -250,6 +250,32 @@ CREATE TABLE IF NOT EXISTS problem_set_shares(
 );
 CREATE INDEX IF NOT EXISTS idx_problem_set_shares_grantee
   ON problem_set_shares(grantee_type, grantee_id);
+CREATE TABLE IF NOT EXISTS training_plans(
+  id INTEGER PRIMARY KEY,
+  group_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  starts_at INTEGER,
+  ends_at INTEGER,
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_training_plans_group
+  ON training_plans(group_id, id);
+CREATE TABLE IF NOT EXISTS training_plan_items(
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  target_score INTEGER NOT NULL,
+  due_at INTEGER,
+  created_at INTEGER NOT NULL,
+  UNIQUE(plan_id, problem_id),
+  FOREIGN KEY(plan_id) REFERENCES training_plans(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_training_plan_items_plan
+  ON training_plan_items(plan_id, ordinal);
 `;
 
 export function migrate(db: DatabaseSync): void {
