@@ -41,6 +41,14 @@
   color: var(--text);
 }
 
+/* 班级设置弹窗：左侧危险操作、右侧取消/保存。 */
+.class-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 /* 教练工作台骨架：统计占位与训练/错题 Tab */
 .class-workbench-note {
   margin-bottom: 12px;

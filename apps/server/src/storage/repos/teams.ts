@@ -253,6 +253,27 @@ export function updateTeamOwner(db: DatabaseSync, teamId: number, ownerId: numbe
   db.prepare('UPDATE teams SET owner_id = ? WHERE id = ?').run(ownerId, teamId);
 }
 
+/** Updates the mutable settings of a group (name and/or the contest switch). */
+export function updateTeamSettings(
+  db: DatabaseSync,
+  teamId: number,
+  input: { name?: string; allowContest?: boolean },
+): void {
+  const assignments: string[] = [];
+  const params: Array<string | number> = [];
+  if (input.name !== undefined) {
+    assignments.push('name = ?');
+    params.push(input.name);
+  }
+  if (input.allowContest !== undefined) {
+    assignments.push('allow_contest = ?');
+    params.push(input.allowContest ? 1 : 0);
+  }
+  if (assignments.length === 0) return;
+  params.push(teamId);
+  db.prepare(`UPDATE teams SET ${assignments.join(', ')} WHERE id = ?`).run(...params);
+}
+
 export function deleteTeamWithMembers(db: DatabaseSync, teamId: number): void {
   db.prepare('DELETE FROM contest_teams WHERE team_id = ?').run(teamId);
   db.prepare('DELETE FROM team_members WHERE team_id = ?').run(teamId);

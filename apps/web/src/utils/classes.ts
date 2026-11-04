@@ -94,6 +94,17 @@ export function canManageClassCoaches(input: ClassPermissionInput): boolean {
   return isClassOwner(input);
 }
 
+/**
+ * 是否可修改或删除班级本身（名称、参赛开关、删除班级）。
+ *
+ * 与后端 `updateClass` / `deleteClass` 对齐：仅管理员与班级创建者可以；
+ * 其他教练只能维护名单。
+ */
+export function canManageClassSettings(input: ClassPermissionInput): boolean {
+  if (input.isAdmin) return true;
+  return isClassOwner(input);
+}
+
 /** 把班级接口错误码翻译成可读文案；未知错误回退到服务端 message。 */
 export function describeClassError(error: unknown, fallback: string): string {
   if (error instanceof ApiError) {

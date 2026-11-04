@@ -1444,6 +1444,12 @@ export interface CreateClassResult {
   id: number;
 }
 
+/** PATCH /api/classes/:id：班级创建者或管理员可修改。 */
+export interface UpdateClassRequest {
+  name?: string;
+  allowContest?: boolean;
+}
+
 export interface AddClassMemberRequest {
   username: string;
   role?: ClassRole;
