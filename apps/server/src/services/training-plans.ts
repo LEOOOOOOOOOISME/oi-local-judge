@@ -103,7 +103,7 @@ export interface TrainingPlanMemberProgress extends TrainingPlanProgressSummary 
 export interface TrainingPlanDetail extends TrainingPlanSummary {
   items: TrainingPlanItemDto[];
   myItems: TrainingPlanItemProgress[];
-  /** Every member's progress; present only for managers and administrators. */
+  /** Every member's progress; present only for group managers and platform managers. */
   memberProgress?: TrainingPlanMemberProgress[];
 }
 
@@ -203,14 +203,18 @@ function requireGroup(db: DatabaseSync, groupId: number) {
   return group;
 }
 
-/** Only the group owner, its coach/captain and administrators may manage a plan. */
+/**
+ * Only the group owner, its coach/captain and platform managers (admins and
+ * contest managers) may manage a plan. `canManageAnyGroup` is the caller's
+ * platform-wide flag; every other actor is checked against the target group.
+ */
 function assertCanManage(
   db: DatabaseSync,
   plan: TrainingPlanViewRow,
   actorId: number,
-  isAdmin: boolean,
+  canManageAnyGroup: boolean,
 ): void {
-  if (!canManageGroup(db, plan.group_id, actorId, isAdmin)) {
+  if (!canManageGroup(db, plan.group_id, actorId, canManageAnyGroup)) {
     throw new TrainingPlanError(
       'TRAINING_PLAN_FORBIDDEN',
       403,
@@ -219,14 +223,14 @@ function assertCanManage(
   }
 }
 
-/** Members of the target group (and administrators) may read a plan. */
+/** Members of the target group and platform managers may read a plan. */
 function canViewPlan(
   db: DatabaseSync,
   plan: TrainingPlanViewRow,
   userId: number,
-  isAdmin: boolean,
+  canManageAnyGroup: boolean,
 ): boolean {
-  if (isAdmin) return true;
+  if (canManageAnyGroup) return true;
   if (getTeamMember(db, plan.group_id, userId)) return true;
   return canManageGroup(db, plan.group_id, userId, false);
 }
@@ -304,13 +308,13 @@ export interface CreateTrainingPlanInput {
   endsAt?: unknown;
   items?: unknown;
   actorId: number;
-  isAdmin: boolean;
+  canManageAnyGroup: boolean;
   now?: number;
 }
 
 export function createTrainingPlan(db: DatabaseSync, input: CreateTrainingPlanInput): number {
   requireGroup(db, input.groupId);
-  if (!canManageGroup(db, input.groupId, input.actorId, input.isAdmin)) {
+  if (!canManageGroup(db, input.groupId, input.actorId, input.canManageAnyGroup)) {
     throw new TrainingPlanError(
       'TRAINING_PLAN_FORBIDDEN',
       403,
@@ -462,7 +466,7 @@ function toSummary(
   db: DatabaseSync,
   plan: TrainingPlanViewRow,
   userId: number,
-  isAdmin: boolean,
+  canManageAnyGroup: boolean,
   itemCount: number,
   myProgress: TrainingPlanProgressSummary,
 ): TrainingPlanSummary {
@@ -479,14 +483,14 @@ function toSummary(
     createdAt: plan.created_at,
     updatedAt: plan.updated_at,
     itemCount,
-    canManage: canManageGroup(db, plan.group_id, userId, isAdmin),
+    canManage: canManageGroup(db, plan.group_id, userId, canManageAnyGroup),
     myProgress,
   };
 }
 
 export function listTrainingPlans(
   db: DatabaseSync,
-  input: { userId: number; isAdmin?: boolean; now?: number },
+  input: { userId: number; canManageAnyGroup?: boolean; now?: number },
 ): TrainingPlanSummary[] {
   const now = input.now ?? Date.now();
   return listTrainingPlanRowsForUser(db, input.userId).map((plan) => {
@@ -496,7 +500,7 @@ export function listTrainingPlans(
       db,
       plan,
       input.userId,
-      input.isAdmin ?? false,
+      input.canManageAnyGroup ?? false,
       items.length,
       summarize(myItems),
     );
@@ -505,17 +509,24 @@ export function listTrainingPlans(
 
 export function getTrainingPlan(
   db: DatabaseSync,
-  input: { planId: number; userId: number; isAdmin: boolean; now?: number },
+  input: { planId: number; userId: number; canManageAnyGroup: boolean; now?: number },
 ): TrainingPlanDetail | null {
   const plan = getTrainingPlanRow(db, input.planId);
   if (!plan) return null;
-  if (!canViewPlan(db, plan, input.userId, input.isAdmin)) return null;
+  if (!canViewPlan(db, plan, input.userId, input.canManageAnyGroup)) return null;
   const now = input.now ?? Date.now();
   const itemRows = listTrainingPlanItemRows(db, plan.id);
   const myItems = progressForUser(db, plan, itemRows, input.userId, now);
-  const canManage = canManageGroup(db, plan.group_id, input.userId, input.isAdmin);
+  const canManage = canManageGroup(db, plan.group_id, input.userId, input.canManageAnyGroup);
   const detail: TrainingPlanDetail = {
-    ...toSummary(db, plan, input.userId, input.isAdmin, itemRows.length, summarize(myItems)),
+    ...toSummary(
+      db,
+      plan,
+      input.userId,
+      input.canManageAnyGroup,
+      itemRows.length,
+      summarize(myItems),
+    ),
     items: itemRows.map(itemToDto),
     myItems,
   };
@@ -542,13 +553,13 @@ export function updateTrainingPlan(
   input: {
     planId: number;
     actorId: number;
-    isAdmin: boolean;
+    canManageAnyGroup: boolean;
     patch: UpdateTrainingPlanPatch;
     now?: number;
   },
 ): void {
   const plan = requirePlan(db, input.planId);
-  assertCanManage(db, plan, input.actorId, input.isAdmin);
+  assertCanManage(db, plan, input.actorId, input.canManageAnyGroup);
 
   const patch: {
     title?: string;
@@ -579,10 +590,10 @@ export function updateTrainingPlan(
 
 export function deleteTrainingPlan(
   db: DatabaseSync,
-  input: { planId: number; actorId: number; isAdmin: boolean },
+  input: { planId: number; actorId: number; canManageAnyGroup: boolean },
 ): void {
   const plan = requirePlan(db, input.planId);
-  assertCanManage(db, plan, input.actorId, input.isAdmin);
+  assertCanManage(db, plan, input.actorId, input.canManageAnyGroup);
   transaction(db, () => {
     deleteTrainingPlanGraph(db, input.planId);
   });
@@ -593,7 +604,7 @@ export function addTrainingPlanItem(
   input: {
     planId: number;
     actorId: number;
-    isAdmin: boolean;
+    canManageAnyGroup: boolean;
     problemId: unknown;
     targetScore?: unknown;
     dueAt?: unknown;
@@ -601,7 +612,7 @@ export function addTrainingPlanItem(
   },
 ): number {
   const plan = requirePlan(db, input.planId);
-  assertCanManage(db, plan, input.actorId, input.isAdmin);
+  assertCanManage(db, plan, input.actorId, input.canManageAnyGroup);
 
   const problemId = input.problemId;
   if (typeof problemId !== 'number' || !Number.isInteger(problemId) || problemId <= 0) {
@@ -644,10 +655,16 @@ export function addTrainingPlanItem(
 
 export function removeTrainingPlanItem(
   db: DatabaseSync,
-  input: { planId: number; itemId: number; actorId: number; isAdmin: boolean; now?: number },
+  input: {
+    planId: number;
+    itemId: number;
+    actorId: number;
+    canManageAnyGroup: boolean;
+    now?: number;
+  },
 ): void {
   const plan = requirePlan(db, input.planId);
-  assertCanManage(db, plan, input.actorId, input.isAdmin);
+  assertCanManage(db, plan, input.actorId, input.canManageAnyGroup);
   if (!getTrainingPlanItemRow(db, input.planId, input.itemId)) {
     throw new TrainingPlanError(
       'TRAINING_PLAN_ITEM_NOT_FOUND',
@@ -668,12 +685,12 @@ export function reorderTrainingPlanItems(
     planId: number;
     itemIds: unknown;
     actorId: number;
-    isAdmin: boolean;
+    canManageAnyGroup: boolean;
     now?: number;
   },
 ): void {
   const plan = requirePlan(db, input.planId);
-  assertCanManage(db, plan, input.actorId, input.isAdmin);
+  assertCanManage(db, plan, input.actorId, input.canManageAnyGroup);
 
   if (!Array.isArray(input.itemIds)) {
     throw new TrainingPlanError('TRAINING_PLAN_ITEM_INVALID', 400, 'itemIds must be an array');
@@ -718,10 +735,10 @@ export function reorderTrainingPlanItems(
 
 export function getTrainingPlanProgress(
   db: DatabaseSync,
-  input: { planId: number; actorId: number; isAdmin: boolean; now?: number },
+  input: { planId: number; actorId: number; canManageAnyGroup: boolean; now?: number },
 ): TrainingPlanProgress {
   const plan = requirePlan(db, input.planId);
-  assertCanManage(db, plan, input.actorId, input.isAdmin);
+  assertCanManage(db, plan, input.actorId, input.canManageAnyGroup);
   const itemRows = listTrainingPlanItemRows(db, plan.id);
   const members = progressForMembers(
     db,
