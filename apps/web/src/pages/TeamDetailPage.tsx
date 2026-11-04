@@ -25,6 +25,7 @@ import { useAuth } from '../auth/AuthContext';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { TeamProblemSetsPanel } from '../components/TeamProblemSetsPanel';
+import { TeamProblemsPanel } from '../components/TeamProblemsPanel';
 import { formatDateTime } from '../utils/format';
 import '../styles/teams.css';
 
@@ -414,6 +415,11 @@ export function TeamDetailPage() {
                 </Card>
               </Space>
             ),
+          },
+          {
+            key: 'problems',
+            label: '题目',
+            children: <TeamProblemsPanel teamId={teamId} />,
           },
           {
             key: 'problem-sets',

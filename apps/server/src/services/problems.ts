@@ -153,6 +153,8 @@ export function problemToSummary(row: ProblemRow): ProblemSummaryDto {
     tags: JSON.parse(row.tags_json) as string[],
     timeMs: row.time_ms,
     memoryMb: row.memory_mb,
+    ownerType: row.owner_type,
+    ownerId: row.owner_id,
   };
 }
 
