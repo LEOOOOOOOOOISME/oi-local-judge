@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { getContest } from '../storage/repos/contests.js';
+import { invalidateOfficialRanking } from './official-ranking.js';
 
 /**
  * After a successful hack the official table is frozen for a configurable
@@ -25,6 +26,8 @@ export function freezeOfficialAfterHack(
   if (minutes <= 0) return contest.official_frozen_until ?? null;
   const until = Math.max(contest.official_frozen_until ?? 0, now + minutes * 60_000);
   db.prepare('UPDATE contests SET official_frozen_until = ? WHERE id = ?').run(until, contestId);
+  // The freeze deadline is part of the ranking response.
+  invalidateOfficialRanking(db, contestId);
   return until;
 }
 

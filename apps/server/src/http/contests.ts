@@ -25,7 +25,7 @@ import {
   startContest,
   unfreezeContest,
 } from '../services/contests.js';
-import { getOfficialRanking } from '../services/official-ranking.js';
+import { getOfficialRanking, invalidateOfficialRanking } from '../services/official-ranking.js';
 import { getCorrectionRanking } from '../services/correction-ranking.js';
 import { getTeamRanking } from '../services/team-ranking.js';
 import {
@@ -550,6 +550,7 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
       addParticipant(options.db, contestId, user.id);
       added.push(user.id);
     }
+    invalidateOfficialRanking(options.db, contestId);
     return { ok: true, data: { added, missing } };
   });
 
@@ -557,7 +558,9 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     '/api/admin/contests/:id/participants/:userId',
     { preHandler: guards },
     async (request) => {
-      removeParticipant(options.db, Number(request.params.id), Number(request.params.userId));
+      const contestId = Number(request.params.id);
+      removeParticipant(options.db, contestId, Number(request.params.userId));
+      invalidateOfficialRanking(options.db, contestId);
       return { ok: true, data: null };
     },
   );
@@ -577,6 +580,7 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
         });
       }
       deleteContest(options.db, contestId);
+      invalidateOfficialRanking(options.db, contestId);
       return { ok: true, data: null };
     },
   );
@@ -585,10 +589,12 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     Params: { id: string; userId: string };
     Body: { extraTime?: number; status?: string };
   }>('/api/admin/contests/:id/participants/:userId', { preHandler: guards }, async (request) => {
-    updateParticipant(options.db, Number(request.params.id), Number(request.params.userId), {
+    const contestId = Number(request.params.id);
+    updateParticipant(options.db, contestId, Number(request.params.userId), {
       extraTime: request.body?.extraTime,
       status: request.body?.status,
     });
+    invalidateOfficialRanking(options.db, contestId);
     return { ok: true, data: null };
   });
 
@@ -661,6 +667,7 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
           })),
       );
     }
+    invalidateOfficialRanking(options.db, contestId);
     return { ok: true, data: { id: contestId } };
   });
 }

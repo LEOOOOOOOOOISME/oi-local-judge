@@ -25,6 +25,7 @@ import { judgeTestcase, JUDGE_WALL_CLOCK_BUFFER_MS, resolveDataPath } from './pi
 import { runSandboxed } from './runner.js';
 import { runValidator } from './validator.js';
 import { freezeOfficialAfterHack } from '../services/official-freeze.js';
+import { invalidateOfficialRanking } from '../services/official-ranking.js';
 
 export function recomputeOfficialCell(
   db: DatabaseSync,
@@ -32,6 +33,9 @@ export function recomputeOfficialCell(
   userId: number,
   problemId: number,
 ): void {
+  // Synchronous from here on, so clearing first cannot let a reader re-cache
+  // the pre-hack result between the invalidation and the upserts below.
+  invalidateOfficialRanking(db, contestId);
   const cell = getOfficialScore(db, contestId, userId, problemId);
   const remaining = listUnhackedContestSubmissions(db, contestId, userId, problemId);
   const best = remaining[0];
@@ -79,6 +83,9 @@ export function recomputeOfficialAfterHack(
   problemId: number,
   targetSubmissionId: number,
 ): void {
+  // See recomputeOfficialCell: invalidating before the synchronous upserts is
+  // equivalent to invalidating after them and covers every early return.
+  invalidateOfficialRanking(db, contestId);
   const cell = getOfficialScore(db, contestId, userId, problemId);
   if (!cell || cell.submission_id !== targetSubmissionId) return;
   const remaining = listUnhackedContestSubmissions(db, contestId, userId, problemId);

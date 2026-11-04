@@ -29,6 +29,7 @@ import {
 import { getProblem } from '../storage/repos/problems.js';
 import { getSubmission } from '../storage/repos/submissions.js';
 import { getUserByUsername } from '../storage/repos/users.js';
+import { invalidateOfficialRanking } from '../services/official-ranking.js';
 
 export interface ContestBatchRouteOptions {
   db: DatabaseSync;
@@ -455,6 +456,7 @@ export function registerContestBatchRoutes(
       }
       updateBatchJob(options.db, batchId, { status: 'published', mode });
       options.db.exec('COMMIT');
+      invalidateOfficialRanking(options.db, contestId);
       return { ok: true, data: { id: batchId, published, mode } };
     } catch (err) {
       options.db.exec('ROLLBACK');
@@ -510,6 +512,7 @@ export function registerContestBatchRoutes(
         existing.add(user.id);
         added.push(username);
       }
+      invalidateOfficialRanking(options.db, contestId);
       return { ok: true, data: { added, skipped, unknown } };
     },
   );
@@ -521,6 +524,7 @@ export function registerContestBatchRoutes(
       updateParticipant(options.db, Number(request.params.id), Number(request.params.userId), {
         hidden: request.body?.hidden,
       });
+      invalidateOfficialRanking(options.db, Number(request.params.id));
       return { ok: true, data: null };
     },
   );
@@ -534,6 +538,7 @@ export function registerContestBatchRoutes(
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       }
       archiveContest(options.db, contestId);
+      invalidateOfficialRanking(options.db, contestId);
       return { ok: true, data: null };
     },
   );
