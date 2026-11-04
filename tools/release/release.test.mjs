@@ -9,9 +9,15 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { strFromU8, unzipSync } from 'fflate';
 import { parsePortableArgs, parseReleaseArgs, resolveGit } from './args.mjs';
+import {
+  LOCK_PACKAGE_KEYS,
+  VERSIONED_PACKAGE_FILES,
+  bumpVersionFiles,
+  validateVersion,
+} from './bump-version.mjs';
 import { acquireBuildLock, isProcessAlive, releaseBuildLock } from './lock.mjs';
 import {
   collectZipEntries,
@@ -28,6 +34,72 @@ function makeTemporaryDirectory(prefix = 'oij-release-test-') {
   const directory = mkdtempSync(join(tmpdir(), prefix));
   temporaryDirectories.push(directory);
   return directory;
+}
+
+function writeJsonFile(path, value) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+}
+
+function makeVersionFixture() {
+  const root = makeTemporaryDirectory('oij-bump-test-');
+  const version = '1.1.0-rc.4';
+  const manifests = {
+    'package.json': {
+      name: 'oi-local-judge',
+      version,
+      private: true,
+      workspaces: ['apps/*', 'packages/*'],
+      dependencies: { fflate: '^0.8.3' },
+    },
+    'apps/server/package.json': {
+      name: '@oij/server',
+      version,
+      dependencies: { fastify: '^5.0.0' },
+    },
+    'apps/web/package.json': {
+      name: '@oij/web',
+      version,
+      dependencies: { react: '18.3.1' },
+    },
+    'apps/desktop/package.json': {
+      name: '@oij/desktop',
+      version,
+      devDependencies: { electron: '^45.2.1' },
+    },
+    'packages/shared/package.json': {
+      name: '@oij/shared',
+      version,
+    },
+  };
+  for (const [relativePath, value] of Object.entries(manifests)) {
+    writeJsonFile(join(root, relativePath), value);
+  }
+
+  writeJsonFile(join(root, 'package-lock.json'), {
+    name: 'oi-local-judge',
+    version,
+    lockfileVersion: 3,
+    requires: true,
+    packages: {
+      '': {
+        name: 'oi-local-judge',
+        version,
+        dependencies: { fflate: '^0.8.3' },
+      },
+      'apps/server': {
+        name: '@oij/server',
+        version,
+        dependencies: { fastify: '^5.0.0' },
+      },
+      'apps/web': { name: '@oij/web', version, dependencies: { react: '18.3.1' } },
+      'apps/desktop': { name: '@oij/desktop', version },
+      'packages/shared': { name: '@oij/shared', version },
+      'node_modules/fastify': { version: '5.6.2' },
+    },
+  });
+
+  return { root, version };
 }
 
 afterEach(() => {
@@ -116,6 +188,74 @@ describe('resolveGit', () => {
       }),
     ).toBe('C:\\Program Files\\Git\\cmd\\git.exe');
     expect(resolveGit({ env: {}, exists: () => false })).toBe('git');
+  });
+});
+
+describe('bumpVersionFiles', () => {
+  it('accepts stable and prerelease semver and rejects malformed versions', () => {
+    expect(validateVersion('1.1.0-rc.5')).toBe('1.1.0-rc.5');
+    expect(validateVersion('1.2.3')).toBe('1.2.3');
+    expect(validateVersion('2.0.0-alpha.1+build.7')).toBe('2.0.0-alpha.1+build.7');
+
+    for (const invalid of [
+      '',
+      '1.1',
+      'v1.1.0',
+      '01.1.0',
+      '1.01.0',
+      '1.1.0-',
+      '1.1.0-01',
+      '1.1.0+',
+      'not-a-version',
+    ]) {
+      expect(() => validateVersion(invalid)).toThrow(/invalid semver version/);
+    }
+  });
+
+  it('reports changes under --dry-run without touching any file', () => {
+    const { root } = makeVersionFixture();
+    const files = [...VERSIONED_PACKAGE_FILES, 'package-lock.json'];
+    const before = new Map(
+      files.map((relativePath) => [relativePath, readFileSync(join(root, relativePath), 'utf8')]),
+    );
+
+    const result = bumpVersionFiles(root, '1.2.0-rc.1', { dryRun: true });
+
+    expect(result.dryRun).toBe(true);
+    expect(result.changes).toHaveLength(VERSIONED_PACKAGE_FILES.length);
+    expect(result.lock.entries).toHaveLength(LOCK_PACKAGE_KEYS.length);
+    for (const relativePath of files) {
+      expect(readFileSync(join(root, relativePath), 'utf8')).toBe(before.get(relativePath));
+    }
+  });
+
+  it('updates the five manifests and only the matching lockfile entries', () => {
+    const { root } = makeVersionFixture();
+    const nextVersion = '1.2.0-rc.1';
+
+    const result = bumpVersionFiles(root, nextVersion);
+
+    expect(result.dryRun).toBe(false);
+    expect(result.version).toBe(nextVersion);
+    expect(result.changes).toHaveLength(VERSIONED_PACKAGE_FILES.length);
+
+    for (const relativePath of VERSIONED_PACKAGE_FILES) {
+      const text = readFileSync(join(root, relativePath), 'utf8');
+      expect(JSON.parse(text).version).toBe(nextVersion);
+      expect(text.endsWith('\n')).toBe(true);
+      expect(text).toContain('\n  "version"');
+    }
+
+    const rootManifest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    expect(rootManifest.dependencies.fflate).toBe('^0.8.3');
+
+    const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
+    expect(lock.version).toBe(nextVersion);
+    for (const key of LOCK_PACKAGE_KEYS) {
+      expect(lock.packages[key].version).toBe(nextVersion);
+    }
+    expect(lock.packages['node_modules/fastify'].version).toBe('5.6.2');
+    expect(lock.packages['apps/server'].dependencies.fastify).toBe('^5.0.0');
   });
 });
 
