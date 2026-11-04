@@ -19,6 +19,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPut } from '../api/client';
 import type {
   BackupEntry,
+  BackupKind,
   DiagnosticCheck,
   DiagnosticsReport,
   DiagnosticStatus,
@@ -30,6 +31,9 @@ import type {
   SystemSettingsEffective,
   SystemSettingsPatch,
   SystemSettingsUpdateResult,
+  UpdateCheckFailure,
+  UpdateCheckResult,
+  UpdatePrepareResult,
 } from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
@@ -460,6 +464,180 @@ function LearningStatsPanel() {
   );
 }
 
+function isUpdateFailure(result: UpdateCheckResult): result is UpdateCheckFailure {
+  return 'error' in result;
+}
+
+/**
+ * 升级页：只做版本检查与升级前备份，不下载、不安装任何更新。
+ * 后端把网络失败封装在 200 响应中，这里按结构化错误友好展示。
+ */
+function UpgradePanel() {
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null,
+  );
+
+  const updateQuery = useQuery({
+    queryKey: ['admin-system-update-check'],
+    queryFn: () => apiGet<UpdateCheckResult>('/api/admin/system/update-check'),
+    // 检查会访问 GitHub；失败时不做自动重试，由用户点“检查更新”重试。
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const result = updateQuery.data;
+  const info = result && !isUpdateFailure(result) ? result : null;
+  const failure = result && isUpdateFailure(result) ? result : null;
+
+  const prepareMutation = useMutation({
+    mutationFn: () => apiPost<UpdatePrepareResult>('/api/admin/system/update/prepare'),
+    onSuccess: (prepared) => {
+      const text = `升级前备份已创建：${prepared.backup.id}（${formatBytes(
+        prepared.backup.sizeBytes,
+      )}）。当前版本 ${prepared.currentVersion}；未下载或安装任何更新。`;
+      setFeedback({ type: 'success', text });
+      message.success('升级前备份已创建');
+      void queryClient.invalidateQueries({ queryKey: ['admin-system-backups'] });
+    },
+    onError: (error) => {
+      const text = error instanceof Error ? error.message : '升级前备份创建失败';
+      setFeedback({ type: 'error', text });
+      message.error(text);
+    },
+  });
+
+  return (
+    <Card
+      className="oij-card"
+      title="版本升级"
+      extra={
+        <Button
+          icon={<ReloadOutlined />}
+          loading={updateQuery.isFetching}
+          onClick={() => void updateQuery.refetch()}
+        >
+          检查更新
+        </Button>
+      }
+    >
+      <Alert
+        className="system-settings-note"
+        type="info"
+        showIcon
+        message="不会自动下载或安装更新"
+        description="这里只检查 GitHub Releases 的最新版本，并按需创建升级前备份。升级本身请按 Release 页面说明手动完成。"
+      />
+
+      {updateQuery.isError ? (
+        <ErrorResult error={updateQuery.error} onRetry={() => void updateQuery.refetch()} />
+      ) : updateQuery.isPending ? (
+        <PageLoading tip="正在检查最新版本…" />
+      ) : (
+        <>
+          <div className="system-stat-grid">
+            <div className="system-stat">
+              <div className="system-stat-label">当前版本</div>
+              <div className="system-stat-value mono">{info?.current ?? failure?.current ?? '—'}</div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">最新版本</div>
+              <div className="system-stat-value mono">{info?.latest ?? '—'}</div>
+            </div>
+            <div className={`system-stat ${info?.updateAvailable ? 'system-stat-warn' : ''}`}>
+              <div className="system-stat-label">更新状态</div>
+              <div className="system-stat-value system-stat-value-text">
+                {info ? (info.updateAvailable ? '有新版本可用' : '已是最新版本') : '检查失败'}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">上次检查</div>
+              <div className="system-stat-value system-stat-value-text">
+                {formatDateTime(info?.checkedAt ?? failure?.checkedAt)}
+              </div>
+            </div>
+          </div>
+
+          {failure ? (
+            <Alert
+              className="system-settings-note"
+              type="warning"
+              showIcon
+              message="检查更新失败"
+              description={`${failure.error}。请检查网络连接或稍后重试。`}
+            />
+          ) : null}
+
+          {info?.updateAvailable ? (
+            <Alert
+              className="system-settings-note"
+              type="success"
+              showIcon
+              message={`发现新版本 ${info.latest}`}
+              description={
+                <Space direction="vertical" size={4}>
+                  <span>
+                    {info.publishedAt ? `发布时间：${formatDateTime(info.publishedAt)}。` : ''}
+                    升级前建议先创建备份。
+                  </span>
+                  {info.url ? (
+                    <a href={info.url} target="_blank" rel="noreferrer">
+                      查看 Release 与下载说明
+                    </a>
+                  ) : null}
+                </Space>
+              }
+            />
+          ) : info ? (
+            <Alert
+              className="system-settings-note"
+              type="success"
+              showIcon
+              message="已是最新版本"
+              description={`当前版本 ${info.current} 不早于最新发布版本 ${info.latest}。`}
+            />
+          ) : null}
+
+          {info?.notes ? (
+            <div className="system-settings-note">
+              <div className="system-metrics-title">Release 说明</div>
+              <div style={{ whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto' }}>
+                {info.notes}
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
+
+      {feedback ? (
+        <Alert
+          className="system-settings-note"
+          type={feedback.type}
+          showIcon
+          message={feedback.text}
+          closable
+          onClose={() => setFeedback(null)}
+        />
+      ) : null}
+
+      <div className="system-settings-footer">
+        <span className="muted">
+          创建升级前备份会把数据库与 problems / submissions / plugins / hacks 目录复制到 backups 下。
+        </span>
+        <Button
+          type="primary"
+          loading={prepareMutation.isPending}
+          onClick={() => prepareMutation.mutate()}
+        >
+          创建升级前备份
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
 function SettingsPanel() {
   const { message } = App.useApp();
   const queryClient = useQueryClient();
@@ -729,6 +907,13 @@ function SettingsPanel() {
   );
 }
 
+const BACKUP_KIND_META: Record<BackupKind, { label: string; color?: string }> = {
+  manual: { label: '手动备份' },
+  auto: { label: '自动备份', color: 'blue' },
+  'pre-restore': { label: '恢复前快照', color: 'gold' },
+  'pre-upgrade': { label: '升级前备份', color: 'purple' },
+};
+
 const BACKUP_COLUMNS: TableColumnsType<BackupEntry> = [
   {
     title: '备份 ID',
@@ -744,14 +929,12 @@ const BACKUP_COLUMNS: TableColumnsType<BackupEntry> = [
   },
   {
     title: '类型',
-    dataIndex: 'manifest',
+    dataIndex: 'kind',
     width: 130,
-    render: (manifest: Record<string, unknown>) =>
-      manifest.kind === 'pre-restore' ? (
-        <Tag color="gold">恢复前快照</Tag>
-      ) : (
-        <Tag>手动备份</Tag>
-      ),
+    render: (value: BackupKind) => {
+      const meta = BACKUP_KIND_META[value] ?? BACKUP_KIND_META.manual;
+      return <Tag color={meta.color}>{meta.label}</Tag>;
+    },
   },
   {
     title: '大小',
@@ -942,7 +1125,7 @@ function BackupsPanel() {
               </span>
               <span>
                 类型：
-                {restoreTarget.manifest.kind === 'pre-restore' ? '恢复前快照' : '手动备份'}
+                {BACKUP_KIND_META[restoreTarget.kind]?.label ?? '手动备份'}
               </span>
             </div>
             <div>
@@ -980,7 +1163,7 @@ export function AdminSystemPage() {
       <PageHead
         breadcrumb={[{ label: '管理', to: '/admin/problems' }, { label: '系统运维' }]}
         title="系统运维"
-        subtitle="查看运行环境诊断，修改需要重启生效的系统设置，并创建或恢复数据备份。"
+        subtitle="查看运行环境诊断，修改需要重启生效的系统设置，检查版本更新并创建升级前备份。"
       />
       <Tabs
         className="admin-tabs"
@@ -989,6 +1172,7 @@ export function AdminSystemPage() {
           { key: 'diagnostics', label: '诊断', children: <DiagnosticsPanel /> },
           { key: 'metrics', label: '指标', children: <MetricsPanel /> },
           { key: 'learning-stats', label: '学习统计', children: <LearningStatsPanel /> },
+          { key: 'upgrade', label: '升级', children: <UpgradePanel /> },
           { key: 'settings', label: '设置', children: <SettingsPanel /> },
           { key: 'backups', label: '备份', children: <BackupsPanel /> },
         ]}
