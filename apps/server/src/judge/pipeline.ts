@@ -41,6 +41,7 @@ import {
 import { parseOutputAnswers, writeAnswerFiles } from './output-only.js';
 import { runInteractive } from './interactive.js';
 import { syncOnlineOfficialScore } from './official-score.js';
+import { invalidateOfficialRanking } from '../services/official-ranking.js';
 import { getAsset } from '../storage/repos/assets.js';
 import { runChecker, type CheckerMode } from './checker.js';
 import { runSandboxed } from './runner.js';
@@ -208,6 +209,22 @@ function publishUpdate(
   }
 }
 
+/**
+ * Drops the cached official ranking of the contest a submission belongs to.
+ * Runs after a judge result is persisted; a non-contest submission needs no
+ * invalidation. Failures are swallowed so caching can never break judging.
+ */
+function invalidateRankingForSubmission(db: DatabaseSync, submissionId: number): void {
+  try {
+    const submission = getSubmission(db, submissionId);
+    if (submission?.contest_id !== null && submission?.contest_id !== undefined) {
+      invalidateOfficialRanking(db, submission.contest_id);
+    }
+  } catch {
+    // A cache miss is always safe; a broken invalidation is not worth a failure.
+  }
+}
+
 function persistJudged(
   db: DatabaseSync,
   submissionId: number,
@@ -252,6 +269,7 @@ function persistJudged(
     results,
   });
   syncOnlineOfficialScore(db, submissionId);
+  invalidateRankingForSubmission(db, submissionId);
 }
 
 function markSubmissionFailed(
@@ -281,6 +299,7 @@ function markSubmissionFailed(
     memoryKb: 0,
     message: clipped,
   });
+  invalidateRankingForSubmission(db, submissionId);
 }
 
 /**
@@ -303,6 +322,7 @@ function markSubmissionCanceled(
     message: '',
     results: [],
   });
+  invalidateRankingForSubmission(db, submissionId);
 }
 
 /** Throws a recognizable error when the submission was canceled. */

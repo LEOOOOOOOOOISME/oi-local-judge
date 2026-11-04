@@ -72,7 +72,57 @@ function parseConfig(contest: ContestRow): {
   };
 }
 
-export async function getOfficialRanking(
+/** Default lifetime of a cached official ranking. */
+export const DEFAULT_RANKING_CACHE_TTL_MS = 1000;
+
+interface OfficialRankingCacheEntry {
+  dataDir: string;
+  expiresAt: number;
+  promise: Promise<OfficialRankingResult | null>;
+}
+
+const rankingCaches = new WeakMap<DatabaseSync, Map<number, OfficialRankingCacheEntry>>();
+
+function rankingCacheFor(db: DatabaseSync): Map<number, OfficialRankingCacheEntry> {
+  let cache = rankingCaches.get(db);
+  if (!cache) {
+    cache = new Map();
+    rankingCaches.set(db, cache);
+  }
+  return cache;
+}
+
+/**
+ * Reads `OIJ_RANKING_CACHE_MS` on every call so tests (and operators who set it
+ * before starting the process) can tune or disable the cache. Values below zero
+ * are clamped to zero, which turns every lookup into a miss.
+ */
+function rankingCacheTtlMs(): number {
+  const raw = process.env.OIJ_RANKING_CACHE_MS;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_RANKING_CACHE_TTL_MS;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed)) return DEFAULT_RANKING_CACHE_TTL_MS;
+  return Math.max(0, parsed);
+}
+
+/**
+ * Drops the cached official ranking for one contest, or for every contest of
+ * this database when `contestId` is omitted. Call it after any mutation that
+ * can change the ranking: judge results, hacks, official scores, contest
+ * status/config, participants or plugins.
+ */
+export function invalidateOfficialRanking(db: DatabaseSync, contestId?: number): void {
+  if (contestId === undefined) {
+    rankingCaches.delete(db);
+    return;
+  }
+  const cache = rankingCaches.get(db);
+  if (!cache) return;
+  cache.delete(contestId);
+  if (cache.size === 0) rankingCaches.delete(db);
+}
+
+export async function computeOfficialRanking(
   db: DatabaseSync,
   contestId: number,
   dataDir = process.cwd(),
@@ -216,4 +266,38 @@ export async function getOfficialRanking(
     officialFrozenUntil: contest.official_frozen_until,
     ...(pluginError ? { pluginError } : {}),
   };
+}
+
+/**
+ * Cached official ranking. Concurrent calls for the same database, contest and
+ * data directory share one in-flight computation, so a burst of page loads
+ * cannot stampede the database. Entries expire after `OIJ_RANKING_CACHE_MS`
+ * (default one second); explicit mutations call `invalidateOfficialRanking` for
+ * immediate consistency. `now` exists so tests can move the clock without
+ * timers; production callers never pass it.
+ *
+ * The returned object is shared between callers and must be treated as
+ * read-only.
+ */
+export function getOfficialRanking(
+  db: DatabaseSync,
+  contestId: number,
+  dataDir = process.cwd(),
+  now = Date.now(),
+): Promise<OfficialRankingResult | null> {
+  const cache = rankingCacheFor(db);
+  const cached = cache.get(contestId);
+  if (cached && cached.dataDir === dataDir && now < cached.expiresAt) {
+    return cached.promise;
+  }
+
+  let promise: Promise<OfficialRankingResult | null>;
+  promise = computeOfficialRanking(db, contestId, dataDir).catch((err: unknown) => {
+    // A rejected promise must not be cached, otherwise every retry within the
+    // TTL would replay the same failure.
+    if (cache.get(contestId)?.promise === promise) cache.delete(contestId);
+    throw err;
+  });
+  cache.set(contestId, { dataDir, expiresAt: now + rankingCacheTtlMs(), promise });
+  return promise;
 }

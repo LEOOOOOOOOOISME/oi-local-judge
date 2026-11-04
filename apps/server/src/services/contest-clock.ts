@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { listContests, setContestStatus } from '../storage/repos/contests.js';
+import { invalidateOfficialRanking } from './official-ranking.js';
 
 export interface ContestClockTransition {
   contestId: number;
@@ -38,6 +39,7 @@ export function tickContests(db: DatabaseSync, now = Date.now()): ContestClockTr
 
     if (to !== from) {
       setContestStatus(db, contest.id, to);
+      invalidateOfficialRanking(db, contest.id);
       transitions.push({ contestId: contest.id, from, to, at: now });
     }
   }

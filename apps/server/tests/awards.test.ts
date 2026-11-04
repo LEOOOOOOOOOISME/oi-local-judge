@@ -22,6 +22,7 @@ import {
 import { upsertOfficialScore } from '../src/storage/repos/official-scores.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import { createUser } from '../src/storage/repos/users.js';
+import { invalidateOfficialRanking } from '../src/services/official-ranking.js';
 import { migrate } from '../src/storage/migrate.js';
 import { openDatabase } from '../src/storage/db.js';
 
@@ -307,6 +308,9 @@ describe('contest awards service', () => {
       source: 'batch',
       batchId: 1,
     });
+    // The service paths that write official scores invalidate the cached
+    // ranking, so simulate that for this direct repository write.
+    invalidateOfficialRanking(db, contestId);
     const after = (await getContestAwards(db, contestId, root))!;
     expect(after.rows[0].userId).toBe(users[3]);
     for (const row of after.rows) {
