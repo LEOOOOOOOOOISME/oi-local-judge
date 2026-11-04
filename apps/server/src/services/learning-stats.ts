@@ -14,6 +14,8 @@ import {
 } from '../storage/repos/teams.js';
 import { getUserById, type UserRow } from '../storage/repos/users.js';
 import { listSubmissions } from '../storage/repos/submissions.js';
+import { getProblem } from '../storage/repos/problems.js';
+import { canViewProblem, type ProblemActor } from './problem-acl.js';
 import {
   canTeachGroup,
   canViewStudentSource,
@@ -478,9 +480,41 @@ function assertCanViewStudent(
 }
 
 /**
+ * Whether one submission's problem may appear in the viewer's student history.
+ *
+ * Hidden problems are filtered with the same `canViewProblem` ACL that gates
+ * `GET /api/problems/:id`: admins always keep them, while owners, team members,
+ * grantees and the student themself keep them only when the ACL allows. Every
+ * other visibility is kept as before. A submission whose problem row is gone is
+ * dropped so its id cannot be inferred from the list either.
+ */
+function canListSubmissionProblem(
+  db: DatabaseSync,
+  problemId: number,
+  actor: ProblemActor,
+  cache: Map<number, boolean>,
+): boolean {
+  const cached = cache.get(problemId);
+  if (cached !== undefined) return cached;
+  const problem = getProblem(db, problemId);
+  const visible =
+    problem !== null &&
+    (problem.visibility !== 'hidden' || canViewProblem(db, problem, actor));
+  cache.set(problemId, visible);
+  return visible;
+}
+
+/**
  * Lists a student's submissions (newest first) for students themself, staff and
  * the coaches/captains who teach them. Only summary fields are returned; source
  * code stays behind `GET /api/submissions/:id`, which audits every coach view.
+ *
+ * Submissions to hidden problems are omitted unless `canViewProblem` lets the
+ * actor read that problem, so the list cannot reveal that a hidden problem
+ * exists (or which submissions it received). `limit` counts *visible* rows:
+ * filtered rows never consume a page slot, so a page is only shorter than
+ * `limit` when the student has no more submissions. `beforeId` is still the id
+ * of the last visible row, keeping the cursor stable across pages.
  */
 export function listStudentSubmissions(
   db: DatabaseSync,
@@ -492,20 +526,41 @@ export function listStudentSubmissions(
   if (!canViewStudentSource(db, actor, targetUserId)) {
     throw new LearningStatsError('STUDENT_FORBIDDEN', 403, 'you cannot view this student');
   }
-  const limit = options.limit ?? 20;
-  return listSubmissions(db, {
-    userId: targetUserId,
-    beforeId: options.beforeId,
-    limit,
-  }).map((row) => ({
-    id: row.id,
-    problemId: row.problem_id,
-    contestId: row.contest_id,
-    status: row.status,
-    verdict: row.verdict,
-    score: row.score,
-    createdAt: new Date(row.created_at).toISOString(),
-  }));
+  const limit = Math.min(Math.max(options.limit ?? 20, 1), 100);
+  const aclActor: ProblemActor = {
+    userId: actor.userId,
+    isAdmin: actor.isAdmin === true || actor.role === 'admin',
+  };
+  const problemVisibility = new Map<number, boolean>();
+  const visible: StudentSubmissionSummary[] = [];
+  let beforeId = options.beforeId;
+
+  while (visible.length < limit) {
+    const remaining = limit - visible.length;
+    const pageSize = Math.min(remaining, 100);
+    const page = listSubmissions(db, {
+      userId: targetUserId,
+      beforeId,
+      limit: pageSize,
+    });
+    if (page.length === 0) break;
+    for (const row of page) {
+      if (!canListSubmissionProblem(db, row.problem_id, aclActor, problemVisibility)) continue;
+      visible.push({
+        id: row.id,
+        problemId: row.problem_id,
+        contestId: row.contest_id,
+        status: row.status,
+        verdict: row.verdict,
+        score: row.score,
+        createdAt: new Date(row.created_at).toISOString(),
+      });
+    }
+    if (page.length < pageSize) break;
+    beforeId = page[page.length - 1]!.id;
+  }
+
+  return visible;
 }
 
 export function getStudentStats(
