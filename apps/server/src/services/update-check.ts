@@ -5,10 +5,18 @@
 // API returning a 500. Successful results are cached for one hour; failures are
 // not cached so a transient outage does not hide a later retry.
 //
+// `/releases/latest` ignores prereleases, which is wrong for this project: the
+// current version can itself be a prerelease (e.g. `1.1.0-rc.6`). Instead the
+// release list is fetched and the highest semver release is selected; drafts are
+// always skipped. `OIJ_UPDATE_INCLUDE_PRERELEASE=0` restricts the selection to
+// final releases.
+//
 // This service never downloads or installs anything.
 const DEFAULT_UPDATE_REPO = 'LEOOOOOOOOOISME/oi-local-judge';
 const GITHUB_API_BASE = 'https://api.github.com/repos';
 const USER_AGENT = 'oi-local-judge-update-check';
+/** GitHub's default page size is 30; 20 keeps the payload small but sufficient. */
+const RELEASES_PER_PAGE = 20;
 /** A hung GitHub request must not occupy the admin request for long. */
 export const UPDATE_CHECK_TIMEOUT_MS = 5_000;
 export const UPDATE_CHECK_CACHE_TTL_MS = 60 * 60 * 1000;
@@ -31,6 +39,10 @@ export type UpdateFetch = (
 export interface UpdateCheckSuccess {
   current: string;
   latest: string;
+  /** The selected release's tag as returned by GitHub (e.g. `v1.1.0-rc.7`). */
+  tagName: string;
+  /** Whether the selected release is a prerelease (semver or GitHub flag). */
+  isPrerelease: boolean;
   updateAvailable: boolean;
   /** Release page (not a direct asset download). */
   url: string | null;
@@ -57,6 +69,10 @@ export interface CheckForUpdateOptions {
   now?: number;
   /** The production timeout is {@link UPDATE_CHECK_TIMEOUT_MS}; tests may lower it. */
   timeoutMs?: number;
+  /**
+   * Defaults to the process environment. `OIJ_UPDATE_INCLUDE_PRERELEASE=0`
+   * (or `false`) restricts the check to final releases.
+   */
   env?: NodeJS.ProcessEnv;
 }
 
@@ -65,6 +81,14 @@ interface ParsedSemver {
   minor: number;
   patch: number;
   prerelease: string[];
+}
+
+/** A release entry from the GitHub release list that can be compared. */
+interface ReleaseCandidate {
+  payload: Record<string, unknown>;
+  tag: string;
+  version: string;
+  isPrerelease: boolean;
 }
 
 interface CacheEntry {
@@ -141,6 +165,14 @@ function resolveRepo(options: CheckForUpdateOptions): string {
   return repo.length > 0 ? repo : DEFAULT_UPDATE_REPO;
 }
 
+/** Prereleases are included unless explicitly disabled. */
+function resolveIncludePrerelease(options: CheckForUpdateOptions): boolean {
+  const raw = (options.env ?? process.env).OIJ_UPDATE_INCLUDE_PRERELEASE;
+  if (typeof raw !== 'string') return true;
+  const normalized = raw.trim().toLowerCase();
+  return normalized !== '0' && normalized !== 'false';
+}
+
 function describeError(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -167,7 +199,49 @@ function publishedAt(payload: Record<string, unknown>): number | null {
 }
 
 /**
- * Fetches the latest GitHub release and compares it with `currentVersion`.
+ * Selects the release with the highest semver from the GitHub release list.
+ * Drafts and entries without a parseable tag are ignored; prereleases are
+ * skipped when `includePrerelease` is false.
+ */
+function selectRelease(
+  payload: unknown,
+  includePrerelease: boolean,
+): { release: ReleaseCandidate } | { error: string } {
+  if (!Array.isArray(payload)) {
+    return { error: 'GitHub Releases 响应格式错误' };
+  }
+
+  let best: ReleaseCandidate | null = null;
+  for (const entry of payload) {
+    if (!isRecord(entry)) continue;
+    // Drafts are unpublished: they must never be offered as an update.
+    if (entry.draft === true) continue;
+    const tag = typeof entry.tag_name === 'string' ? entry.tag_name.trim() : '';
+    if (tag.length === 0) continue;
+    const version = normalizeVersion(tag);
+    const parsed = parseSemver(version);
+    if (!parsed) continue;
+    // GitHub can mark a release as prerelease even when the tag looks final.
+    const isPrerelease = parsed.prerelease.length > 0 || entry.prerelease === true;
+    if (isPrerelease && !includePrerelease) continue;
+    if (!best || compareSemver(version, best.version) > 0) {
+      best = { payload: entry, tag, version, isPrerelease };
+    }
+  }
+
+  if (!best) {
+    return {
+      error: includePrerelease
+        ? '无法解析任何发布版本号'
+        : '没有可比较的正式版本发布（已禁用预发布版本）',
+    };
+  }
+  return { release: best };
+}
+
+/**
+ * Fetches the GitHub release list, selects the highest semver release (including
+ * prereleases by default) and compares it with `currentVersion`.
  * Never throws for network/HTTP/payload failures: those become `{ error }`.
  */
 export async function checkForUpdate(
@@ -183,8 +257,10 @@ export async function checkForUpdate(
   if (!REPO_PATTERN.test(repo)) {
     return { error: `更新仓库配置无效：${repo}`, current, checkedAt: now };
   }
+  const includePrerelease = resolveIncludePrerelease(options);
 
-  const key = `${repo.toLowerCase()}@${current}`;
+  // The include flag belongs to the key: toggling it must not reuse a stale result.
+  const key = `${repo.toLowerCase()}@${current}@${includePrerelease ? 'pre' : 'stable'}`;
   if (cache && cache.key === key && now < cache.expiresAt) {
     return cache.value;
   }
@@ -208,7 +284,7 @@ export async function checkForUpdate(
   let response: UpdateFetchResponse;
   try {
     response = await Promise.race([
-      fetcher(`${GITHUB_API_BASE}/${repo}/releases/latest`, {
+      fetcher(`${GITHUB_API_BASE}/${repo}/releases?per_page=${RELEASES_PER_PAGE}`, {
         headers: {
           Accept: 'application/vnd.github+json',
           'User-Agent': USER_AGENT,
@@ -240,33 +316,29 @@ export async function checkForUpdate(
   } catch (error) {
     return { error: `GitHub Releases 响应无法解析：${describeError(error)}`, current, checkedAt: now };
   }
-  if (!isRecord(payload)) {
-    return { error: 'GitHub Releases 响应格式错误', current, checkedAt: now };
+
+  const selected = selectRelease(payload, includePrerelease);
+  if ('error' in selected) {
+    return { error: selected.error, current, checkedAt: now };
   }
 
-  const tag = typeof payload.tag_name === 'string' ? payload.tag_name.trim() : '';
-  if (tag.length === 0) {
-    return { error: 'GitHub Releases 响应缺少 tag_name', current, checkedAt: now };
-  }
-  const latest = normalizeVersion(tag);
-  if (!parseSemver(latest)) {
-    return { error: `无法解析最新版本号：${tag}`, current, checkedAt: now };
-  }
-
+  const { release } = selected;
   let updateAvailable: boolean;
   try {
-    updateAvailable = compareSemver(latest, current) > 0;
+    updateAvailable = compareSemver(release.version, current) > 0;
   } catch (error) {
     return { error: describeError(error), current, checkedAt: now };
   }
 
   const result: UpdateCheckSuccess = {
     current,
-    latest,
+    latest: release.version,
+    tagName: release.tag,
+    isPrerelease: release.isPrerelease,
     updateAvailable,
-    url: releaseUrl(payload, repo, tag),
-    publishedAt: publishedAt(payload),
-    notes: releaseNotes(payload),
+    url: releaseUrl(release.payload, repo, release.tag),
+    publishedAt: publishedAt(release.payload),
+    notes: releaseNotes(release.payload),
     checkedAt: now,
   };
   cache = { key, expiresAt: now + UPDATE_CHECK_CACHE_TTL_MS, value: result };

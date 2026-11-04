@@ -528,7 +528,7 @@ function UpgradePanel() {
         type="info"
         showIcon
         message="不会自动下载或安装更新"
-        description="这里只检查 GitHub Releases 的最新版本，并按需创建升级前备份。升级本身请按 Release 页面说明手动完成。"
+        description="这里只检查 GitHub Releases 中版本号最高的发布（默认包含预发布版本），并按需创建升级前备份。升级本身请按 Release 页面说明手动完成。"
       />
 
       {updateQuery.isError ? (
@@ -544,7 +544,14 @@ function UpgradePanel() {
             </div>
             <div className="system-stat">
               <div className="system-stat-label">最新版本</div>
-              <div className="system-stat-value mono">{info?.latest ?? '—'}</div>
+              <div className="system-stat-value mono">
+                {info?.latest ?? '—'}
+                {info?.isPrerelease ? (
+                  <Tag color="gold" style={{ marginLeft: 8 }}>
+                    预发布
+                  </Tag>
+                ) : null}
+              </div>
             </div>
             <div className={`system-stat ${info?.updateAvailable ? 'system-stat-warn' : ''}`}>
               <div className="system-stat-label">更新状态</div>
@@ -575,10 +582,16 @@ function UpgradePanel() {
               className="system-settings-note"
               type="success"
               showIcon
-              message={`发现新版本 ${info.latest}`}
+              message={
+                <Space size={6}>
+                  <span>发现新版本 {info.latest}</span>
+                  {info.isPrerelease ? <Tag color="gold">预发布</Tag> : null}
+                </Space>
+              }
               description={
                 <Space direction="vertical" size={4}>
                   <span>
+                    {info.tagName ? `标签：${info.tagName}。` : ''}
                     {info.publishedAt ? `发布时间：${formatDateTime(info.publishedAt)}。` : ''}
                     升级前建议先创建备份。
                   </span>

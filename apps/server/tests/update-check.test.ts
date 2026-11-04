@@ -26,6 +26,8 @@ const NOW = 1_700_000_000_000;
 const ROOT_VERSION = (
   JSON.parse(readFileSync(join(process.cwd(), 'package.json'), 'utf8')) as { version: string }
 ).version;
+const RELEASES_URL =
+  'https://api.github.com/repos/LEOOOOOOOOOISME/oi-local-judge/releases?per_page=20';
 
 function jsonResponse(body: unknown, status = 200): UpdateFetchResponse {
   return {
@@ -40,20 +42,30 @@ interface FetchCall {
   init: { headers: Record<string, string>; signal: AbortSignal };
 }
 
-/** Fake GitHub Releases endpoint; never touches the network. */
-function releaseFetch(
-  payload: Record<string, unknown> = {},
+/** One GitHub release entry; never touches the network. */
+function release(
+  tagName: string,
+  extra: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    tag_name: tagName,
+    html_url: `https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/${tagName}`,
+    published_at: '2026-01-02T03:04:05Z',
+    body: '## 更新内容\n- 修复若干问题',
+    draft: false,
+    prerelease: tagName.includes('-'),
+    ...extra,
+  };
+}
+
+/** Fake GitHub release-list endpoint; never touches the network. */
+function releasesFetch(
+  releases: unknown = [release('v1.1.0-rc.7')],
 ): { fetch: UpdateFetch; calls: FetchCall[] } {
   const calls: FetchCall[] = [];
   const fetch: UpdateFetch = async (url, init) => {
     calls.push({ url, init });
-    return jsonResponse({
-      tag_name: 'v1.1.0-rc.7',
-      html_url: 'https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.7',
-      published_at: '2026-01-02T03:04:05Z',
-      body: '## 更新内容\n- 修复若干问题',
-      ...payload,
-    });
+    return jsonResponse(releases);
   };
   return { fetch, calls };
 }
@@ -90,8 +102,8 @@ describe('compareSemver', () => {
 });
 
 describe('checkForUpdate', () => {
-  it('requests the configured repo and reports an available update with release metadata', async () => {
-    const fake = releaseFetch();
+  it('requests the release list and reports an available update with release metadata', async () => {
+    const fake = releasesFetch();
     const result = expectSuccess(
       await checkForUpdate({
         currentVersion: '1.1.0-rc.6',
@@ -104,6 +116,8 @@ describe('checkForUpdate', () => {
     expect(result).toEqual({
       current: '1.1.0-rc.6',
       latest: '1.1.0-rc.7',
+      tagName: 'v1.1.0-rc.7',
+      isPrerelease: true,
       updateAvailable: true,
       url: 'https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.7',
       publishedAt: Date.parse('2026-01-02T03:04:05Z'),
@@ -112,9 +126,8 @@ describe('checkForUpdate', () => {
     });
 
     expect(fake.calls).toHaveLength(1);
-    expect(fake.calls[0].url).toBe(
-      'https://api.github.com/repos/LEOOOOOOOOOISME/oi-local-judge/releases/latest',
-    );
+    expect(fake.calls[0].url).toBe(RELEASES_URL);
+    expect(fake.calls[0].url).not.toContain('/releases/latest');
     expect(fake.calls[0].init.headers).toMatchObject({
       Accept: 'application/vnd.github+json',
     });
@@ -122,7 +135,7 @@ describe('checkForUpdate', () => {
   });
 
   it('allows OIJ_UPDATE_REPO to override the repository', async () => {
-    const fake = releaseFetch();
+    const fake = releasesFetch();
     await checkForUpdate({
       currentVersion: '1.0.0',
       fetch: fake.fetch,
@@ -130,45 +143,180 @@ describe('checkForUpdate', () => {
       env: { OIJ_UPDATE_REPO: 'acme/forked-judge' },
     });
     expect(fake.calls[0].url).toBe(
-      'https://api.github.com/repos/acme/forked-judge/releases/latest',
+      'https://api.github.com/repos/acme/forked-judge/releases?per_page=20',
     );
+  });
+
+  it('does not rely on the /releases/latest endpoint', async () => {
+    const calls: string[] = [];
+    const fetch: UpdateFetch = async (url) => {
+      calls.push(url);
+      // The old implementation used this endpoint; it must no longer be called.
+      if (url.endsWith('/releases/latest')) {
+        return jsonResponse({ message: 'Not Found' }, 404);
+      }
+      return jsonResponse([release('v1.1.1')]);
+    };
+
+    const result = expectSuccess(
+      await checkForUpdate({ currentVersion: '1.1.0', fetch, now: NOW, env: {} }),
+    );
+
+    expect(result.latest).toBe('1.1.1');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).not.toContain('/releases/latest');
   });
 
   it('reports no update when the current version is equal or newer', async () => {
     const equal = expectSuccess(
       await checkForUpdate({
         currentVersion: '1.1.0',
-        fetch: releaseFetch({ tag_name: 'v1.1.0' }).fetch,
+        fetch: releasesFetch([release('v1.1.0')]).fetch,
         now: NOW,
         env: {},
       }),
     );
     expect(equal.updateAvailable).toBe(false);
     expect(equal.latest).toBe('1.1.0');
+    expect(equal.isPrerelease).toBe(false);
 
+    resetUpdateCheckCache();
     // A prerelease is older than the corresponding final release.
     const newer = expectSuccess(
       await checkForUpdate({
         currentVersion: '1.1.0',
-        fetch: releaseFetch({ tag_name: 'v1.1.0-rc.7' }).fetch,
+        fetch: releasesFetch([release('v1.1.0-rc.7')]).fetch,
         now: NOW,
         env: {},
       }),
     );
     expect(newer.updateAvailable).toBe(false);
+    expect(newer.latest).toBe('1.1.0-rc.7');
+    expect(newer.isPrerelease).toBe(true);
   });
 
-  it('detects a prerelease update', async () => {
+  it('detects a prerelease update when the current version is a prerelease', async () => {
     const result = expectSuccess(
       await checkForUpdate({
         currentVersion: '1.1.0-rc.6',
-        fetch: releaseFetch({ tag_name: 'v1.1.0-rc.7' }).fetch,
+        fetch: releasesFetch([release('v1.1.0-rc.6'), release('v1.1.0-rc.7')]).fetch,
         now: NOW,
         env: {},
       }),
     );
     expect(result.updateAvailable).toBe(true);
     expect(result.latest).toBe('1.1.0-rc.7');
+    expect(result.tagName).toBe('v1.1.0-rc.7');
+    expect(result.isPrerelease).toBe(true);
+  });
+
+  it('detects an update when only prereleases exist', async () => {
+    const result = expectSuccess(
+      await checkForUpdate({
+        currentVersion: '1.0.0',
+        fetch: releasesFetch([release('v1.2.0-beta.1'), release('v1.1.0-rc.1')]).fetch,
+        now: NOW,
+        env: {},
+      }),
+    );
+    expect(result.updateAvailable).toBe(true);
+    expect(result.latest).toBe('1.2.0-beta.1');
+    expect(result.isPrerelease).toBe(true);
+  });
+
+  it('selects the highest semver across stable and prerelease tags', async () => {
+    const result = expectSuccess(
+      await checkForUpdate({
+        currentVersion: '1.0.0',
+        fetch: releasesFetch([
+          release('v1.1.0'),
+          release('v1.2.0-beta.2'),
+          release('v1.2.0-beta.10'),
+          release('v1.3.0-rc.1'),
+        ]).fetch,
+        now: NOW,
+        env: {},
+      }),
+    );
+    expect(result.latest).toBe('1.3.0-rc.1');
+    expect(result.isPrerelease).toBe(true);
+
+    resetUpdateCheckCache();
+    // A final release outranks prereleases with the same core version.
+    const stable = expectSuccess(
+      await checkForUpdate({
+        currentVersion: '1.0.0',
+        fetch: releasesFetch([
+          release('v1.1.0-rc.7'),
+          release('v1.1.0'),
+          release('v1.1.0-rc.10'),
+        ]).fetch,
+        now: NOW,
+        env: {},
+      }),
+    );
+    expect(stable.latest).toBe('1.1.0');
+    expect(stable.isPrerelease).toBe(false);
+  });
+
+  it('excludes draft releases', async () => {
+    const result = expectSuccess(
+      await checkForUpdate({
+        currentVersion: '1.0.0',
+        fetch: releasesFetch([
+          release('v9.9.9', { draft: true }),
+          release('v1.2.0'),
+          release('v1.1.0'),
+        ]).fetch,
+        now: NOW,
+        env: {},
+      }),
+    );
+    expect(result.latest).toBe('1.2.0');
+    expect(result.tagName).toBe('v1.2.0');
+  });
+
+  it('can restrict the check to final releases with OIJ_UPDATE_INCLUDE_PRERELEASE=0', async () => {
+    const withPrerelease = expectSuccess(
+      await checkForUpdate({
+        currentVersion: '1.1.0',
+        fetch: releasesFetch([release('v1.2.0-rc.1'), release('v1.1.0')]).fetch,
+        now: NOW,
+        env: {},
+      }),
+    );
+    expect(withPrerelease.latest).toBe('1.2.0-rc.1');
+    expect(withPrerelease.updateAvailable).toBe(true);
+
+    resetUpdateCheckCache();
+    const stableOnly = expectSuccess(
+      await checkForUpdate({
+        currentVersion: '1.1.0',
+        fetch: releasesFetch([release('v1.2.0-rc.1'), release('v1.1.0')]).fetch,
+        now: NOW,
+        env: { OIJ_UPDATE_INCLUDE_PRERELEASE: '0' },
+      }),
+    );
+    expect(stableOnly.latest).toBe('1.1.0');
+    expect(stableOnly.isPrerelease).toBe(false);
+    expect(stableOnly.updateAvailable).toBe(false);
+
+    resetUpdateCheckCache();
+    // `false` is accepted as well, and GitHub's prerelease flag is honoured
+    // even when the tag looks like a final release.
+    const flagged = expectSuccess(
+      await checkForUpdate({
+        currentVersion: '1.1.0',
+        fetch: releasesFetch([
+          release('v1.2.0', { prerelease: true }),
+          release('v1.1.1'),
+        ]).fetch,
+        now: NOW,
+        env: { OIJ_UPDATE_INCLUDE_PRERELEASE: 'false' },
+      }),
+    );
+    expect(flagged.latest).toBe('1.1.1');
+    expect(flagged.updateAvailable).toBe(true);
   });
 
   it('returns a structured error when the network request fails', async () => {
@@ -215,7 +363,7 @@ describe('checkForUpdate', () => {
   });
 
   it('returns a structured error for an invalid payload', async () => {
-    const missingTag = expectFailure(
+    const notAList = expectFailure(
       await checkForUpdate({
         currentVersion: '1.1.0-rc.6',
         fetch: async () => jsonResponse({ message: 'no tag' }),
@@ -223,21 +371,31 @@ describe('checkForUpdate', () => {
         env: {},
       }),
     );
-    expect(missingTag.error).toContain('tag_name');
+    expect(notAList.error).toContain('格式');
 
     const badTag = expectFailure(
       await checkForUpdate({
         currentVersion: '1.1.0-rc.6',
-        fetch: releaseFetch({ tag_name: 'not-a-version' }).fetch,
+        fetch: releasesFetch([release('not-a-version')]).fetch,
         now: NOW,
         env: {},
       }),
     );
     expect(badTag.error).toContain('无法解析');
+
+    const draftsOnly = expectFailure(
+      await checkForUpdate({
+        currentVersion: '1.1.0-rc.6',
+        fetch: releasesFetch([release('v9.9.9', { draft: true })]).fetch,
+        now: NOW,
+        env: {},
+      }),
+    );
+    expect(draftsOnly.error).toContain('无法解析');
   });
 
   it('caches a successful result for one hour', async () => {
-    const fake = releaseFetch();
+    const fake = releasesFetch();
     const options = {
       currentVersion: '1.1.0-rc.6',
       fetch: fake.fetch,
@@ -342,12 +500,10 @@ describe('GET /api/admin/system/update-check', () => {
   it('returns the update result for admins without hitting the real GitHub API', async () => {
     resetUpdateCheckCache();
     vi.stubGlobal('fetch', async () =>
-      jsonResponse({
-        tag_name: 'v1.1.0-rc.7',
-        html_url: 'https://example.test/release',
-        published_at: '2026-01-02T03:04:05Z',
-        body: 'notes',
-      }),
+      jsonResponse([
+        release('v1.1.0-rc.7', { html_url: 'https://example.test/release' }),
+        release('v1.1.0-rc.6'),
+      ]),
     );
 
     const response = await getUpdateCheck(cookies.admin);
@@ -356,9 +512,11 @@ describe('GET /api/admin/system/update-check', () => {
     expect(result).toMatchObject({
       current: ROOT_VERSION,
       latest: '1.1.0-rc.7',
+      tagName: 'v1.1.0-rc.7',
+      isPrerelease: true,
       updateAvailable: true,
       url: 'https://example.test/release',
-      notes: 'notes',
+      notes: '## 更新内容\n- 修复若干问题',
     });
   });
 
