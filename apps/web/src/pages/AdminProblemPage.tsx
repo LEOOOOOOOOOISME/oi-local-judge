@@ -59,6 +59,7 @@ import { DataPlanPanel } from '../components/DataPlanPanel';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { ProblemSharePanel } from '../components/ProblemSharePanel';
+import { TeamSearchSelect } from '../components/TeamSearchSelect';
 import { VerdictBadge } from '../components/VerdictBadge';
 import {
   formatBytes,
@@ -302,6 +303,7 @@ export function AdminProblemPage() {
   const validId = Number.isInteger(problemId) && problemId > 0;
   const { message } = App.useApp();
   const { user } = useAuth();
+  const canSearchAllTeams = user?.role === 'admin' || user?.role === 'contestmanager';
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('basic');
   const [basicForm] = Form.useForm<BasicFormValues>();
@@ -972,17 +974,21 @@ export function AdminProblemPage() {
               />
             </label>
           ) : null}
-          {ownerTypeDraft === 'team' && teams.length > 0 ? (
+          {ownerTypeDraft === 'team' ? (
             <label className="problem-owner-field">
               <span className="muted">团队</span>
-              <Select<number>
+              <TeamSearchSelect
                 value={ownerIdDraft}
                 onChange={(value) => setOwnerIdDraft(value)}
-                placeholder="选择团队"
-                options={teams.map((team) => ({
+                enabled={canSearchAllTeams}
+                fallbackOptions={teams.map((team) => ({
                   value: team.id,
                   label: team.name,
                 }))}
+                selectedLabel={
+                  ownerIdDraft !== null ? teamNames.get(ownerIdDraft) ?? null : null
+                }
+                placeholder={canSearchAllTeams ? '搜索团队名称' : '选择团队'}
                 style={{ width: 220 }}
               />
             </label>
@@ -996,7 +1002,7 @@ export function AdminProblemPage() {
             保存归属
           </Button>
         </div>
-        {ownerTypeDraft === 'team' && teams.length === 0 ? (
+        {ownerTypeDraft === 'team' && !canSearchAllTeams && teams.length === 0 ? (
           <Alert
             style={{ marginTop: 12 }}
             type="warning"
