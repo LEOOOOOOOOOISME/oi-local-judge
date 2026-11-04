@@ -670,6 +670,65 @@ describe('team ranking service', () => {
     expect(row).toMatchObject({ totalScore: 200, hackScore: 100, solved: 1 });
   });
 
+  it('hides team hacks created after freeze_at', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      freezeAt: 1000,
+      startAt: 0,
+      endAt: 100 * 60 * 1000,
+    });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5, hackPoints: 100, failedHackPenalty: 50 },
+    });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+
+    // Visible: created before freeze_at.
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'success',
+      createdAt: 500,
+    });
+    // Hidden: both are created after freeze_at, so they must not change the
+    // team's hack score (without the filter this would be 100 - 50 + 100).
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'failed',
+      createdAt: 1500,
+    });
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'success',
+      createdAt: 1600,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 200, hackScore: 100, solved: 1 });
+  });
+
   it('ignores legacy hacks whose team attribution is null', () => {
     const ctx = setup();
     const contestId = makeContest(ctx, { startAt: 0, endAt: 100 * 60 * 1000 });
