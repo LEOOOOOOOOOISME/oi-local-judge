@@ -465,6 +465,8 @@ export interface TeamRankingRow {
   memberCount: number;
   totalScore: number;
   solved: number;
+  /** ACM/CF-like 罚时（分钟）；OI/IOI 为 0。 */
+  penalty: number;
   lastAcAt: number | null;
   cells: TeamRankingCell[];
 }

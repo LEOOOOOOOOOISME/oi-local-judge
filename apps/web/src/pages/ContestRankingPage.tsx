@@ -301,14 +301,42 @@ export function ContestRankingPage() {
       align: 'right',
       render: (value: number) => <span className="mono">{value}</span>,
     },
-    {
-      title: '总分',
-      dataIndex: 'totalScore',
-      width: 84,
-      align: 'right',
-      render: (value: number) => <strong className="rank-total">{value}</strong>,
-    },
   ];
+
+  // ACM/CF-like 团队榜按过题数与罚时排序；OI/IOI 仍看每题最高分求和。
+  const teamScoreColumns: TableColumnsType<TeamRankingRow> = isAcm
+    ? [
+        {
+          title: '通过题数',
+          dataIndex: 'solved',
+          width: 82,
+          align: 'right',
+          render: (value: number) => <span className="mono">{value}</span>,
+        },
+        {
+          title: '罚时',
+          dataIndex: 'penalty',
+          width: 82,
+          align: 'right',
+          render: (value: number) => <span className="mono">{value}</span>,
+        },
+      ]
+    : [
+        {
+          title: '总分',
+          dataIndex: 'totalScore',
+          width: 84,
+          align: 'right',
+          render: (value: number) => <strong className="rank-total">{value}</strong>,
+        },
+        {
+          title: 'AC 数',
+          dataIndex: 'solved',
+          width: 82,
+          align: 'right',
+          render: (value: number) => <span className="mono">{value}</span>,
+        },
+      ];
 
   const teamProblemColumns: TableColumnsType<TeamRankingRow> = problems.map(
     (problem, index) => ({
@@ -328,13 +356,6 @@ export function ContestRankingPage() {
   );
 
   const teamTrailingColumns: TableColumnsType<TeamRankingRow> = [
-    {
-      title: 'AC 数',
-      dataIndex: 'solved',
-      width: 82,
-      align: 'right',
-      render: (value: number) => <span className="mono">{value}</span>,
-    },
     {
       title: '最后 AC',
       dataIndex: 'lastAcAt',
@@ -356,7 +377,7 @@ export function ContestRankingPage() {
       }
       downloadCsv(
         `contest-${contestId}-team-ranking.csv`,
-        buildTeamRankingCsv(problems, teamRows),
+        buildTeamRankingCsv(problems, teamRows, isAcm),
       );
       message.success('团队榜 CSV 已导出');
       return;
@@ -393,7 +414,9 @@ export function ContestRankingPage() {
         }
         subtitle={
           activeView === 'team'
-            ? '团队榜：每题取团队成员最佳得分后求和，仅统计已报名团队。'
+            ? isAcm
+              ? `${presetLabel(preset)}：团队榜按通过题数与罚时排序，仅统计已报名团队。`
+              : '团队榜：每题取团队成员最佳得分后求和，仅统计已报名团队。'
             : isAcm
               ? `${presetLabel(preset)}：按通过题数与罚时排序，正式榜数据只读。`
               : `${presetLabel(preset)}：每题取正式得分，总分降序；正式榜数据只读。`
@@ -480,6 +503,7 @@ export function ContestRankingPage() {
               columns={[
                 ...teamBaseColumns,
                 ...teamProblemColumns,
+                ...teamScoreColumns,
                 ...teamTrailingColumns,
               ]}
               dataSource={teamRows}

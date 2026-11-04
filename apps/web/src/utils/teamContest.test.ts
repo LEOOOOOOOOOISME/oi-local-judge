@@ -22,6 +22,7 @@ const rankingRows: TeamRankingRow[] = [
     memberCount: 3,
     totalScore: 180,
     solved: 2,
+    penalty: 0,
     lastAcAt: 1_700_000_000_000,
     cells: [
       { problemId: 11, score: 100, verdict: 'AC', attempts: 1, firstAcAt: 1_700_000_000_000 },
@@ -35,6 +36,7 @@ const rankingRows: TeamRankingRow[] = [
     memberCount: 1,
     totalScore: 100,
     solved: 1,
+    penalty: 0,
     lastAcAt: null,
     cells: [
       { problemId: 11, score: 100, verdict: 'AC', attempts: 1, firstAcAt: null },
@@ -120,5 +122,17 @@ describe('buildTeamRankingCsv', () => {
       { ...rankingRows[0], teamName: 'Alpha, Team' },
     ]);
     expect(csv.split('\r\n')[1]).toBe('1,"Alpha, Team",3,180,2');
+  });
+
+  it('exports ACM teams with solved count and penalty instead of total score', () => {
+    const problems: TeamRankingProblem[] = [
+      { id: 11, ordinal: 1, points: 100, title: 'A 题' },
+    ];
+    const csv = buildTeamRankingCsv(problems, [
+      { ...rankingRows[0], totalScore: 2, solved: 2, penalty: 43 },
+    ], true);
+    const lines = csv.split('\r\n');
+    expect(lines[0]).toBe('排名,团队,成员数,AC 数,罚时,A');
+    expect(lines[1]).toBe('1,Alpha,3,2,43,100');
   });
 });

@@ -76,17 +76,32 @@ function setup(): Ctx {
 
 function makeContest(
   ctx: Ctx,
-  input: { mode?: string; freezeAt?: number | null } = {},
+  input: {
+    mode?: string;
+    freezeAt?: number | null;
+    startAt?: number;
+    endAt?: number;
+  } = {},
 ): number {
   return createContest(ctx.db, {
     name: `Team Ranking ${input.mode ?? 'oi'}`,
     mode: input.mode ?? 'oi',
     teamMode: 'team',
-    startAt: 0,
-    endAt: 10_000,
+    startAt: input.startAt ?? 0,
+    endAt: input.endAt ?? 10_000,
     freezeAt: input.freezeAt ?? null,
     problemIds: [ctx.p1, ctx.p2],
   });
+}
+
+function setRankingRule(
+  ctx: Ctx,
+  contestId: number,
+  rule: Record<string, unknown>,
+): void {
+  ctx.db
+    .prepare('UPDATE contests SET ranking_rule_json = ? WHERE id = ?')
+    .run(JSON.stringify(rule), contestId);
 }
 
 function makeTeam(
@@ -268,6 +283,242 @@ describe('team ranking service', () => {
       totalScore: 150,
       solved: 1,
     });
+  });
+
+  it('scores ACM teams by the union of problems solved by different members', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    // Alice solves p1 after 1 minute, Bob solves p2 after 2 minutes.
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 60_000,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p2,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 120_000,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({
+      solved: 2,
+      totalScore: 2,
+      penalty: 3,
+      lastAcAt: 120_000,
+    });
+    expect(row.cells).toEqual([
+      { problemId: ctx.p1, score: 1, verdict: 'AC', attempts: 1, firstAcAt: 60_000 },
+      { problemId: ctx.p2, score: 1, verdict: 'AC', attempts: 1, firstAcAt: 120_000 },
+    ]);
+  });
+
+  it('adds every team-member failure before the first AC to the ACM penalty', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'WA',
+      score: 0,
+      createdAt: 60_000,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'WA',
+      score: 0,
+      createdAt: 120_000,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 180_000,
+    });
+    // Wrong submissions after the first team AC must not add penalty.
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'WA',
+      score: 0,
+      createdAt: 240_000,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row.solved).toBe(1);
+    expect(row.penalty).toBe(3 + 2 * 20);
+    expect(row.cells[0]).toMatchObject({
+      problemId: ctx.p1,
+      score: 1,
+      verdict: 'AC',
+      attempts: 4,
+      firstAcAt: 180_000,
+    });
+  });
+
+  it('counts repeated ACs on the same problem only once for a team', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    for (const [userId, createdAt] of [
+      [ctx.users.alice, 60_000],
+      [ctx.users.bob, 120_000],
+      [ctx.users.alice, 180_000],
+    ] as const) {
+      addSubmission(ctx, {
+        contestId,
+        problemId: ctx.p1,
+        userId,
+        teamId: alpha,
+        verdict: 'AC',
+        score: 100,
+        createdAt,
+      });
+    }
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row.solved).toBe(1);
+    expect(row.penalty).toBe(1);
+    expect(row.cells[0]).toMatchObject({ attempts: 3, firstAcAt: 60_000 });
+  });
+
+  it('hides ACM team submissions created after freeze_at', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      freezeAt: 1000,
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 500,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p2,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 1500,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row.solved).toBe(1);
+    expect(row.cells[1]).toMatchObject({
+      problemId: ctx.p2,
+      score: 0,
+      verdict: null,
+      firstAcAt: null,
+    });
+  });
+
+  it('scores CF-like teams with the shared CF formula', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 100 * 60 * 1000,
+    });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5 },
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p2,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 50 * 60 * 1000,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row.solved).toBe(2);
+    expect(row.totalScore).toBe(175);
+    expect(row.penalty).toBe(50);
+    expect(row.cells.map((cell) => cell.score)).toEqual([100, 75]);
   });
 
   it('ignores hacked, post-freeze, non-contest and unfinished submissions', () => {
@@ -453,7 +704,14 @@ describe('team ranking service', () => {
     expect(response.statusCode).toBe(200);
     const body = response.json() as {
       ok: boolean;
-      data: Array<{ teamName: string; memberCount: number; totalScore: number; rank: number }>;
+      data: Array<{
+        teamName: string;
+        memberCount: number;
+        totalScore: number;
+        solved: number;
+        penalty: number;
+        rank: number;
+      }>;
     };
     expect(body.ok).toBe(true);
     expect(body.data).toEqual([
@@ -461,6 +719,8 @@ describe('team ranking service', () => {
         teamName: 'Alpha',
         memberCount: 2,
         totalScore: 100,
+        solved: 1,
+        penalty: 0,
         rank: 1,
       }),
     ]);
