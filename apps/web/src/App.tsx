@@ -74,6 +74,12 @@ const TeamsPage = lazy(() =>
 const TeamDetailPage = lazy(() =>
   import('./pages/TeamDetailPage').then((module) => ({ default: module.TeamDetailPage })),
 );
+const ClassesPage = lazy(() =>
+  import('./pages/ClassesPage').then((module) => ({ default: module.ClassesPage })),
+);
+const ClassDetailPage = lazy(() =>
+  import('./pages/ClassDetailPage').then((module) => ({ default: module.ClassDetailPage })),
+);
 const ProblemSetsPage = lazy(() =>
   import('./pages/ProblemSetsPage').then((module) => ({ default: module.ProblemSetsPage })),
 );
@@ -246,6 +252,22 @@ export function AppRoutes() {
           element={
             <ProtectedRoute>
               <TeamDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/classes"
+          element={
+            <ProtectedRoute>
+              <ClassesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/classes/:id"
+          element={
+            <ProtectedRoute>
+              <ClassDetailPage />
             </ProtectedRoute>
           }
         />
