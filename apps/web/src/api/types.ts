@@ -717,6 +717,58 @@ export interface OfficialRanking {
   officialFrozenUntil?: number | null;
 }
 
+/** 比赛成绩报告：参与者统计。 */
+export interface ContestReportParticipantStats {
+  total: number;
+  accepted: number;
+  pending: number;
+  rejected: number;
+  checkedIn: number;
+}
+
+/** 比赛成绩报告：提交统计。 */
+export interface ContestReportSubmissionStats {
+  total: number;
+  /** 按 verdict 计数；无 verdict 的提交记为 none。 */
+  byVerdict: Record<string, number>;
+  byStatus: Record<string, number>;
+}
+
+/** 比赛成绩报告：每题统计。 */
+export interface ContestReportProblemStats {
+  problemId: number;
+  ordinal: number;
+  title: string;
+  points: number;
+  submissions: number;
+  acSubmissions: number;
+  /** 有至少一次 AC 的去重人数。 */
+  acUsers: number;
+  /** AC 提交率（0-100，保留一位小数）。 */
+  acRate: number;
+  averageScore: number;
+  maxScore: number;
+}
+
+/** 比赛成绩报告：团队统计（仅团队赛）。 */
+export interface ContestReportTeamStats {
+  teamCount: number;
+  rows: TeamRankingRow[];
+}
+
+/** GET /api/admin/contests/:id/report；个人榜已排除隐藏选手。 */
+export interface ContestReport {
+  generatedAt: number;
+  contest: Contest;
+  participants: ContestReportParticipantStats;
+  submissions: ContestReportSubmissionStats;
+  problems: ContestReportProblemStats[];
+  ranking: OfficialRankingRow[];
+  /** 应用 top 限制前的可见榜行数。 */
+  rankingTotal: number;
+  teamStats: ContestReportTeamStats | null;
+}
+
 /** WebSocket `ranking.delta` 载荷：只含变化行、全部名次与移除用户。 */
 export interface RankingDelta {
   contestId: number;

@@ -26,6 +26,7 @@ import {
   unfreezeContest,
 } from '../services/contests.js';
 import { getOfficialRanking, invalidateOfficialRanking } from '../services/official-ranking.js';
+import { buildContestReport, contestReportToCsv } from '../services/contest-report.js';
 import { getCorrectionRanking } from '../services/correction-ranking.js';
 import { getTeamRanking } from '../services/team-ranking.js';
 import {
@@ -602,6 +603,54 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     async (request, reply) => {
       unfreezeContest(options.db, Number(request.params.id));
       return { ok: true, data: null };
+    },
+  );
+
+  app.get<{
+    Params: { id: string };
+    Querystring: { format?: string; top?: string };
+  }>(
+    '/api/admin/contests/:id/report',
+    { preHandler: guards },
+    async (request, reply) => {
+      const contestId = Number(request.params.id);
+      const format = request.query?.format ?? 'json';
+      if (format !== 'json' && format !== 'csv') {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'INVALID_FORMAT', message: 'format must be json or csv' },
+        });
+      }
+      let top: number | undefined;
+      const rawTop = request.query?.top;
+      if (rawTop !== undefined) {
+        const parsed = Number(rawTop);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          return reply.code(400).send({
+            ok: false,
+            error: { code: 'INVALID_TOP', message: 'top must be a positive integer' },
+          });
+        }
+        top = parsed;
+      }
+      const report = await buildContestReport(
+        options.db,
+        contestId,
+        options.config?.dataDir ?? process.cwd(),
+        { top },
+      );
+      if (!report) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      if (format === 'csv') {
+        reply.header('content-type', 'text/csv; charset=utf-8');
+        reply.header(
+          'content-disposition',
+          `attachment; filename="contest-${contestId}-report.csv"`,
+        );
+        return reply.send(contestReportToCsv(report));
+      }
+      return { ok: true, data: report };
     },
   );
 
