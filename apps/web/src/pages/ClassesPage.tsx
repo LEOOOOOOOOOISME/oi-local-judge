@@ -102,7 +102,7 @@ export function ClassesPage() {
       <PageHead
         breadcrumb={[{ label: '首页', to: '/contests' }, { label: '班级' }]}
         title="班级"
-        subtitle="班级由管理员或比赛管理员创建；教练可以维护学生名单，训练与错题统计即将接入。"
+        subtitle="班级由管理员或比赛管理员创建；教练可以维护学生名单，并在班级详情页查看学习统计、错题本与训练入口。"
         extra={
           <Space wrap>
             <Button

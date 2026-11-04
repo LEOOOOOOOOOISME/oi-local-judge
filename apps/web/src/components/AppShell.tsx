@@ -88,6 +88,9 @@ export function AppShell() {
                 <NavLink to="/records" className={navClass}>
                   我的记录
                 </NavLink>
+                <NavLink to={`/students/${user.id}/learning`} className={navClass}>
+                  我的学习
+                </NavLink>
                 <NavLink to="/messages" className={navClass}>
                   消息
                 </NavLink>
