@@ -13,6 +13,7 @@ import { getProblem } from '../storage/repos/problems.js';
 import { listContestSubmissions } from '../storage/repos/submissions.js';
 import { seedOfficialScoresFromSubmissions } from '../storage/repos/official-scores.js';
 import { getUserById } from '../storage/repos/users.js';
+import { getOfficialRanking, invalidateOfficialRanking } from './official-ranking.js';
 
 export interface ContestRankingRow extends RankingRow {
   username: string;
@@ -98,6 +99,7 @@ export function listContestDtos(db: DatabaseSync): ContestRow[] {
 
 export function startContest(db: DatabaseSync, contestId: number): void {
   setContestStatus(db, contestId, 'running');
+  invalidateOfficialRanking(db, contestId);
 }
 
 export function freezeContest(db: DatabaseSync, contestId: number): void {
@@ -106,6 +108,7 @@ export function freezeContest(db: DatabaseSync, contestId: number): void {
     Date.now(),
     contestId,
   );
+  invalidateOfficialRanking(db, contestId);
 }
 
 export function unfreezeContest(db: DatabaseSync, contestId: number): void {
@@ -115,10 +118,12 @@ export function unfreezeContest(db: DatabaseSync, contestId: number): void {
   if (contest?.mode === 'oi') {
     seedOfficialScoresFromSubmissions(db, contestId);
   }
+  invalidateOfficialRanking(db, contestId);
 }
 
 export function endContest(db: DatabaseSync, contestId: number): void {
   setContestStatus(db, contestId, 'ended');
+  invalidateOfficialRanking(db, contestId);
 }
 
 export interface ClassStatRow {
@@ -130,8 +135,12 @@ export interface ClassStatRow {
   bestRank: number;
 }
 
-export function getClassStats(db: DatabaseSync, contestId: number): ClassStatRow[] | null {
-  const ranking = getContestRanking(db, contestId);
+export async function getClassStats(
+  db: DatabaseSync,
+  contestId: number,
+  dataDir = process.cwd(),
+): Promise<ClassStatRow[] | null> {
+  const ranking = await getOfficialRanking(db, contestId, dataDir);
   if (!ranking) return null;
   const groups = new Map<string, { scores: number[]; ac: number; best: number }>();
   for (const row of ranking.rows) {

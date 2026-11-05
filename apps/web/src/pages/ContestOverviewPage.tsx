@@ -1,14 +1,26 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Card, Empty, Result, Space, Spin, Tabs, Tag } from 'antd';
+import {
+  App,
+  Button,
+  Card,
+  Empty,
+  Result,
+  Space,
+  Spin,
+  Tabs,
+  Tag,
+} from 'antd';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { apiGet } from '../api/client';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ApiError, apiDelete, apiGet, apiPost } from '../api/client';
 import type {
   Contest,
   ContestDetail,
+  MyContestRegistration,
   ProblemSummary,
-  RankingRow,
   Submission,
+  TeamRegistration,
+  TeamSummary,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { ContestAnnouncements } from '../components/ContestAnnouncements';
@@ -21,6 +33,24 @@ import { ProblemListTable, type ProblemScore } from '../components/ProblemListTa
 import { SubmissionTable } from '../components/SubmissionTable';
 import { useNow } from '../hooks/useNow';
 import { formatDateTime } from '../utils/format';
+import { fetchOfficialRanking } from '../utils/officialRanking';
+import {
+  captainTeams,
+  resolveTeamMode,
+  teamModeLabel,
+} from '../utils/teamContest';
+import {
+  allowsSelfRegistration,
+  canCancelAcceptedRegistration,
+  describeRegistrationError,
+  registrationModeLabel,
+  registrationStatusColor,
+  registrationStatusLabel,
+  registrationWindowState,
+  registrationWindowText,
+  resolveRegistrationMode,
+  resolveRegistrationWindow,
+} from '../utils/registration';
 import {
   CONTEST_PHASE_LABEL,
   contestModeLabel,
@@ -42,7 +72,11 @@ export function ContestOverviewPage() {
   const validId = Number.isInteger(contestId) && contestId > 0;
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
   const now = useNow(1000);
+  const [registeringTeamId, setRegisteringTeamId] = useState<number | null>(null);
+  const [registrationBusy, setRegistrationBusy] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const [activeTab, setActiveTab] = useState(
     searchParams.get('tab') === 'clarifications' ? 'clarifications' : 'overview',
@@ -77,11 +111,13 @@ export function ContestOverviewPage() {
     enabled: validId && useFallback,
     staleTime: 15_000,
   });
+  // 比赛页与正式榜共用 official-ranking（计算规则一致，404 时内部回退旧 /ranking）。
   const rankingQuery = useQuery({
-    queryKey: ['ranking', contestId],
-    queryFn: () => apiGet<RankingRow[]>(`/api/contests/${contestId}/ranking`),
+    queryKey: ['official-ranking', contestId],
+    queryFn: () => fetchOfficialRanking(contestId),
     enabled: validId,
     staleTime: 5_000,
+    retry: false,
   });
   const problemsQuery = useQuery({
     queryKey: ['problems'],
@@ -95,10 +131,131 @@ export function ContestOverviewPage() {
     enabled: validId && Boolean(user),
   });
 
-  const contest =
-    detail?.contest ?? contestsQuery.data?.find((item) => item.id === contestId) ?? null;
-  const ranking = rankingQuery.data ?? [];
-  const myRow = user ? ranking.find((row) => row.userId === user.id) : undefined;
+  const contestSource =
+    detail?.contest ??
+    contestsQuery.data?.find((item) => item.id === contestId) ??
+    null;
+  const teamMode = resolveTeamMode(contestSource);
+  const teamEnabled = teamMode !== 'individual';
+  const registrationMode = resolveRegistrationMode(contestSource);
+  const registrationEnabled = allowsSelfRegistration(registrationMode);
+  const isManager = user?.role === 'admin' || user?.role === 'contestmanager';
+
+  const myTeamsQuery = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => apiGet<TeamSummary[]>('/api/teams'),
+    enabled: validId && Boolean(user) && teamEnabled,
+    staleTime: 15_000,
+  });
+  const contestTeamsQuery = useQuery({
+    queryKey: ['contest-teams', contestId],
+    queryFn: () => apiGet<TeamRegistration[]>(`/api/contests/${contestId}/teams`),
+    enabled: validId && Boolean(user) && teamEnabled,
+    staleTime: 10_000,
+    retry: false,
+  });
+  // manual 模式下后端只允许管理员导入，选手侧不显示自助报名入口。
+  const myRegistrationQuery = useQuery({
+    queryKey: ['my-registration', contestId],
+    queryFn: () => apiGet<MyContestRegistration>(`/api/contests/${contestId}/registration`),
+    enabled: validId && Boolean(user) && registrationEnabled,
+    staleTime: 5_000,
+    retry: false,
+  });
+  const myRegistration = myRegistrationQuery.data?.registration ?? null;
+
+  const myCaptainTeams = useMemo(
+    () => captainTeams(myTeamsQuery.data ?? []),
+    [myTeamsQuery.data],
+  );
+  const registeredTeamIds = useMemo(
+    () => new Set((contestTeamsQuery.data ?? []).map((team) => team.teamId)),
+    [contestTeamsQuery.data],
+  );
+
+  const registerTeam = async (teamId: number) => {
+    setRegisteringTeamId(teamId);
+    try {
+      await apiPost<null>(`/api/contests/${contestId}/teams`, { teamId });
+      message.success('团队报名成功');
+      void queryClient.invalidateQueries({ queryKey: ['contest-teams', contestId] });
+      void queryClient.invalidateQueries({ queryKey: ['team-ranking', contestId] });
+    } catch (error) {
+      if (error instanceof ApiError && error.code === 'TEAM_ALREADY_REGISTERED') {
+        message.warning('该团队已经报名本场比赛');
+        void queryClient.invalidateQueries({ queryKey: ['contest-teams', contestId] });
+      } else if (error instanceof ApiError && error.code === 'TEAM_MEMBER_CONFLICT') {
+        message.error(error.message);
+      } else {
+        message.error(error instanceof Error ? error.message : '团队报名失败');
+      }
+    } finally {
+      setRegisteringTeamId(null);
+    }
+  };
+
+  const contest = contestSource;
+  const registrationClosed =
+    contest !== null &&
+    (contest.status === 'ended' ||
+      contest.status === 'archived' ||
+      Boolean(contest.archived_at) ||
+      (contest.end_at !== null && now >= contest.end_at));
+  const registrationWindow = resolveRegistrationWindow(contest);
+  const windowState = registrationWindowState(contest, now);
+  const registrationNotOpen = windowState === 'before-open';
+  const acceptedCancellable =
+    myRegistration !== null &&
+    myRegistration.status === 'accepted' &&
+    canCancelAcceptedRegistration(contest, now);
+
+  const invalidateRegistration = () => {
+    void queryClient.invalidateQueries({ queryKey: ['my-registration', contestId] });
+    void queryClient.invalidateQueries({ queryKey: ['contest-detail', contestId] });
+    void queryClient.invalidateQueries({ queryKey: ['contests'] });
+    void queryClient.invalidateQueries({ queryKey: ['admin-registrations', contestId] });
+    void queryClient.invalidateQueries({ queryKey: ['admin-participants', contestId] });
+    void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
+    void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
+  };
+
+  const selfRegister = async () => {
+    setRegistrationBusy(true);
+    try {
+      const result = await apiPost<{ status: 'accepted' | 'pending' }>(
+        `/api/contests/${contestId}/register`,
+      );
+      message.success(
+        result.status === 'pending'
+          ? '报名已提交，等待管理员审核'
+          : '报名成功，已加入参赛名单',
+      );
+      invalidateRegistration();
+    } catch (error) {
+      message.error(describeRegistrationError(error));
+    } finally {
+      setRegistrationBusy(false);
+    }
+  };
+
+  const cancelRegistration = async () => {
+    setRegistrationBusy(true);
+    try {
+      await apiDelete<null>(`/api/contests/${contestId}/register`);
+      message.success('已取消报名');
+      invalidateRegistration();
+    } catch (error) {
+      message.error(describeRegistrationError(error));
+    } finally {
+      setRegistrationBusy(false);
+    }
+  };
+
+  // 正式榜：rows 用于 top3 / 我的排名，problems 用于题目顺序与题号。
+  const official = rankingQuery.data;
+  const rows = official?.rows ?? [];
+  const officialProblems = official?.problems;
+  const myRow = user ? rows.find((row) => row.userId === user.id) : undefined;
 
   const problemMap = useMemo(
     () => new Map((problemsQuery.data ?? []).map((problem) => [problem.id, problem])),
@@ -117,12 +274,10 @@ export function ContestOverviewPage() {
         memoryMb: problem.memoryMb,
       }));
     }
-    const first = ranking[0];
-    if (!first) return [];
-    return first.problems
-      .map((cell) => problemMap.get(cell.problemId))
+    return (officialProblems ?? [])
+      .map((problem) => problemMap.get(problem.id))
       .filter((problem): problem is ProblemSummary => problem !== undefined);
-  }, [detail, ranking, problemMap]);
+  }, [detail, officialProblems, problemMap]);
 
   const letters = useMemo(() => {
     const map = new Map<number, string>();
@@ -132,12 +287,11 @@ export function ContestOverviewPage() {
       }
       return map;
     }
-    const first = ranking[0];
-    if (first) {
-      first.problems.forEach((cell, index) => map.set(cell.problemId, problemLetter(index)));
-    }
+    (officialProblems ?? []).forEach((problem, index) =>
+      map.set(problem.id, problemLetter(index)),
+    );
     return map;
-  }, [detail, ranking]);
+  }, [detail, officialProblems]);
 
   const points = useMemo(() => {
     const map = new Map<number, number>();
@@ -154,7 +308,7 @@ export function ContestOverviewPage() {
 
   const scores = useMemo(() => {
     const map = new Map<number, ProblemScore>();
-    for (const cell of myRow?.problems ?? []) {
+    for (const cell of myRow?.cells ?? []) {
       map.set(cell.problemId, { score: cell.score, verdict: cell.verdict });
     }
     return map;
@@ -216,11 +370,17 @@ export function ContestOverviewPage() {
   }
 
   const phase = contestPhase(contest, now);
+  // 奖项在比赛结束/归档后公开；管理员可提前预览（与后端 403 判定一致）。
+  const awardsReady =
+    phase === 'ended' ||
+    contest.status === 'archived' ||
+    Boolean(contest.archived_at);
+  const showAwardsEntry = awardsReady || isManager;
   const contestPath = `/contest/${contest.id}`;
   const loginHref = `/login?next=${encodeURIComponent(contestPath)}`;
   const listPending = !detail && rankingQuery.isPending;
   const listError = !detail ? rankingQuery.error : null;
-  const participantCount = detail?.participantCount ?? ranking.length;
+  const participantCount = detail?.participantCount ?? rows.length;
 
   return (
     <div>
@@ -230,6 +390,10 @@ export function ContestOverviewPage() {
         tags={
           <>
             <Tag color="blue">{contestModeLabel(contest.mode)}</Tag>
+            {teamEnabled ? <Tag color="purple">{teamModeLabel(teamMode)}</Tag> : null}
+            <Tag color={registrationMode === 'manual' ? 'default' : 'geekblue'}>
+              {registrationModeLabel(registrationMode)}
+            </Tag>
             <Tag color={PHASE_COLOR[phase]}>{CONTEST_PHASE_LABEL[phase]}</Tag>
             {contest.freeze_at !== null ? <Tag>已设置封榜</Tag> : null}
           </>
@@ -241,13 +405,23 @@ export function ContestOverviewPage() {
           </span>
         }
         extra={
-          <Space>
+          <Space wrap>
+            {teamEnabled ? (
+              <Link to={`${contestPath}/ranking?view=team`}>
+                <Button>团队榜</Button>
+              </Link>
+            ) : null}
             <Link to={`${contestPath}/screen`} target="_blank" rel="noreferrer">
               <Button>大屏</Button>
             </Link>
             <Link to={`${contestPath}/correction`}>
               <Button>订正榜</Button>
             </Link>
+            {showAwardsEntry ? (
+              <Link to={`${contestPath}/awards`}>
+                <Button>{awardsReady ? '奖项/证书' : '奖项预览'}</Button>
+              </Link>
+            ) : null}
           </Space>
         }
       />
@@ -332,6 +506,13 @@ export function ContestOverviewPage() {
             <MetaList
               items={[
                 { label: '赛制', value: contestModeLabel(contest.mode) },
+                { label: '报名方式', value: registrationModeLabel(registrationMode) },
+                ...(registrationMode === 'manual'
+                  ? []
+                  : [{ label: '报名时间', value: registrationWindowText(contest) }]),
+                ...(teamEnabled
+                  ? [{ label: '团队报名', value: teamModeLabel(teamMode) }]
+                  : []),
                 { label: '开始', value: formatDateTime(contest.start_at) },
                 { label: '结束', value: formatDateTime(contest.end_at) },
                 {
@@ -346,6 +527,238 @@ export function ContestOverviewPage() {
 
           <Card
             className="oij-card"
+            title="我的报名"
+            size="small"
+            extra={
+              isManager ? <Link to={`/admin/contests/${contest.id}`}>报名管理</Link> : null
+            }
+          >
+            {registrationMode === 'manual' ? (
+              <div className="stack">
+                <Space wrap>
+                  <Tag>{registrationModeLabel(registrationMode)}</Tag>
+                </Space>
+                <span className="muted">本场比赛由管理员导入参赛名单，无需自助报名。</span>
+                {isManager ? (
+                  <span className="muted">可在管理控制台的“参赛者”中添加名单。</span>
+                ) : null}
+              </div>
+            ) : !user ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description={<Link to={loginHref}>登录后报名</Link>}
+              />
+            ) : myRegistrationQuery.isPending ? (
+              <div className="inline-loading">
+                <Spin />
+              </div>
+            ) : myRegistrationQuery.isError ? (
+              <div className="side-error">
+                <span className="muted">报名状态加载失败</span>
+                <Button size="small" onClick={() => void myRegistrationQuery.refetch()}>
+                  重试
+                </Button>
+              </div>
+            ) : myRegistration ? (
+              <div className="stack">
+                <Space wrap>
+                  <Tag color={registrationStatusColor(myRegistration.status)}>
+                    {myRegistration.status === 'accepted'
+                      ? '已报名'
+                      : registrationStatusLabel(myRegistration.status)}
+                  </Tag>
+                  {myRegistration.checkedInAt !== null ? (
+                    <Tag color="blue">已签到</Tag>
+                  ) : null}
+                </Space>
+                {myRegistration.status === 'pending' ? (
+                  <span className="muted">报名已提交，等待管理员审核。</span>
+                ) : null}
+                {myRegistration.status === 'accepted' ? (
+                  <span className="muted">
+                    {myRegistration.checkedInAt !== null
+                      ? '你已报名并完成签到。'
+                      : '你已报名本场比赛，签到状态以管理员记录为准。'}
+                  </span>
+                ) : null}
+                {myRegistration.status === 'rejected' ? (
+                  <span className="muted">
+                    {registrationNotOpen
+                      ? '报名未通过，可在报名开放后重新报名。'
+                      : '报名未通过，可在比赛结束前重新报名。'}
+                  </span>
+                ) : null}
+                {registrationClosed ? (
+                  <span className="muted">报名已截止。</span>
+                ) : myRegistration.status === 'accepted' ? (
+                  acceptedCancellable ? (
+                    <Button
+                      size="small"
+                      danger
+                      loading={registrationBusy}
+                      onClick={() => void cancelRegistration()}
+                    >
+                      取消报名
+                    </Button>
+                  ) : (
+                    <span className="muted">比赛已经开始，不能再取消报名。</span>
+                  )
+                ) : myRegistration.status === 'pending' ? (
+                  <Button
+                    size="small"
+                    danger
+                    loading={registrationBusy}
+                    onClick={() => void cancelRegistration()}
+                  >
+                    取消报名
+                  </Button>
+                ) : myRegistration.status === 'rejected' ? (
+                  registrationNotOpen ? (
+                    <span className="muted">报名尚未开始。</span>
+                  ) : (
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={registrationBusy}
+                      onClick={() => void selfRegister()}
+                    >
+                      重新报名
+                    </Button>
+                  )
+                ) : null}
+              </div>
+            ) : (
+              <div className="stack">
+                <span className="muted">
+                  {registrationNotOpen
+                    ? `报名尚未开始${
+                        registrationWindow.openAt !== null
+                          ? `，将于 ${formatDateTime(registrationWindow.openAt)} 开放。`
+                          : '。'
+                      }`
+                    : registrationClosed
+                      ? `报名已截止${
+                          registrationWindow.closeAt !== null
+                            ? `（${formatDateTime(registrationWindow.closeAt)}）`
+                            : ''
+                        }。`
+                      : registrationMode === 'approval'
+                        ? '本场比赛需要管理员审核报名。'
+                        : '本场比赛开放自助报名。'}
+                </span>
+                <Button
+                  type="primary"
+                  size="small"
+                  disabled={registrationClosed || registrationNotOpen}
+                  loading={registrationBusy}
+                  onClick={() => void selfRegister()}
+                >
+                  {registrationClosed ? '报名已截止' : registrationNotOpen ? '报名未开始' : '报名'}
+                </Button>
+              </div>
+            )}
+          </Card>
+
+          {teamEnabled ? (
+            <Card
+              className="oij-card"
+              title="团队报名"
+              size="small"
+              extra={<Link to={`${contestPath}/ranking?view=team`}>团队榜</Link>}
+            >
+              {!user ? (
+                <Empty
+                  image={Empty.PRESENTED_IMAGE_SIMPLE}
+                  description={<Link to={loginHref}>登录后报名团队</Link>}
+                />
+              ) : (
+                <div className="stack">
+                  {myTeamsQuery.isPending ? (
+                    <div className="inline-loading">
+                      <Spin />
+                    </div>
+                  ) : myCaptainTeams.length === 0 ? (
+                    <div className="muted">
+                      只有队长可以为本团队报名；管理员可以在管理控制台代报名。
+                    </div>
+                  ) : (
+                    <div className="stack">
+                      {myCaptainTeams.map((team) => {
+                        const registered = registeredTeamIds.has(team.id);
+                        return (
+                          <Space key={team.id} wrap>
+                            <span>{team.name}</span>
+                            <span className="muted">{team.memberCount} 人</span>
+                            {registered ? (
+                              <Tag color="green">已报名</Tag>
+                            ) : (
+                              <Button
+                                size="small"
+                                type="primary"
+                                loading={registeringTeamId === team.id}
+                                onClick={() => void registerTeam(team.id)}
+                              >
+                                报名
+                              </Button>
+                            )}
+                          </Space>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {isManager ? (
+                    <Link to={`/admin/contests/${contest.id}`}>
+                      <Button size="small" block>
+                        管理员代报名 / 移除团队
+                      </Button>
+                    </Link>
+                  ) : null}
+
+                  <div className="muted">已报名团队</div>
+                  {contestTeamsQuery.isPending ? (
+                    <div className="inline-loading">
+                      <Spin />
+                    </div>
+                  ) : contestTeamsQuery.isError ? (
+                    contestTeamsQuery.error instanceof ApiError &&
+                    contestTeamsQuery.error.status === 403 ? (
+                      <div className="muted">
+                        仅已报名团队成员与管理员可查看已报名团队。
+                      </div>
+                    ) : (
+                      <div className="side-error">
+                        <span className="muted">团队报名列表加载失败</span>
+                        <Button
+                          size="small"
+                          onClick={() => void contestTeamsQuery.refetch()}
+                        >
+                          重试
+                        </Button>
+                      </div>
+                    )
+                  ) : (contestTeamsQuery.data ?? []).length === 0 ? (
+                    <div className="muted">还没有团队报名</div>
+                  ) : (
+                    <div className="stack">
+                      {(contestTeamsQuery.data ?? []).map((team) => (
+                        <Space key={team.teamId} wrap>
+                          <span>{team.name}</span>
+                          <span className="muted">{team.members.length} 人</span>
+                          <span className="muted">
+                            {formatDateTime(team.registeredAt)}
+                          </span>
+                        </Space>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </Card>
+          ) : null}
+
+          <Card
+            className="oij-card"
             title="榜单"
             size="small"
             extra={<Link to={`${contestPath}/ranking`}>完整榜单</Link>}
@@ -357,11 +770,11 @@ export function ContestOverviewPage() {
                   重试
                 </Button>
               </div>
-            ) : ranking.length === 0 ? (
+            ) : rows.length === 0 ? (
               <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="暂无参赛者" />
             ) : (
               <div className="top3-list">
-                {ranking.slice(0, 3).map((row) => (
+                {rows.slice(0, 3).map((row) => (
                   <div className="top3-row" key={row.userId}>
                     <span className={`top3-rank top3-rank-${row.rank}`}>{row.rank}</span>
                     <span className="top3-name">{row.realName ?? row.username}</span>
@@ -378,6 +791,15 @@ export function ContestOverviewPage() {
             >
               查看完整榜单
             </Button>
+            {showAwardsEntry ? (
+              <Button
+                block
+                className="side-action"
+                onClick={() => navigate(`${contestPath}/awards`)}
+              >
+                {awardsReady ? '奖项/证书' : '奖项预览（管理员）'}
+              </Button>
+            ) : null}
           </Card>
         </div>
               </div>

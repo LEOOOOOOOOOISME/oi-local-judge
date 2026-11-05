@@ -62,6 +62,7 @@ beforeAll(async () => {
     size: stdCode.length,
   });
   contestId = createContest(db, { name: 'Hack Contest', mode: 'oi', problemIds: [problemId] });
+  db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(contestId);
   for (const userId of [hackerId, targetId]) {
     db.prepare(
       "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",

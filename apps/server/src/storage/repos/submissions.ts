@@ -5,6 +5,7 @@ export interface SubmissionRow {
   contest_id: number | null;
   problem_id: number;
   user_id: number;
+  team_id: number | null;
   language: string;
   source_path: string;
   source_hash: string;
@@ -27,31 +28,55 @@ export interface CreateSubmissionInput {
   contestId?: number | null;
   problemId: number;
   userId: number;
+  /** Team the submission is attributed to (team contests); null for individual/practice. */
+  teamId?: number | null;
   language: string;
   sourcePath: string;
   sourceHash: string;
   phase?: string;
   batchId?: number | null;
+  /** Submission timestamp override (used by tests and for deterministic callers). */
+  createdAt?: number;
 }
 
 export function createSubmission(db: DatabaseSync, input: CreateSubmissionInput): number {
   const result = db
     .prepare(
-      `INSERT INTO submissions(contest_id, problem_id, user_id, language, source_path,
-         source_hash, created_at, phase, batch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO submissions(contest_id, problem_id, user_id, team_id, language, source_path,
+         source_hash, created_at, phase, batch_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.contestId ?? null,
       input.problemId,
       input.userId,
+      input.teamId ?? null,
       input.language,
       input.sourcePath,
       input.sourceHash,
-      Date.now(),
+      input.createdAt ?? Date.now(),
       input.phase ?? 'contest',
       input.batchId ?? null,
     );
   return Number(result.lastInsertRowid);
+}
+
+/**
+ * Returns the newest submission timestamp for a user/problem/contest key.
+ * `contestId` is part of the key; `null` (practice) is a distinct key.
+ */
+export function getLatestSubmissionAt(
+  db: DatabaseSync,
+  userId: number,
+  problemId: number,
+  contestId: number | null,
+): number | null {
+  const row = db
+    .prepare(
+      `SELECT MAX(created_at) AS latest FROM submissions
+       WHERE user_id = ? AND problem_id = ? AND contest_id IS ?`,
+    )
+    .get(userId, problemId, contestId) as unknown as { latest: number | null } | undefined;
+  return row?.latest ?? null;
 }
 
 export function getSubmission(db: DatabaseSync, id: number): SubmissionRow | null {
@@ -126,6 +151,40 @@ export function finishSubmission(
     Date.now(),
     submissionId,
   );
+}
+
+/**
+ * Marks a submission as canceled and clears any judge output.
+ *
+ * Cancellation is not a verdict: the row keeps `verdict = NULL` and no
+ * per-testcase rows, so nothing can be mistaken for SE/WA. `judged_at` records
+ * when judging stopped. Idempotent — a second call just rewrites the same state.
+ */
+export function cancelSubmissionState(
+  db: DatabaseSync,
+  submissionId: number,
+  now = Date.now(),
+): void {
+  db.prepare(
+    `UPDATE submissions SET status = 'canceled', verdict = NULL, score = 0, time_ms = 0,
+       memory_kb = 0, message = '', judged_at = ? WHERE id = ?`,
+  ).run(now, submissionId);
+  db.prepare('DELETE FROM test_results WHERE submission_id = ?').run(submissionId);
+}
+
+/**
+ * Puts a submission back into the judging queue: clears every judge-produced
+ * field and drops its per-testcase rows, so a rejudge cannot display stale
+ * results. Canceled submissions are accepted as well — canceling is reversible
+ * through a rejudge. The caller is expected to run this inside a transaction
+ * together with `enqueueRejudge`.
+ */
+export function resetSubmissionForRejudge(db: DatabaseSync, submissionId: number): void {
+  db.prepare(
+    `UPDATE submissions SET status = 'queued', verdict = NULL, score = 0, time_ms = 0,
+       memory_kb = 0, message = '', judged_at = NULL WHERE id = ?`,
+  ).run(submissionId);
+  db.prepare('DELETE FROM test_results WHERE submission_id = ?').run(submissionId);
 }
 
 export function getTestResults(

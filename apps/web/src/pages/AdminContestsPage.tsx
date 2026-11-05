@@ -4,6 +4,7 @@ import {
   Button,
   Card,
   Col,
+  DatePicker,
   Drawer,
   Form,
   Input,
@@ -14,6 +15,7 @@ import {
   Tag,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
+import type { Dayjs } from 'dayjs';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '../api/client';
@@ -22,10 +24,18 @@ import type {
   AdminUser,
   Contest,
   CreateContestRequest,
+  RegistrationMode,
+  TeamMode,
 } from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { formatDateTime } from '../utils/format';
+import { resolveTeamMode, TEAM_MODE_OPTIONS, teamModeLabel } from '../utils/teamContest';
+import {
+  REGISTRATION_MODE_OPTIONS,
+  registrationModeLabel,
+  resolveRegistrationMode,
+} from '../utils/registration';
 import {
   contestModeLabel,
   contestStatusLabel,
@@ -41,6 +51,10 @@ import '../styles/contest-admin.css';
 interface CreateContestFormValues {
   name: string;
   mode: string;
+  teamMode: TeamMode;
+  registrationMode: RegistrationMode;
+  registrationOpenAt?: Dayjs | null;
+  registrationCloseAt?: Dayjs | null;
   startAt: string;
   endAt: string;
   freezeAt?: string;
@@ -95,6 +109,12 @@ export function AdminContestsPage() {
       const payload: CreateContestRequest = {
         name: values.name.trim(),
         mode: values.mode,
+        teamMode: values.teamMode,
+        registrationMode: values.registrationMode,
+        registrationOpenAt: values.registrationOpenAt ? values.registrationOpenAt.valueOf() : null,
+        registrationCloseAt: values.registrationCloseAt
+          ? values.registrationCloseAt.valueOf()
+          : null,
         startAt,
         endAt,
         ...(freezeAt !== null ? { freezeAt } : {}),
@@ -120,6 +140,10 @@ export function AdminContestsPage() {
     form.setFieldsValue({
       name: '',
       mode: 'oi',
+      teamMode: 'individual',
+      registrationMode: 'manual',
+      registrationOpenAt: null,
+      registrationCloseAt: null,
       startAt: toLocalDateTimeInput(times.startAt),
       endAt: toLocalDateTimeInput(times.endAt),
       freezeAt: '',
@@ -159,6 +183,27 @@ export function AdminContestsPage() {
       dataIndex: 'mode',
       width: 80,
       render: (value: string) => contestModeLabel(value),
+    },
+    {
+      title: '团队报名',
+      width: 130,
+      render: (_value, record) => (
+        <Tag color={resolveTeamMode(record) === 'individual' ? 'default' : 'purple'}>
+          {teamModeLabel(resolveTeamMode(record))}
+        </Tag>
+      ),
+    },
+    {
+      title: '报名方式',
+      width: 110,
+      render: (_value, record) => {
+        const mode = resolveRegistrationMode(record);
+        return (
+          <Tag color={mode === 'manual' ? 'default' : mode === 'open' ? 'green' : 'gold'}>
+            {registrationModeLabel(mode)}
+          </Tag>
+        );
+      },
     },
     {
       title: '状态',
@@ -280,6 +325,38 @@ export function AdminContestsPage() {
               </Form.Item>
             </Col>
             <Col span={8}>
+              <Form.Item label="团队报名" name="teamMode" rules={[{ required: true }]}>
+                <Select<TeamMode> options={TEAM_MODE_OPTIONS} />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="报名方式" name="registrationMode" rules={[{ required: true }]}>
+                <Select<RegistrationMode> options={REGISTRATION_MODE_OPTIONS} />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                label="报名开始时间（可空）"
+                name="registrationOpenAt"
+                tooltip="留空表示不限制报名开始时间"
+              >
+                <DatePicker showTime allowClear style={{ width: '100%' }} placeholder="不限制" />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                label="报名截止时间（可空）"
+                name="registrationCloseAt"
+                tooltip="留空表示不限制报名截止时间；需晚于开始时间"
+              >
+                <DatePicker showTime allowClear style={{ width: '100%' }} placeholder="不限制" />
+              </Form.Item>
+            </Col>
+          </Row>
+          <Row gutter={12}>
+            <Col span={12}>
               <Form.Item
                 label="开始时间"
                 name="startAt"
@@ -288,7 +365,7 @@ export function AdminContestsPage() {
                 <Input type="datetime-local" />
               </Form.Item>
             </Col>
-            <Col span={8}>
+            <Col span={12}>
               <Form.Item
                 label="结束时间"
                 name="endAt"

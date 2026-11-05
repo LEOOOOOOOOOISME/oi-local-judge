@@ -1,0 +1,42 @@
+/* Teams v1.2：团队列表与详情页 */
+
+.team-name-link {
+  font-weight: 600;
+}
+
+.team-create-tip {
+  margin-top: -4px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.team-empty {
+  padding: 18px 0;
+  text-align: center;
+}
+
+.team-empty .muted {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.team-member-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.team-self-tag {
+  margin-inline-end: 0;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.team-detail-descriptions .ant-descriptions-item-label {
+  color: var(--text-3);
+}
+
+.team-detail-descriptions .ant-descriptions-item-content {
+  color: var(--text);
+}

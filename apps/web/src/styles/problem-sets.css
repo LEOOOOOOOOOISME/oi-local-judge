@@ -1,0 +1,66 @@
+/* Problem Sets：题单列表、详情与团队题单 Tab */
+
+.problem-set-title-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.problem-set-title-link {
+  font-weight: 600;
+}
+
+.problem-set-desc {
+  max-width: 560px;
+  overflow: hidden;
+  font-size: 12px;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.problem-set-empty {
+  padding: 18px 0;
+  text-align: center;
+}
+
+.problem-set-empty .muted {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.problem-set-descriptions .ant-descriptions-item-label {
+  color: var(--text-3);
+}
+
+.problem-set-descriptions .ant-descriptions-item-content {
+  color: var(--text);
+}
+
+.problem-set-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.problem-set-items-toolbar,
+.problem-set-shares-toolbar {
+  margin-bottom: 12px;
+}
+
+.problem-set-item-title {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+.problem-set-item-title .mono {
+  font-size: 12px;
+}
+
+.team-tabs {
+  margin-top: -4px;
+}

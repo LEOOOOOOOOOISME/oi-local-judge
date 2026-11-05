@@ -1,5 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 
+export type ProblemOwnerType = 'system' | 'user' | 'team';
+
 export interface TestcaseRow {
   id: number;
   problem_id: number;
@@ -28,6 +30,8 @@ export interface ProblemRow {
   tags_json: string;
   time_ms: number;
   memory_mb: number;
+  /** stdout/stderr output limit in MiB; exceeding it yields OLE. */
+  output_mb: number;
   io_mode: string;
   input_file: string | null;
   output_file: string | null;
@@ -38,6 +42,8 @@ export interface ProblemRow {
   compare_mode: string;
   objective_json: string;
   visibility: string;
+  owner_type: ProblemOwnerType;
+  owner_id: number | null;
   version: number;
   created_at: number;
 }
@@ -49,6 +55,8 @@ export interface CreateProblemInput {
   tags?: string[];
   timeMs: number;
   memoryMb: number;
+  /** Output limit in MiB (default 64). */
+  outputMb?: number;
   ioMode?: 'stdio' | 'file';
   inputFile?: string | null;
   outputFile?: string | null;
@@ -59,6 +67,9 @@ export interface CreateProblemInput {
   compareMode?: string;
   objective?: unknown;
   visibility?: string;
+  /** Ownership of the problem; imported/seed problems stay `system`. */
+  ownerType?: ProblemOwnerType;
+  ownerId?: number | null;
   testcases: Array<{
     inputPath: string;
     outputPath: string;
@@ -73,10 +84,11 @@ export interface CreateProblemInput {
 export function createProblem(db: DatabaseSync, input: CreateProblemInput): number {
   const result = db
     .prepare(
-      `INSERT INTO problems(title, type, difficulty, tags_json, time_ms, memory_mb,
+      `INSERT INTO problems(title, type, difficulty, tags_json, time_ms, memory_mb, output_mb,
          io_mode, input_file, output_file, statement_html, samples_json, checker_mode,
-         checker_path, compare_mode, objective_json, visibility, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         checker_path, compare_mode, objective_json, visibility, owner_type, owner_id,
+         created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.title,
@@ -85,6 +97,7 @@ export function createProblem(db: DatabaseSync, input: CreateProblemInput): numb
       JSON.stringify(input.tags ?? []),
       input.timeMs,
       input.memoryMb,
+      input.outputMb ?? 64,
       input.ioMode ?? 'stdio',
       input.inputFile ?? null,
       input.outputFile ?? null,
@@ -95,6 +108,8 @@ export function createProblem(db: DatabaseSync, input: CreateProblemInput): numb
       input.compareMode ?? 'ignore-trailing',
       JSON.stringify(input.objective ?? {}),
       input.visibility ?? 'public',
+      input.ownerType ?? 'system',
+      input.ownerId ?? null,
       Date.now(),
     );
   const problemId = Number(result.lastInsertRowid);
@@ -144,6 +159,9 @@ export interface UpdateProblemPatch {
   checkerMode?: 'builtin' | 'testlib' | 'lemon';
   compareMode?: string;
   objectiveJson?: string;
+  /** Changing ownership; `system` clears `owner_id`. */
+  ownerType?: ProblemOwnerType;
+  ownerId?: number | null;
 }
 
 export function updateProblem(db: DatabaseSync, id: number, patch: UpdateProblemPatch): boolean {
@@ -168,6 +186,14 @@ export function updateProblem(db: DatabaseSync, id: number, patch: UpdateProblem
   add('checker_mode', patch.checkerMode);
   add('compare_mode', patch.compareMode);
   add('objective_json', patch.objectiveJson);
+  if (patch.ownerType !== undefined) {
+    add('owner_type', patch.ownerType);
+    // A system-owned problem never carries an owner id.
+    if (patch.ownerType === 'system' && patch.ownerId === undefined) {
+      sets.push('owner_id = NULL');
+    }
+  }
+  add('owner_id', patch.ownerId);
   if (sets.length === 0) return false;
   sets.push('version = version + 1');
   const result = db
@@ -234,6 +260,20 @@ export function updateTestcasePoints(
     'UPDATE problem_testcases SET points = ? WHERE id = ? AND problem_id = ?',
   );
   for (const item of items) update.run(item.points, item.id, problemId);
+}
+
+export function replaceSubtasks(
+  db: DatabaseSync,
+  problemId: number,
+  items: Array<{ name: string; points: number; aggregation: string }>,
+): number[] {
+  db.prepare('DELETE FROM problem_subtasks WHERE problem_id = ?').run(problemId);
+  const insert = db.prepare(
+    'INSERT INTO problem_subtasks(problem_id, name, points, aggregation) VALUES (?, ?, ?, ?)',
+  );
+  return items.map((item) =>
+    Number(insert.run(problemId, item.name, item.points, item.aggregation).lastInsertRowid),
+  );
 }
 
 export function getSubtasks(db: DatabaseSync, problemId: number): SubtaskRow[] {

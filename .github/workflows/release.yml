@@ -1,0 +1,249 @@
+name: Release
+
+# Builds the Windows portable distribution, its ZIP and an NSIS installer on a
+# hosted windows-latest runner. Nothing here runs on a developer machine: the
+# workflow installs Node.js 24, MinGW-w64 (for the native runners) and
+# electron-builder itself.
+#
+# Manual run:
+#   gh workflow run release.yml --ref <branch>
+# Tag run:
+#   git tag v1.1.0 && git push origin v1.1.0
+
+run-name: Release ${{ github.ref_name }}
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+# contents: write is required by the "Publish release assets" step, which
+# creates the GitHub Release for a tag and uploads the ZIP + NSIS installer.
+permissions:
+  contents: write
+
+# Never cancel a release build that is already running for the same ref.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows-release:
+    name: Windows x64 release
+    runs-on: windows-latest
+    timeout-minutes: 120
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          # build:release creates a temporary git worktree from HEAD, so the
+          # checkout must be a normal (not shallow) repository.
+          fetch-depth: 0
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # tools/build-runner.mjs and tools/build-interact.mjs compile the native
+      # runners with g++.
+      - name: Set up MSYS2 with MinGW-w64 g++
+        id: msys2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
+
+      - name: Add MinGW-w64 to PATH
+        shell: pwsh
+        run: |
+          $msys2 = '${{ steps.msys2.outputs.msys2-location }}'
+          if (-not $msys2) { $msys2 = 'C:\msys64' }
+          $mingw = Join-Path $msys2 'mingw64\bin'
+          $gxx = Join-Path $mingw 'g++.exe'
+          if (-not (Test-Path $gxx)) {
+            throw "MinGW-w64 g++ not found at $gxx"
+          }
+          # Later steps inherit both PATH and OIJ_GXX. tools/build-portable.mjs
+          # uses OIJ_GXX to copy the MinGW runtime DLLs next to the native
+          # runners, so the portable build does not depend on a PATH lookup.
+          $mingw | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          "OIJ_GXX=$gxx" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "MinGW-w64: $mingw"
+
+      - name: Verify compiler
+        shell: pwsh
+        run: |
+          g++ --version
+          if (-not (Test-Path $env:OIJ_GXX)) { throw "OIJ_GXX points to a missing file: $env:OIJ_GXX" }
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      # Electron 45 ships no postinstall script (its package.json has no
+      # `scripts`), so `npm ci` does not populate node_modules/electron/dist.
+      # The portable build copies that directory as the app runtime, so fetch it
+      # explicitly with the package's own install script. This fails loudly if
+      # the download or checksum verification fails.
+      - name: Download Electron runtime
+        run: node node_modules/electron/install.js
+
+      - name: Build native runners
+        run: npm run build:native
+
+      # build:release builds inside a temporary git worktree whose node_modules
+      # is a junction to this checkout. The workspace link
+      # node_modules/@oij/shared therefore resolves to this checkout, not to the
+      # worktree, so the shared package must already be compiled here. Without
+      # this step a fresh clone fails with
+      # `TS2307: Cannot find module '@oij/shared'` while compiling apps/server.
+      - name: Prime @oij/shared for the isolated build
+        run: npx tsc -p packages/shared/tsconfig.json
+
+      # Produces release/oi-local-judge-<version>-win-x64/ and its ZIP.
+      - name: Build portable release and ZIP
+        run: npm run build:release
+
+      - name: Locate release artifacts
+        id: artifacts
+        shell: pwsh
+        run: |
+          $portableDirs = @(Get-ChildItem -Path release -Directory -Filter 'oi-local-judge-*-win-x64')
+          if ($portableDirs.Count -ne 1) {
+            throw "expected exactly one portable build under release/, found $($portableDirs.Count)"
+          }
+          $portable = $portableDirs[0]
+          if (-not (Test-Path (Join-Path $portable.FullName 'OiJudge.exe'))) {
+            throw "$($portable.FullName) does not contain OiJudge.exe"
+          }
+          $zip = Join-Path 'release' ($portable.Name + '.zip')
+          if (-not (Test-Path $zip)) {
+            throw "$zip was not created by build:release"
+          }
+          "portable=$($portable.FullName)" >> $env:GITHUB_OUTPUT
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          Get-ChildItem release -Force | Format-Table Name, Length, LastWriteTime -AutoSize
+
+      - name: Upload portable directory
+        uses: actions/upload-artifact@v4
+        with:
+          name: oi-local-judge-portable
+          path: ${{ steps.artifacts.outputs.portable }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: oi-local-judge-zip
+          path: ${{ steps.artifacts.outputs.zip }}
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Install electron-builder
+        run: npm install --no-save --package-lock=false electron-builder@24.13.3
+
+      - name: Build NSIS installer
+        shell: pwsh
+        run: |
+          # electron-builder 24.13.3 treats --prepackaged as the *app output
+          # directory* (the win-unpacked layout) and archives it as-is, so point
+          # it at the portable root, which already contains OiJudge.exe and
+          # resources/app/. Pointing it at resources/app would produce an
+          # installer whose install root has no executable.
+          #
+          # --publish never: GitHub Actions sets CI=true, which makes
+          # electron-builder try to publish a release afterwards; without
+          # GH_TOKEN that step fails the job even though the installer was
+          # built. The installer is uploaded as an artifact instead.
+          npx electron-builder --win nsis --prepackaged "${{ steps.artifacts.outputs.portable }}" --config electron-builder.yml --publish never
+
+      - name: Verify installer
+        shell: pwsh
+        run: |
+          $installers = @(Get-ChildItem -Path 'release/installer' -Filter 'OiJudge-Setup-*.exe' -ErrorAction SilentlyContinue)
+          if ($installers.Count -eq 0) {
+            throw 'electron-builder produced no OiJudge-Setup-*.exe under release/installer/'
+          }
+          foreach ($installer in $installers) {
+            if ($installer.Length -lt 10MB) {
+              throw "installer looks too small: $($installer.FullName) ($($installer.Length) bytes)"
+            }
+          }
+          $installers | Format-Table Name, Length, LastWriteTime -AutoSize
+
+      - name: Upload NSIS installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: OiJudge-Setup
+          path: release/installer/OiJudge-Setup-*.exe
+          if-no-files-found: error
+          retention-days: 14
+
+      # Attach the ZIP and the NSIS installer to the GitHub Release for the tag.
+      # This is the only publishing path: electron-builder runs with
+      # `--publish never`, so it never talks to the GitHub API itself.
+      - name: Publish release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:GITHUB_REF_NAME
+          if (-not $tag) { throw 'GITHUB_REF_NAME is empty' }
+
+          $zips = @(Get-ChildItem -Path 'release' -Filter '*.zip' -File)
+          if ($zips.Count -ne 1) {
+            throw "expected exactly one release ZIP under release/, found $($zips.Count)"
+          }
+          $installers = @(Get-ChildItem -Path 'release/installer' -Filter 'OiJudge-Setup-*.exe' -File -ErrorAction SilentlyContinue)
+          if ($installers.Count -eq 0) {
+            throw 'no OiJudge-Setup-*.exe under release/installer/'
+          }
+          $zip = $zips[0].FullName
+          $installer = $installers[0].FullName
+          Write-Host "tag:       $tag"
+          Write-Host "zip:       $zip ($($zips[0].Length) bytes)"
+          Write-Host "installer: $installer ($($installers[0].Length) bytes)"
+
+          # A tag push normally has no release yet; create one with the checked-in
+          # notes. Re-runs find the existing release and only re-upload assets.
+          gh release view $tag --json tagName 2>$null | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "OiJudge $tag" --notes-file docs/releases/RELEASE_NOTES.md --prerelease
+            if ($LASTEXITCODE -ne 0) { throw "gh release create $tag failed with exit code $LASTEXITCODE" }
+          }
+
+          gh release upload $tag $zip $installer --clobber
+          if ($LASTEXITCODE -ne 0) { throw "gh release upload $tag failed with exit code $LASTEXITCODE" }
+
+          Write-Host '=== release assets ==='
+          gh release view $tag --json assets
+          if ($LASTEXITCODE -ne 0) { throw "gh release view $tag failed with exit code $LASTEXITCODE" }
+
+      # Keep failures diagnosable: dump what the build produced and how much
+      # disk is left. Individual steps already fail loudly (no error is
+      # swallowed), this only adds context to the run log.
+      - name: Diagnose failure
+        if: failure()
+        shell: pwsh
+        run: |
+          Write-Host '=== release/ contents ==='
+          if (Test-Path release) {
+            Get-ChildItem release -Force | Format-Table Name, Length, LastWriteTime -AutoSize
+            Get-ChildItem release -Recurse -Filter *.exe -ErrorAction SilentlyContinue |
+              Select-Object -First 20 FullName, Length | Format-Table -AutoSize
+          } else {
+            Write-Host 'release/ does not exist (the build failed before packaging).'
+          }
+          Write-Host '=== free disk space ==='
+          Get-PSDrive -PSProvider FileSystem |
+            Select-Object Name, @{ Name = 'FreeGB'; Expression = { [math]::Round($_.Free / 1GB, 1) } } |
+            Format-Table -AutoSize
+          Write-Host '=== git status ==='
+          git status --short

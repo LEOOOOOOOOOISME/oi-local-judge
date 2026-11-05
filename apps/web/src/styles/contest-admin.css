@@ -160,3 +160,27 @@
   margin-bottom: 0;
 }
 
+/* Awards：奖项比例配置卡片 */
+.award-config-grid {
+  align-items: flex-end;
+}
+
+.award-percent-sum {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  margin-inline-end: 0;
+  font-family: var(--mono);
+}
+
+.award-config-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+}
+

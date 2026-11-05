@@ -1,9 +1,29 @@
 import type { DatabaseSync } from 'node:sqlite';
 
+export const TEAM_MODES = ['individual', 'team', 'both'] as const;
+export type TeamMode = (typeof TEAM_MODES)[number];
+
+export function isTeamMode(value: unknown): value is TeamMode {
+  return typeof value === 'string' && (TEAM_MODES as readonly string[]).includes(value);
+}
+
+export const REGISTRATION_MODES = ['manual', 'open', 'approval'] as const;
+export type RegistrationMode = (typeof REGISTRATION_MODES)[number];
+
+export function isRegistrationMode(value: unknown): value is RegistrationMode {
+  return (
+    typeof value === 'string' && (REGISTRATION_MODES as readonly string[]).includes(value)
+  );
+}
+
 export interface ContestRow {
   id: number;
   name: string;
   mode: string;
+  team_mode: TeamMode;
+  registration_mode: RegistrationMode;
+  registration_open_at: number | null;
+  registration_close_at: number | null;
   start_at: number | null;
   end_at: number | null;
   freeze_at: number | null;
@@ -11,6 +31,7 @@ export interface ContestRow {
   status: string;
   rules_json: string;
   ranking_rule_json: string;
+  award_config_json: string;
   archived_at: number | null;
   official_frozen_until: number | null;
 }
@@ -18,6 +39,10 @@ export interface ContestRow {
 export interface CreateContestInput {
   name: string;
   mode?: string;
+  teamMode?: TeamMode;
+  registrationMode?: RegistrationMode;
+  registrationOpenAt?: number | null;
+  registrationCloseAt?: number | null;
   startAt?: number | null;
   endAt?: number | null;
   freezeAt?: number | null;
@@ -27,12 +52,16 @@ export interface CreateContestInput {
 export function createContest(db: DatabaseSync, input: CreateContestInput): number {
   const result = db
     .prepare(
-      `INSERT INTO contests(name, mode, start_at, end_at, freeze_at, status)
-       VALUES (?, ?, ?, ?, ?, 'draft')`,
+      `INSERT INTO contests(name, mode, team_mode, registration_mode, registration_open_at, registration_close_at, start_at, end_at, freeze_at, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'draft')`,
     )
     .run(
       input.name,
       input.mode ?? 'oi',
+      input.teamMode ?? 'individual',
+      input.registrationMode ?? 'manual',
+      input.registrationOpenAt ?? null,
+      input.registrationCloseAt ?? null,
       input.startAt ?? null,
       input.endAt ?? null,
       input.freezeAt ?? null,
@@ -59,9 +88,21 @@ export function setContestStatus(db: DatabaseSync, id: number, status: string): 
   db.prepare('UPDATE contests SET status = ? WHERE id = ?').run(status, id);
 }
 
+export function setContestAwardConfig(
+  db: DatabaseSync,
+  id: number,
+  configJson: string,
+): void {
+  db.prepare('UPDATE contests SET award_config_json = ? WHERE id = ?').run(configJson, id);
+}
+
 export interface UpdateContestPatch {
   name?: string;
   mode?: string;
+  teamMode?: TeamMode;
+  registrationMode?: RegistrationMode;
+  registrationOpenAt?: number | null;
+  registrationCloseAt?: number | null;
   startAt?: number | null;
   endAt?: number | null;
   freezeAt?: number | null;
@@ -79,6 +120,10 @@ export function updateContest(db: DatabaseSync, id: number, patch: UpdateContest
   };
   add('name', patch.name);
   add('mode', patch.mode);
+  add('team_mode', patch.teamMode);
+  add('registration_mode', patch.registrationMode);
+  add('registration_open_at', patch.registrationOpenAt);
+  add('registration_close_at', patch.registrationCloseAt);
   add('start_at', patch.startAt);
   add('end_at', patch.endAt);
   add('freeze_at', patch.freezeAt);
@@ -175,6 +220,7 @@ export function archiveContest(db: DatabaseSync, contestId: number): void {
 export function deleteContest(db: DatabaseSync, contestId: number): void {
   db.prepare('DELETE FROM contest_problems WHERE contest_id = ?').run(contestId);
   db.prepare('DELETE FROM contest_participants WHERE contest_id = ?').run(contestId);
+  db.prepare('DELETE FROM contest_teams WHERE contest_id = ?').run(contestId);
   db.prepare('DELETE FROM contests WHERE id = ?').run(contestId);
 }
 
@@ -204,16 +250,27 @@ export function getContestProblemEntries(
     .all(contestId) as unknown as Array<{ problem_id: number; ordinal: number; points: number }>;
 }
 
-export function addParticipant(db: DatabaseSync, contestId: number, userId: number): void {
+export function addParticipant(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+  now = Date.now(),
+): void {
   db.prepare(
-    "INSERT OR IGNORE INTO contest_participants(contest_id, user_id) VALUES (?, ?)",
-  ).run(contestId, userId);
+    `INSERT INTO contest_participants(contest_id, user_id, status, registered_at)
+     VALUES (?, ?, 'accepted', ?)
+     ON CONFLICT(contest_id, user_id) DO UPDATE SET
+       status = 'accepted',
+       registered_at = COALESCE(contest_participants.registered_at, excluded.registered_at)`,
+  ).run(contestId, userId, now);
 }
 
 export function getParticipants(db: DatabaseSync, contestId: number): number[] {
   return (
     db
-      .prepare('SELECT user_id FROM contest_participants WHERE contest_id = ? ORDER BY user_id')
+      .prepare(
+        "SELECT user_id FROM contest_participants WHERE contest_id = ? AND status = 'accepted' ORDER BY user_id",
+      )
       .all(contestId) as Array<{ user_id: number }>
   ).map((row) => row.user_id);
 }
@@ -222,7 +279,7 @@ export function getVisibleParticipants(db: DatabaseSync, contestId: number): num
   return (
     db
       .prepare(
-        'SELECT user_id FROM contest_participants WHERE contest_id = ? AND hidden_at IS NULL ORDER BY user_id',
+        "SELECT user_id FROM contest_participants WHERE contest_id = ? AND status = 'accepted' AND hidden_at IS NULL ORDER BY user_id",
       )
       .all(contestId) as Array<{ user_id: number }>
   ).map((row) => row.user_id);
@@ -234,9 +291,26 @@ export function isContestParticipant(
   userId: number,
 ): boolean {
   const row = db
-    .prepare('SELECT 1 AS ok FROM contest_participants WHERE contest_id = ? AND user_id = ?')
+    .prepare(
+      "SELECT 1 AS ok FROM contest_participants WHERE contest_id = ? AND user_id = ? AND status = 'accepted'",
+    )
     .get(contestId, userId) as { ok: number } | undefined;
   return row !== undefined;
+}
+
+export function getContestParticipantStatus(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+): 'accepted' | 'pending' | 'rejected' | null {
+  const row = db
+    .prepare('SELECT status FROM contest_participants WHERE contest_id = ? AND user_id = ?')
+    .get(contestId, userId) as { status: string } | undefined;
+  if (!row) return null;
+  if (row.status === 'accepted' || row.status === 'pending' || row.status === 'rejected') {
+    return row.status;
+  }
+  return null;
 }
 
 export function getParticipantRows(db: DatabaseSync, contestId: number) {

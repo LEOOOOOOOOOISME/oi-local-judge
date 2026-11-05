@@ -10,16 +10,21 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc -b",
+    "build:help": "node tools/build-help-docs.mjs",
     "build:runner": "node tools/build-runner.mjs",
     "build:interact": "node tools/build-interact.mjs",
     "build:native": "node tools/build-runner.mjs && node tools/build-interact.mjs",
     "bench": "node tools/bench/run-all.mjs",
     "bench:compile": "node tools/bench-compile.mjs",
     "bench:concurrency": "tsx tools/bench/concurrency.mjs",
+    "bench:online": "tsx tools/bench/online.mjs",
     "seed": "tsx tools/seed/seed.ts",
     "seed:batch": "node tools/seed/make-batch-zip.mjs",
     "seed:batch:multi": "node tools/seed/make-batch-multi-zip.mjs",
-    "build": "tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/desktop/tsconfig.json && npm run build --workspace @oij/web",
+    "build": "node tools/build-help-docs.mjs && tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/desktop/tsconfig.json && npm run build --workspace @oij/web",
+    "build:portable": "node tools/build-portable.mjs",
+    "build:release": "node tools/release/build-release.mjs",
+    "release:bump": "node tools/release/bump-version.mjs",
     "start": "node apps/server/dist/cli.js",
     "electron:smoke": "electron tools/electron-smoke.cjs",
     "electron:smoke:flags": "electron --no-sandbox --disable-gpu tools/electron-smoke.cjs",
@@ -44,5 +49,5 @@
     "markdown-it-texmath": "^1.0.0",
     "sanitize-html": "^2.18.1"
   },
-  "version": "1.0.0-alpha.1"
+  "version": "1.1.0-rc.6"
 }

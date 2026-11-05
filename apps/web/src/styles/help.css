@@ -1,55 +1,252 @@
-/* Phase A：帮助中心 */
+/* 帮助中心：文档浏览 + 搜索 + 侧边栏 */
 .help-page {
   max-width: 1180px;
 }
 
-.help-sections {
+.help-layout {
+  display: grid;
+  grid-template-columns: 248px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+/* ---------- Sidebar ---------- */
+
+.help-sidebar {
+  position: sticky;
+  top: 64px;
   display: flex;
   flex-direction: column;
   gap: 14px;
-}
-
-.help-card .ant-card-body {
-  padding: 14px 18px;
-}
-
-.help-card p,
-.help-card li {
-  font-size: 13px;
-  line-height: 1.75;
-}
-
-.help-card ul {
-  margin: 8px 0;
-  padding-left: 20px;
-}
-
-.help-card li + li {
-  margin-top: 4px;
-}
-
-.help-note {
-  margin-top: 10px;
-  color: var(--text-2);
-  font-size: 12px;
-}
-
-.help-code {
-  margin: 8px 0 10px;
-  padding: 10px 12px;
-  overflow-x: auto;
+  max-height: calc(100vh - 80px);
+  padding: 12px;
+  overflow-y: auto;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #fafbfc;
-  font-family: var(--mono);
-  font-size: 12px;
-  line-height: 1.6;
+  background: var(--surface);
 }
 
-.help-card code {
+.help-search {
+  width: 100%;
+}
+
+.help-nav-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.help-nav-title {
+  margin: 0;
+  color: var(--text-3);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+}
+
+.help-nav-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.help-nav-link {
+  display: block;
+  width: 100%;
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  text-align: left;
+  cursor: pointer;
+}
+
+.help-nav-link:hover {
+  background: #f3f4f6;
+}
+
+.help-nav-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.help-nav-link.is-active {
+  background: var(--accent-weak);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* ---------- Article ---------- */
+
+.help-main {
+  min-width: 0;
+}
+
+.help-doc {
+  padding: 16px 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.help-doc-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 260px;
+}
+
+.help-doc-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 22px;
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.help-doc-meta .ant-tag {
+  margin-inline-end: 0;
+}
+
+.help-doc-path {
+  color: var(--text-3);
+}
+
+.help-doc-title {
+  margin: 6px 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+/* generated-help 的 html 首元素是文章自身的 <h1>，标题已在页面上单独展示。 */
+.help-doc-body > h1:first-child {
+  display: none;
+}
+
+.help-doc-body {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.75;
+  overflow-wrap: break-word;
+}
+
+.help-doc-body h1 {
+  margin: 0 0 12px;
+  font-size: 19px;
+}
+
+.help-doc-body h2 {
+  margin: 22px 0 8px;
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 16px;
+}
+
+.help-doc-body h3 {
+  margin: 16px 0 6px;
+  font-size: 14px;
+}
+
+.help-doc-body h4,
+.help-doc-body h5,
+.help-doc-body h6 {
+  margin: 14px 0 6px;
+  font-size: 13px;
+}
+
+.help-doc-body p {
+  margin: 8px 0;
+}
+
+.help-doc-body ul,
+.help-doc-body ol {
+  margin: 8px 0;
+  padding-left: 22px;
+}
+
+.help-doc-body li + li {
+  margin-top: 3px;
+}
+
+.help-doc-body code {
   padding: 1px 4px;
   border-radius: 3px;
   background: #f3f4f6;
   font-family: var(--mono);
   font-size: 12px;
+}
+
+.help-doc-body pre {
+  margin: 8px 0 10px;
+  padding: 10px 12px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #f6f8fa;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.help-doc-body pre code {
+  padding: 0;
+  background: transparent;
+  font-size: inherit;
+}
+
+.help-doc-body blockquote {
+  margin: 8px 0;
+  padding: 4px 12px;
+  border-left: 3px solid var(--border-strong);
+  color: var(--text-2);
+}
+
+.help-doc-body img {
+  max-width: 100%;
+}
+
+.help-doc-body table {
+  margin: 8px 0;
+  border-collapse: collapse;
+}
+
+.help-doc-body th,
+.help-doc-body td {
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  font-size: 12.5px;
+}
+
+.help-doc-body .katex-display {
+  padding: 4px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* 标题锚点在 sticky 顶栏下留出距离。 */
+.help-doc-body [id] {
+  scroll-margin-top: 64px;
+}
+
+@media (max-width: 900px) {
+  .help-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .help-sidebar {
+    position: static;
+    max-height: none;
+    overflow: visible;
+  }
 }

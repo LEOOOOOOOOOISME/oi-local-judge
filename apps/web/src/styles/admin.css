@@ -392,3 +392,245 @@
   vertical-align: bottom;
   white-space: nowrap;
 }
+
+/* Phase Authoring：Data Plan */
+.data-plan-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.data-plan-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.data-plan-summary {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.data-plan-summary .score-ok {
+  color: var(--success, #52c41a);
+}
+
+.data-plan-summary .score-bad {
+  color: var(--danger, #ff4d4f);
+}
+
+.data-plan-groups {
+  margin-bottom: 10px;
+}
+
+.data-plan-add-group {
+  margin-bottom: 12px;
+}
+
+.data-plan-json {
+  margin-top: 8px;
+}
+
+.data-plan-issues {
+  margin-top: 12px;
+}
+
+.data-plan-job-card {
+  margin-top: 4px;
+}
+
+.data-plan-cases {
+  margin-top: 12px;
+}
+
+.data-plan-case-message {
+  display: inline-block;
+  max-width: 380px;
+  overflow: hidden;
+  color: var(--danger, #ff4d4f);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.data-plan-preview {
+  max-height: 420px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle, #fafafa);
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.data-plan-gate-findings {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.data-plan-gate-findings li {
+  margin-bottom: 6px;
+}
+
+.help-tip-content {
+  max-width: 320px;
+  font-size: 12px;
+}
+
+.help-tip-content p {
+  margin: 0 0 6px;
+}
+
+.help-tip-content ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+/* System Ops v1.1：系统诊断与备份 */
+.system-overall {
+  margin-bottom: 14px;
+}
+
+.system-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.system-stat {
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+}
+
+.system-stat-ok {
+  border-color: #c8e9d5;
+  background: #ecf8f1;
+}
+
+.system-stat-warn {
+  border-color: #f0e2b8;
+  background: #fdf8e8;
+}
+
+.system-stat-bad {
+  border-color: #f3c9c9;
+  background: #fdf0f0;
+}
+
+.system-stat-label {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.system-stat-value {
+  margin-top: 1px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.system-stat-value-text {
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.6;
+}
+
+.system-check-name {
+  font-size: 12px;
+}
+
+.system-check-detail {
+  color: var(--text-2);
+  word-break: break-all;
+}
+
+.system-backup-note,
+.system-backup-feedback {
+  margin-bottom: 12px;
+}
+
+.system-backup-path {
+  display: inline-block;
+  max-width: 420px;
+  overflow: hidden;
+  color: var(--text-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+
+.system-backup-footer {
+  margin-top: 10px;
+  font-size: 12px;
+}
+
+/* Settings Center v1.1：运行时设置与恢复 */
+.system-settings-note {
+  margin-bottom: 12px;
+}
+
+.system-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+}
+
+@media (max-width: 900px) {
+  .system-settings-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.system-settings-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.system-settings-source-title {
+  margin: 18px 0 8px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.system-settings-value {
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.system-settings-env {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.system-restore-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+  font-size: 12px;
+}
+
+.system-restore-hint {
+  margin-bottom: 6px;
+  color: var(--text-2);
+  font-size: 12px;
+}

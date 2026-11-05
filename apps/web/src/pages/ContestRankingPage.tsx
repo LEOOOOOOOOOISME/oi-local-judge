@@ -1,9 +1,28 @@
-import { Alert, App, Button, Card, Empty, Space, Table, Tag, Tooltip } from 'antd';
+import { useEffect, useState } from 'react';
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Empty,
+  Segmented,
+  Space,
+  Spin,
+  Table,
+  Tag,
+  Tooltip,
+} from 'antd';
 import type { TableColumnsType } from 'antd';
 import { DownloadOutlined } from '@ant-design/icons';
-import { Link, useParams } from 'react-router-dom';
+import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import type { OfficialRanking, OfficialRankingCell, OfficialRankingRow } from '../api/types';
+import { apiGet } from '../api/client';
+import type {
+  OfficialRanking,
+  OfficialRankingRow,
+  TeamRankingRow,
+  Verdict,
+} from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { useNow } from '../hooks/useNow';
@@ -22,6 +41,11 @@ import {
   presetLabel,
 } from '../utils/officialRanking';
 import { downloadCsv } from '../utils/ranking';
+import {
+  buildTeamRankingCsv,
+  resolveTeamMode,
+  teamModeLabel,
+} from '../utils/teamContest';
 
 const PHASE_COLOR: Record<ContestPhase, string> = {
   upcoming: 'default',
@@ -30,7 +54,15 @@ const PHASE_COLOR: Record<ContestPhase, string> = {
   ended: 'default',
 };
 
-function OfficialCell({ cell }: { cell: OfficialRankingCell | undefined }) {
+type RankingView = 'individual' | 'team';
+
+interface RankCellData {
+  score: number;
+  verdict: Verdict | null;
+  attempts: number;
+}
+
+function RankCell({ cell }: { cell: RankCellData | undefined }) {
   if (!cell || (cell.score === 0 && cell.verdict === null)) {
     return <span className="official-cell official-cell-empty">—</span>;
   }
@@ -54,6 +86,14 @@ export function ContestRankingPage() {
   const validId = Number.isInteger(contestId) && contestId > 0;
   const now = useNow(1000);
   const { message } = App.useApp();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [view, setView] = useState<RankingView>(
+    searchParams.get('view') === 'team' ? 'team' : 'individual',
+  );
+
+  useEffect(() => {
+    if (searchParams.get('view') === 'team') setView('team');
+  }, [searchParams]);
 
   const rankingQuery = useQuery({
     queryKey: ['official-ranking', contestId],
@@ -65,6 +105,19 @@ export function ContestRankingPage() {
 
   const data: OfficialRanking | undefined = rankingQuery.data;
   const contest = data?.contest ?? null;
+  const teamMode = resolveTeamMode(contest);
+  const teamEnabled = teamMode !== 'individual';
+  const activeView: RankingView = teamEnabled ? view : 'individual';
+
+  // 团队榜只在团队模式且切换到团队视图时请求，个人榜保持默认行为不变。
+  const teamRankingQuery = useQuery({
+    queryKey: ['team-ranking', contestId],
+    queryFn: () => apiGet<TeamRankingRow[]>(`/api/contests/${contestId}/team-ranking`),
+    enabled: validId && teamEnabled && activeView === 'team',
+    staleTime: 5_000,
+    retry: false,
+  });
+
   const rows = data?.rows ?? [];
   const problems = data?.problems ?? [];
   const archived = data?.archived ?? false;
@@ -83,6 +136,7 @@ export function ContestRankingPage() {
           hour12: false,
         })
       : null;
+  const teamRows = teamRankingQuery.data ?? [];
 
   if (!validId) {
     return <ErrorResult error={new Error('无效的比赛编号')} />;
@@ -101,6 +155,14 @@ export function ContestRankingPage() {
   if (!data || !contest) {
     return <ErrorResult error={new Error('比赛不存在')} />;
   }
+
+  const handleViewChange = (next: RankingView) => {
+    setView(next);
+    const params = new URLSearchParams(searchParams);
+    if (next === 'team') params.set('view', 'team');
+    else params.delete('view');
+    setSearchParams(params, { replace: true });
+  };
 
   const baseColumns: TableColumnsType<OfficialRankingRow> = [
     {
@@ -157,7 +219,7 @@ export function ContestRankingPage() {
     width: 108,
     align: 'center',
     render: (_value, row) => (
-      <OfficialCell cell={row.cells.find((cell) => cell.problemId === problem.id)} />
+      <RankCell cell={row.cells.find((cell) => cell.problemId === problem.id)} />
     ),
   }));
 
@@ -213,8 +275,93 @@ export function ContestRankingPage() {
     },
   ];
 
+  const teamBaseColumns: TableColumnsType<TeamRankingRow> = [
+    {
+      title: '排名',
+      dataIndex: 'rank',
+      width: 64,
+      align: 'center',
+      render: (rank: number) => <span className={`rank-no rank-no-${rank}`}>{rank}</span>,
+    },
+    {
+      title: '团队',
+      dataIndex: 'teamName',
+      width: 220,
+      render: (value: string, row) => (
+        <div className="rank-user">
+          <span className="rank-user-name">{value}</span>
+          <span className="rank-user-meta muted">团队 #{row.teamId}</span>
+        </div>
+      ),
+    },
+    {
+      title: '成员数',
+      dataIndex: 'memberCount',
+      width: 90,
+      align: 'right',
+      render: (value: number) => <span className="mono">{value}</span>,
+    },
+    {
+      title: '总分',
+      dataIndex: 'totalScore',
+      width: 84,
+      align: 'right',
+      render: (value: number) => <strong className="rank-total">{value}</strong>,
+    },
+  ];
+
+  const teamProblemColumns: TableColumnsType<TeamRankingRow> = problems.map(
+    (problem, index) => ({
+      title: (
+        <div className="rank-problem-head">
+          <span>{problemLetter(index)}</span>
+          <span className="muted rank-problem-title">{problem.title}</span>
+          <span className="rank-problem-points">{problem.points} 分</span>
+        </div>
+      ),
+      width: 108,
+      align: 'center',
+      render: (_value, row) => (
+        <RankCell cell={row.cells.find((cell) => cell.problemId === problem.id)} />
+      ),
+    }),
+  );
+
+  const teamTrailingColumns: TableColumnsType<TeamRankingRow> = [
+    {
+      title: 'AC 数',
+      dataIndex: 'solved',
+      width: 82,
+      align: 'right',
+      render: (value: number) => <span className="mono">{value}</span>,
+    },
+    {
+      title: '最后 AC',
+      dataIndex: 'lastAcAt',
+      width: 156,
+      render: (value: number | null) =>
+        value === null ? (
+          <span className="muted">—</span>
+        ) : (
+          <span className="mono">{formatDateTime(value)}</span>
+        ),
+    },
+  ];
+
   const exportCsv = () => {
-    if (!data || rows.length === 0) {
+    if (activeView === 'team') {
+      if (teamRows.length === 0) {
+        message.warning('暂无团队榜单数据可导出');
+        return;
+      }
+      downloadCsv(
+        `contest-${contestId}-team-ranking.csv`,
+        buildTeamRankingCsv(problems, teamRows),
+      );
+      message.success('团队榜 CSV 已导出');
+      return;
+    }
+    if (rows.length === 0) {
       message.warning('暂无榜单数据可导出');
       return;
     }
@@ -231,25 +378,38 @@ export function ContestRankingPage() {
         breadcrumb={[
           { label: '比赛', to: '/contests' },
           { label: contest.name, to: `/contest/${contestId}` },
-          { label: '正式榜' },
+          { label: activeView === 'team' ? '团队榜' : '正式榜' },
         ]}
-        title={`${contest.name} · 正式榜`}
+        title={`${contest.name} · ${activeView === 'team' ? '团队榜' : '正式榜'}`}
         tags={
           <>
             <Tag color="geekblue">{presetLabel(preset)}</Tag>
             <Tag>{contestModeLabel(contest.mode)}</Tag>
+            {teamEnabled ? <Tag color="purple">{teamModeLabel(teamMode)}</Tag> : null}
             <Tag color={PHASE_COLOR[phase]}>{CONTEST_PHASE_LABEL[phase]}</Tag>
             {archived ? <Tag color="red">已归档 · 只读</Tag> : null}
             {frozen ? <Tag color="gold">封榜中</Tag> : null}
           </>
         }
         subtitle={
-          isAcm
-            ? `${presetLabel(preset)}：按通过题数与罚时排序，正式榜数据只读。`
-            : `${presetLabel(preset)}：每题取正式得分，总分降序；正式榜数据只读。`
+          activeView === 'team'
+            ? '团队榜：每题取团队成员最佳得分后求和，仅统计已报名团队。'
+            : isAcm
+              ? `${presetLabel(preset)}：按通过题数与罚时排序，正式榜数据只读。`
+              : `${presetLabel(preset)}：每题取正式得分，总分降序；正式榜数据只读。`
         }
         extra={
-          <Space>
+          <Space wrap>
+            {teamEnabled ? (
+              <Segmented<RankingView>
+                value={activeView}
+                onChange={handleViewChange}
+                options={[
+                  { value: 'individual', label: '个人榜' },
+                  { value: 'team', label: '团队榜' },
+                ]}
+              />
+            ) : null}
             <Button icon={<DownloadOutlined />} onClick={exportCsv}>
               导出 CSV
             </Button>
@@ -271,7 +431,7 @@ export function ContestRankingPage() {
           className="ranking-freeze"
           type="warning"
           showIcon
-          message="比赛已归档，当前为只读正式榜快照。"
+          message="比赛已归档，当前为只读榜单快照。"
           description="归档后不接受榜单订正；如需修改请联系管理员解除归档。"
         />
       ) : null}
@@ -299,21 +459,52 @@ export function ContestRankingPage() {
         />
       ) : null}
 
-      <Card className="oij-card">
-        {rows.length === 0 ? (
-          <Empty description="暂无参赛者" />
-        ) : (
-          <Table<OfficialRankingRow>
-            className="oij-table rank-table"
-            rowKey="userId"
-            size="small"
-            columns={[...baseColumns, ...problemColumns, ...trailingColumns]}
-            dataSource={rows}
-            pagination={false}
-            scroll={{ x: 'max-content' }}
-          />
-        )}
-      </Card>
+      {activeView === 'team' ? (
+        <Card className="oij-card">
+          {teamRankingQuery.isPending ? (
+            <div className="inline-loading">
+              <Spin />
+            </div>
+          ) : teamRankingQuery.isError ? (
+            <ErrorResult
+              error={teamRankingQuery.error}
+              onRetry={() => void teamRankingQuery.refetch()}
+            />
+          ) : teamRows.length === 0 ? (
+            <Empty description="暂无已报名团队" />
+          ) : (
+            <Table<TeamRankingRow>
+              className="oij-table rank-table"
+              rowKey="teamId"
+              size="small"
+              columns={[
+                ...teamBaseColumns,
+                ...teamProblemColumns,
+                ...teamTrailingColumns,
+              ]}
+              dataSource={teamRows}
+              pagination={false}
+              scroll={{ x: 'max-content' }}
+            />
+          )}
+        </Card>
+      ) : (
+        <Card className="oij-card">
+          {rows.length === 0 ? (
+            <Empty description="暂无参赛者" />
+          ) : (
+            <Table<OfficialRankingRow>
+              className="oij-table rank-table"
+              rowKey="userId"
+              size="small"
+              columns={[...baseColumns, ...problemColumns, ...trailingColumns]}
+              dataSource={rows}
+              pagination={false}
+              scroll={{ x: 'max-content' }}
+            />
+          )}
+        </Card>
+      )}
     </div>
   );
 }
