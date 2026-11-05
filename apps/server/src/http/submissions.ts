@@ -4,7 +4,14 @@ import type { FastifyInstance } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { requireAuth } from '../security/auth.js';
-import { getSubmissionDetail, submitSource } from '../services/submissions.js';
+import {
+  getSubmissionDetail,
+  SubmissionRateLimitError,
+  submitSource,
+} from '../services/submissions.js';
+import { ContestAccessError } from '../services/contest-access.js';
+import { ContestTeamError } from '../services/contest-teams.js';
+import { ProblemAclError } from '../services/problem-acl.js';
 import { listSubmissions, getSubmission } from '../storage/repos/submissions.js';
 
 export interface SubmissionRouteOptions {
@@ -24,6 +31,7 @@ export function registerSubmissionRoutes(
       language?: string;
       code?: string;
       contestId?: number | null;
+      teamId?: number | null;
     };
   }>('/api/submissions', { preHandler: auth }, async (request, reply) => {
     const body = request.body ?? {};
@@ -31,6 +39,16 @@ export function registerSubmissionRoutes(
       return reply.code(400).send({
         ok: false,
         error: { code: 'BAD_REQUEST', message: 'problemId, language and code are required' },
+      });
+    }
+    if (
+      body.teamId !== undefined &&
+      body.teamId !== null &&
+      (!Number.isInteger(body.teamId) || body.teamId <= 0)
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: { code: 'BAD_REQUEST', message: 'teamId must be a positive integer' },
       });
     }
     try {
@@ -42,10 +60,42 @@ export function registerSubmissionRoutes(
           language: body.language,
           code: body.code,
           contestId: body.contestId ?? null,
+          teamId: body.teamId ?? null,
         },
       );
       return reply.code(201).send({ ok: true, data: { id, status: 'queued' } });
     } catch (err) {
+      if (err instanceof ContestAccessError) {
+        return reply.code(err.status).send({
+          ok: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      if (err instanceof ContestTeamError) {
+        return reply.code(err.status).send({
+          ok: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      if (err instanceof ProblemAclError) {
+        return reply.code(err.status).send({
+          ok: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      if (err instanceof SubmissionRateLimitError) {
+        return reply
+          .code(429)
+          .header('Retry-After', String(err.retryAfterSec))
+          .send({
+            ok: false,
+            error: {
+              code: err.code,
+              message: err.message,
+              retryAfterSec: err.retryAfterSec,
+            },
+          });
+      }
       const message = (err as Error).message;
       const status = /too large/.test(message) ? 413 : /not found/.test(message) ? 404 : 400;
       return reply.code(status).send({ ok: false, error: { code: 'SUBMIT_FAILED', message } });

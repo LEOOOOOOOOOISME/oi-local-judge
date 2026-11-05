@@ -347,6 +347,272 @@
   text-align: center;
 }
 
+/* ICPC 滚榜 + OI 倒计时 */
+
+.screen-header-right {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
+.screen-countdown {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 150px;
+  padding: 8px 14px;
+  border: 1px solid #26364d;
+  border-radius: 10px;
+  background: linear-gradient(180deg, rgba(20, 32, 51, 0.92), rgba(14, 23, 38, 0.92));
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
+}
+
+.screen-countdown-label {
+  color: #8fa7c4;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+}
+
+.screen-countdown-time {
+  color: #e6edf7;
+  font-family: var(--mono);
+  font-size: clamp(24px, 2.4vw, 36px);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.screen-countdown-frozen {
+  border-color: rgba(210, 153, 34, 0.45);
+  background: rgba(210, 153, 34, 0.1);
+}
+
+.screen-countdown-frozen .screen-countdown-time {
+  color: #e3b341;
+}
+
+.screen-countdown-ended {
+  opacity: 0.72;
+}
+
+.screen-countdown-urgent {
+  border-color: rgba(248, 81, 73, 0.65);
+  background: rgba(248, 81, 73, 0.14);
+  box-shadow: 0 0 18px rgba(248, 81, 73, 0.16);
+}
+
+.screen-countdown-urgent .screen-countdown-time {
+  color: #ff7b72;
+}
+
+.screen-mode {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid #26364d;
+  border-radius: 999px;
+  background: #111c2e;
+}
+
+.screen-mode-btn {
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #9fb3cc;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.screen-mode-btn:hover {
+  color: #e6edf7;
+}
+
+.screen-mode-btn.is-active {
+  background: #1f6feb;
+  color: #fff;
+}
+
+.screen-roll-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 14px;
+  border: 1px solid #22334a;
+  border-radius: 10px;
+  background: #0e1726;
+}
+
+.screen-roll-summary {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  min-width: 280px;
+}
+
+.screen-roll-state {
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: rgba(88, 166, 255, 0.14);
+  color: #79c0ff;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.screen-roll-state-done {
+  background: rgba(63, 185, 80, 0.16);
+  color: #7ee787;
+}
+
+.screen-roll-progress-text {
+  color: #9fb3cc;
+  font-family: var(--mono);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.screen-roll-progress {
+  flex: 1;
+  min-width: 140px;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #1b2a3f;
+}
+
+.screen-roll-progress > span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, #1f6feb, #58a6ff);
+  transition: width 0.3s ease;
+}
+
+.screen-roll-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.screen-roll-btn {
+  padding: 7px 14px;
+  border: 1px solid #30435d;
+  border-radius: 6px;
+  background: #111c2e;
+  color: #c9d7e8;
+  cursor: pointer;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.screen-roll-btn:hover:not(:disabled) {
+  border-color: #58a6ff;
+  color: #fff;
+}
+
+.screen-roll-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.screen-roll-btn-primary {
+  border-color: #1f6feb;
+  background: #1f6feb;
+  color: #fff;
+}
+
+.screen-roll-btn-primary:hover:not(:disabled) {
+  border-color: #388bfd;
+  background: #388bfd;
+}
+
+.screen-roll-btn-reset {
+  border-color: rgba(248, 81, 73, 0.4);
+  color: #ffb4ad;
+}
+
+.screen-roll-btn-reset:hover:not(:disabled) {
+  border-color: #f85149;
+  color: #ff7b72;
+}
+
+.screen-roll-speed {
+  display: inline-flex;
+  padding: 2px;
+  border: 1px solid #26364d;
+  border-radius: 6px;
+  background: #111c2e;
+}
+
+.screen-roll-speed-btn {
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #9fb3cc;
+  cursor: pointer;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.screen-roll-speed-btn:hover {
+  color: #e6edf7;
+}
+
+.screen-roll-speed-btn.is-active {
+  background: #1f6feb;
+  color: #fff;
+}
+
+.screen-mode-btn:focus-visible,
+.screen-roll-btn:focus-visible,
+.screen-roll-speed-btn:focus-visible {
+  outline: 2px solid #58a6ff;
+  outline-offset: 2px;
+}
+
+.screen-roll-row {
+  transition: opacity 0.3s ease, transform 0.3s ease;
+}
+
+.screen-roll-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+}
+
+.screen-roll-revealed {
+  opacity: 1;
+  transform: none;
+}
+
+@media (max-width: 900px) {
+  .screen-header-right {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
+  .screen-countdown {
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-roll-row {
+    transition: none;
+  }
+}
+
 /* 审计页 */
 .audit-table .audit-action {
   margin-inline-end: 0;

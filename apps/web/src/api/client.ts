@@ -1,4 +1,4 @@
-import type { ApiEnvelope } from './types';
+import type { ApiEnvelope, QualityGateReport } from './types';
 
 /**
  * 统一 API client：
@@ -10,12 +10,20 @@ import type { ApiEnvelope } from './types';
 export class ApiError extends Error {
   readonly status: number;
   readonly code: string | undefined;
+  /** 发布接口在 409 时附带的质控报告。 */
+  readonly report: QualityGateReport | undefined;
 
-  constructor(status: number, message: string, code?: string) {
+  constructor(
+    status: number,
+    message: string,
+    code?: string,
+    report?: QualityGateReport,
+  ) {
     super(message);
     this.name = 'ApiError';
     this.status = status;
     this.code = code;
+    this.report = report;
   }
 }
 
@@ -118,6 +126,7 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
       response.status,
       envelope?.error?.message ?? defaultErrorMessage(response.status),
       envelope?.error?.code,
+      envelope?.error?.report,
     );
   }
 

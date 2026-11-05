@@ -1,0 +1,31 @@
+# electron-builder configuration for the NSIS installer.
+#
+# CI runs `npm run build:release` first, which produces a complete, unpacked
+# portable application at `release/oi-local-judge-<version>-win-x64/`
+# (OiJudge.exe + resources/app/ + node_modules/ + native runners). electron-builder
+# is invoked with `--prepackaged` pointing at that directory and archives it
+# as-is, so it must not pack the project sources again. `asar: false` keeps the
+# prepackaged tree byte-for-byte: the app code already lives in
+# resources/app/, and wrapping the whole portable tree in an asar would break
+# the Electron runtime and the native runners.
+appId: com.oij.localjudge
+productName: OiJudge
+
+directories:
+  output: release/installer
+
+asar: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: "OiJudge-Setup-${version}.exe"
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: OiJudge

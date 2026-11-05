@@ -106,6 +106,7 @@ const SETTER_PERMISSIONS: readonly Permission[] = [
   'data.stress_test',
   'judge.submit',
   'judge.rejudge_self',
+  'judge.rejudge_any',
   'judge.view_detail',
   'stats.view',
 ];

@@ -23,7 +23,7 @@ export function ProblemsPage() {
     <div>
       <PageHead
         title="题目"
-        subtitle="题库中的公开题目，可直接提交练习。"
+        subtitle="按你的权限可见的题目：公开题、自己的题目以及分享给你的题目。"
         extra={<span className="muted">共 {problems.length} 题</span>}
       />
       <ProblemListTable problems={problems} problemPath={(id) => `/problem/${id}`} emptyText="暂无公开题目" />

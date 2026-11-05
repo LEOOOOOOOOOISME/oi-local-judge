@@ -23,6 +23,7 @@ import {
   type TestcaseRow,
 } from '../storage/repos/problems.js';
 import {
+  cancelSubmissionState,
   finishSubmission,
   getSubmission,
   replaceTestResults,
@@ -31,6 +32,7 @@ import {
 import { compileSource } from './compiler.js';
 import { ensureCompiledProgram } from './compile-cache.js';
 import { ensureChecker } from './checker-cache.js';
+import { JudgeCanceledError, isJudgeCanceledError } from './cancellation.js';
 import {
   gradeObjective,
   parseObjectiveAnswers,
@@ -39,6 +41,12 @@ import {
 import { parseOutputAnswers, writeAnswerFiles } from './output-only.js';
 import { runInteractive } from './interactive.js';
 import { syncOnlineOfficialScore } from './official-score.js';
+import {
+  diffOfficialRanking,
+  getOfficialRanking,
+  invalidateOfficialRanking,
+  type OfficialRankingResult,
+} from '../services/official-ranking.js';
 import { getAsset } from '../storage/repos/assets.js';
 import { runChecker, type CheckerMode } from './checker.js';
 import { runSandboxed } from './runner.js';
@@ -58,7 +66,7 @@ export const JUDGE_RESULT_MESSAGE_LIMIT = 512;
 const STATUS_QUOTA_EXCEEDED = 0xc0000044; // 3221225540
 
 export interface EventPublisher {
-  publish(event: { type: string; data: unknown }): void;
+  publish(event: { type: string; data: unknown; room?: string }): void;
 }
 
 export interface JudgeSubmissionOptions {
@@ -69,6 +77,8 @@ export interface JudgeSubmissionOptions {
   events?: EventPublisher;
   /** Alias for `events`, matching the phase-1a plan's `hub` parameter name. */
   hub?: EventPublisher;
+  /** Aborting this signal stops the run and records `canceled` (not failed). */
+  signal?: AbortSignal;
 }
 
 export interface JudgedResult {
@@ -80,7 +90,7 @@ export interface JudgedResult {
   message: string;
 }
 
-const VERDICT_PRIORITY: readonly Verdict[] = ['SE', 'MLE', 'TLE', 'RE', 'PE'];
+const VERDICT_PRIORITY: readonly Verdict[] = ['SE', 'MLE', 'TLE', 'OLE', 'RE', 'PE'];
 
 export function decideOverallVerdict(results: readonly JudgedResult[], score = 0): Verdict {
   if (results.length === 0) return 'SE';
@@ -162,15 +172,61 @@ function firstStderrLine(path: string): string {
   }
 }
 
+/**
+ * Rooms a submission update must reach. Contest submissions go to the contest
+ * room and to the submitter's user room, so non-contest pages such as
+ * `/records` and `/submissions/:id` keep updating. Returns undefined for a
+ * non-contest submission, which keeps the global broadcast.
+ */
+function submissionRooms(db: DatabaseSync, submissionId: number): string[] | undefined {
+  try {
+    const submission = getSubmission(db, submissionId);
+    if (!submission || submission.contest_id === null || submission.contest_id === undefined) {
+      return undefined;
+    }
+    return [`contest:${submission.contest_id}`, `user:${submission.user_id}`];
+  } catch {
+    return undefined;
+  }
+}
+
 function publishUpdate(
+  db: DatabaseSync,
+  submissionId: number,
   events: EventPublisher | undefined,
   data: Record<string, unknown>,
 ): void {
   if (!events) return;
+  const rooms = submissionRooms(db, submissionId);
+  // No contest: one global broadcast. Contest: contest room + submitter room;
+  // a submitter connected to both rooms sees a duplicate, which the client
+  // debounces.
+  for (const room of rooms ?? [undefined]) {
+    try {
+      events.publish({
+        type: WS_EVENTS.submissionUpdated,
+        data,
+        ...(room === undefined ? {} : { room }),
+      });
+    } catch {
+      // A broken event sink must never break judging.
+    }
+  }
+}
+
+/**
+ * Drops the cached official ranking of the contest a submission belongs to.
+ * Runs after a judge result is persisted; a non-contest submission needs no
+ * invalidation. Failures are swallowed so caching can never break judging.
+ */
+function invalidateRankingForSubmission(db: DatabaseSync, submissionId: number): void {
   try {
-    events.publish({ type: WS_EVENTS.submissionUpdated, data });
+    const submission = getSubmission(db, submissionId);
+    if (submission?.contest_id !== null && submission?.contest_id !== undefined) {
+      invalidateOfficialRanking(db, submission.contest_id);
+    }
   } catch {
-    // A broken event sink must never break judging.
+    // A cache miss is always safe; a broken invalidation is not worth a failure.
   }
 }
 
@@ -207,7 +263,7 @@ function persistJudged(
       message,
     });
   });
-  publishUpdate(events, {
+  publishUpdate(db, submissionId, events, {
     submissionId,
     status: 'finished',
     verdict,
@@ -218,6 +274,7 @@ function persistJudged(
     results,
   });
   syncOnlineOfficialScore(db, submissionId);
+  invalidateRankingForSubmission(db, submissionId);
 }
 
 function markSubmissionFailed(
@@ -238,7 +295,7 @@ function markSubmissionFailed(
       message: clipped,
     });
   });
-  publishUpdate(events, {
+  publishUpdate(db, submissionId, events, {
     submissionId,
     status: 'failed',
     verdict: 'SE',
@@ -247,6 +304,42 @@ function markSubmissionFailed(
     memoryKb: 0,
     message: clipped,
   });
+  invalidateRankingForSubmission(db, submissionId);
+}
+
+/**
+ * Records a cancellation instead of a failure. A canceled run never gets a
+ * verdict, so the page shows `canceled` rather than SE/WA.
+ */
+function markSubmissionCanceled(
+  db: DatabaseSync,
+  submissionId: number,
+  events: EventPublisher | undefined,
+): void {
+  transaction(db, () => cancelSubmissionState(db, submissionId));
+  publishUpdate(db, submissionId, events, {
+    submissionId,
+    status: 'canceled',
+    verdict: null,
+    score: 0,
+    timeMs: 0,
+    memoryKb: 0,
+    message: '',
+    results: [],
+  });
+  invalidateRankingForSubmission(db, submissionId);
+}
+
+/** Throws a recognizable error when the submission was canceled. */
+function throwIfCanceled(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) {
+    throw new JudgeCanceledError();
+  }
+}
+
+/** True when a caught error is the result of canceling the run. */
+function isCanceledFailure(err: unknown, signal: AbortSignal | undefined): boolean {
+  return isJudgeCanceledError(err) || signal?.aborted === true;
 }
 
 export async function judgeTestcase(args: {
@@ -256,8 +349,10 @@ export async function judgeTestcase(args: {
   workdir: string;
   outExe: string;
   checkerExe?: string;
+  signal?: AbortSignal;
 }): Promise<JudgedResult> {
-  const { config, problem, testcase, workdir, outExe, checkerExe } = args;
+  const { config, problem, testcase, workdir, outExe, checkerExe, signal } = args;
+  throwIfCanceled(signal);
   const stdoutFile = join(workdir, `case-${testcase.id}.out`);
   const stderrFile = join(workdir, `case-${testcase.id}.err`);
   const inputPath = resolveDataPath(config.dataDir, testcase.input_path);
@@ -284,7 +379,10 @@ export async function judgeTestcase(args: {
     stdinFile,
     stdoutFile,
     stderrFile,
+    signal,
   });
+
+  throwIfCanceled(signal);
 
   const base = {
     testcaseId: testcase.id,
@@ -314,6 +412,22 @@ export async function judgeTestcase(args: {
       verdict: 'TLE',
       message: clipMessage(
         `time limit exceeded (cpu ${run.cpuMs} ms, wall ${run.wallMs} ms, limit ${timeLimitMs} ms)`,
+      ),
+    };
+  }
+  // Output limit (OLE) is checked after the resource verdicts MLE/TLE (a
+  // process killed for those reasons may have produced partial output) but
+  // before RE/WA, so an output bomb is never misreported as a runtime error or
+  // a wrong answer.
+  const outputLimitMb = Math.max(1, Math.floor(problem.output_mb ?? 64));
+  const outputLimitBytes = outputLimitMb * 1024 * 1024;
+  const outputBytes = run.stdoutBytes + run.stderrBytes;
+  if (outputBytes > outputLimitBytes) {
+    return {
+      ...base,
+      verdict: 'OLE',
+      message: clipMessage(
+        `output limit exceeded (stdout ${run.stdoutBytes} bytes, stderr ${run.stderrBytes} bytes, limit ${outputLimitMb} MB)`,
       ),
     };
   }
@@ -368,13 +482,17 @@ export async function judgeTestcase(args: {
  * submission row. Internal failures are recorded as failed + SE instead of
  * rejecting, so a scheduler can keep processing.
  */
-export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<void> {
-  const { db, config, submissionId } = options;
+async function judgeSubmissionInternal(options: JudgeSubmissionOptions): Promise<void> {
+  const { db, config, submissionId, signal } = options;
   const events = options.events ?? options.hub;
 
   const submission = getSubmission(db, submissionId);
   if (!submission) {
     throw new Error(`submission ${submissionId} not found`);
+  }
+  if (signal?.aborted) {
+    markSubmissionCanceled(db, submissionId, events);
+    return;
   }
 
   const problem = getProblem(db, submission.problem_id);
@@ -390,6 +508,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
 
   if (problem.type === 'objective') {
     try {
+      throwIfCanceled(signal);
       setSubmissionStatus(db, submissionId, 'running');
       const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
       const objective = parseObjectiveConfig(problem.objective_json);
@@ -399,6 +518,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       }
       const answers = parseObjectiveAnswers(readFileSync(sourcePath, 'utf8'));
       const graded = gradeObjective(objective, answers);
+      throwIfCanceled(signal);
       persistJudged(
         db,
         submissionId,
@@ -408,6 +528,14 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         graded.score,
       );
     } catch (err) {
+      if (isCanceledFailure(err, signal)) {
+        try {
+          markSubmissionCanceled(db, submissionId, events);
+        } catch {
+          // The database may be gone; the scheduler records the task separately.
+        }
+        return;
+      }
       markSubmissionFailed(
         db,
         submissionId,
@@ -428,11 +556,13 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
     mkdirSync(tmpRoot, { recursive: true });
     const workdir = mkdtempSync(join(tmpRoot, `answer-${submissionId}-`));
     try {
+      throwIfCanceled(signal);
       setSubmissionStatus(db, submissionId, 'running');
       const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
       const answers = parseOutputAnswers(readFileSync(sourcePath, 'utf8'), testcases);
       const answerPaths = writeAnswerFiles(join(workdir, 'answers'), testcases, answers);
       const results = testcases.map((testcase) => {
+        throwIfCanceled(signal);
         const accepted = outputMatches(
           resolveDataPath(config.dataDir, testcase.output_path),
           answerPaths.get(testcase.id)!,
@@ -448,6 +578,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         };
       });
       const score = results.reduce((sum, result) => sum + result.score, 0);
+      throwIfCanceled(signal);
       persistJudged(
         db,
         submissionId,
@@ -457,6 +588,14 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         score,
       );
     } catch (err) {
+      if (isCanceledFailure(err, signal)) {
+        try {
+          markSubmissionCanceled(db, submissionId, events);
+        } catch {
+          // The database may be gone; the scheduler records the task separately.
+        }
+        return;
+      }
       markSubmissionFailed(
         db,
         submissionId,
@@ -492,6 +631,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         sourcePath,
         language: submission.language,
       });
+      throwIfCanceled(signal);
       if (!compiled.ok || !compiled.exe) {
         persistJudged(db, submissionId, events, [], 'CE', 0, clipMessage(compiled.message));
         return;
@@ -504,6 +644,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         includeDir: join(process.cwd(), 'vendor'),
         timeoutMs: 60_000,
       });
+      throwIfCanceled(signal);
       if (!interactor.ok || !interactor.exe) {
         markSubmissionFailed(
           db,
@@ -513,9 +654,11 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         );
         return;
       }
+      throwIfCanceled(signal);
       setSubmissionStatus(db, submissionId, 'running');
       const results = [];
       for (const testcase of testcases) {
+        throwIfCanceled(signal);
         const inputPath = resolveDataPath(config.dataDir, testcase.input_path);
         const answerPath = resolveDataPath(config.dataDir, testcase.output_path);
         const run = await runInteractive({
@@ -530,6 +673,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
           interactorErr: join(workdir, `interactor-${testcase.id}.err`),
           contestantErr: join(workdir, `contestant-${testcase.id}.err`),
         });
+        throwIfCanceled(signal);
         results.push({
           testcaseId: testcase.id,
           verdict: run.verdict,
@@ -540,6 +684,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         });
       }
       const score = results.reduce((sum, result) => sum + result.score, 0);
+      throwIfCanceled(signal);
       persistJudged(
         db,
         submissionId,
@@ -549,6 +694,14 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         score,
       );
     } catch (err) {
+      if (isCanceledFailure(err, signal)) {
+        try {
+          markSubmissionCanceled(db, submissionId, events);
+        } catch {
+          // The database may be gone; the scheduler records the task separately.
+        }
+        return;
+      }
       markSubmissionFailed(
         db,
         submissionId,
@@ -575,6 +728,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
   try {
     const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
 
+    throwIfCanceled(signal);
     setSubmissionStatus(db, submissionId, 'compiling');
     const compiled = await ensureCompiledProgram({
       gxx: config.gxx,
@@ -582,6 +736,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       sourcePath,
       language: submission.language,
     });
+    throwIfCanceled(signal);
     if (!compiled.ok || !compiled.exe) {
       persistJudged(db, submissionId, events, [], 'CE', 0, clipMessage(compiled.message));
       return;
@@ -601,6 +756,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         sourcePath: resolveDataPath(config.dataDir, problem.checker_path),
         includeDir: join(process.cwd(), 'vendor'),
       });
+      throwIfCanceled(signal);
       if (!checkerCompiled.ok || !checkerCompiled.exe) {
         markSubmissionFailed(
           db,
@@ -613,10 +769,12 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       checkerExe = checkerCompiled.exe;
     }
 
+    throwIfCanceled(signal);
     setSubmissionStatus(db, submissionId, 'running');
     const results: JudgedResult[] = [];
     const passed = new Set<number>();
     for (const testcase of testcases) {
+      throwIfCanceled(signal);
       const dependencies = (testcase.depends_on ?? '')
         .split(/[,\s]+/)
         .filter(Boolean)
@@ -640,7 +798,9 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
         workdir,
         outExe,
         checkerExe,
+        signal,
       });
+      throwIfCanceled(signal);
       results.push(result);
       if (result.verdict === 'AC') passed.add(testcase.id);
     }
@@ -661,6 +821,7 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
     }));
     const score = aggregateSubtask(dtoResults, subtaskGroups);
 
+    throwIfCanceled(signal);
     persistJudged(
       db,
       submissionId,
@@ -670,6 +831,15 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
       score,
     );
   } catch (err) {
+    if (isCanceledFailure(err, signal)) {
+      try {
+        markSubmissionCanceled(db, submissionId, events);
+      } catch {
+        // The database itself may be unavailable; the scheduler records the
+        // task failure separately.
+      }
+      return;
+    }
     const message = err instanceof Error ? err.message : String(err);
     try {
       markSubmissionFailed(db, submissionId, events, `judge failed: ${message}`);
@@ -679,5 +849,71 @@ export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<
     }
   } finally {
     rmSync(workdir, { recursive: true, force: true });
+  }
+}
+
+/** Publishes one compact ranking delta to the contest room. */
+function publishRankingDelta(
+  events: EventPublisher | undefined,
+  contestId: number,
+  before: OfficialRankingResult,
+  after: OfficialRankingResult,
+): void {
+  if (!events) return;
+  const delta = diffOfficialRanking(before, after);
+  if (!delta) return;
+  try {
+    // `hub.publish` also delivers room events to admin subscribers, and a
+    // client that joined no contest room never receives another contest's
+    // standings. The payload is one rows subset, never the whole board.
+    events.publish({
+      type: WS_EVENTS.rankingDelta,
+      data: delta,
+      room: `contest:${contestId}`,
+    });
+  } catch {
+    // A broken event sink must never break judging.
+  }
+}
+
+/**
+ * Judges one submission, then pushes a `ranking.delta` for contest submissions.
+ *
+ * The board snapshot is taken before judging starts and again in `finally`.
+ * `persistJudged` invalidates the ranking cache, so the second snapshot is a
+ * fresh computation that carries a bumped version; diffing the two produces
+ * only the changed rows. Non-contest submissions and unchanged boards publish
+ * nothing. This wrapper never adds a second `submission.updated` event.
+ */
+export async function judgeSubmission(options: JudgeSubmissionOptions): Promise<void> {
+  const { db, config, submissionId } = options;
+  const events = options.events ?? options.hub;
+
+  let contestId: number | null = null;
+  let before: OfficialRankingResult | null = null;
+  try {
+    const submission = getSubmission(db, submissionId);
+    contestId = submission?.contest_id ?? null;
+    // Without an event sink there is nothing to publish, so skip the snapshots
+    // entirely (tests and internal callers pass no hub).
+    if (events && contestId !== null) {
+      before = await getOfficialRanking(db, contestId, config.dataDir);
+    }
+  } catch {
+    // Ranking snapshots are best effort; they must never block judging.
+    before = null;
+  }
+
+  try {
+    await judgeSubmissionInternal(options);
+  } finally {
+    if (contestId !== null && before !== null) {
+      try {
+        const after = await getOfficialRanking(db, contestId, config.dataDir);
+        if (after) publishRankingDelta(events, contestId, before, after);
+      } catch {
+        // A failed snapshot/diff/publish must never break judging.
+      }
+    }
   }
 }

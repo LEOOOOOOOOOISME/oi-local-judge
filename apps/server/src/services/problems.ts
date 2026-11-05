@@ -14,9 +14,112 @@ import {
   getProblem,
   getTestcases,
   listProblems,
+  updateProblem,
+  type CreateProblemInput,
+  type ProblemOwnerType,
   type ProblemRow,
+  type UpdateProblemPatch,
 } from '../storage/repos/problems.js';
+import { getTeamRow } from '../storage/repos/teams.js';
+import { getUserById } from '../storage/repos/users.js';
 
+export type { ProblemOwnerType } from '../storage/repos/problems.js';
+
+export interface ProblemOwner {
+  ownerType: ProblemOwnerType;
+  ownerId: number | null;
+}
+
+/**
+ * Ownership validation for create/update. `system` ownership has no owner id;
+ * `user`/`team` owners must reference an existing user/team.
+ */
+export class ProblemOwnerError extends Error {
+  readonly code = 'PROBLEM_OWNER_INVALID';
+  readonly status = 400;
+
+  constructor(message: string) {
+    super(message);
+    this.name = 'ProblemOwnerError';
+  }
+}
+
+export function resolveProblemOwner(
+  db: DatabaseSync,
+  input: { ownerType?: unknown; ownerId?: unknown },
+): ProblemOwner {
+  const ownerType = input.ownerType ?? 'system';
+  if (ownerType !== 'system' && ownerType !== 'user' && ownerType !== 'team') {
+    throw new ProblemOwnerError('ownerType must be system, user or team');
+  }
+  if (ownerType === 'system') {
+    if (input.ownerId !== undefined && input.ownerId !== null) {
+      throw new ProblemOwnerError('system-owned problems cannot have an ownerId');
+    }
+    return { ownerType, ownerId: null };
+  }
+  const ownerId = input.ownerId;
+  if (typeof ownerId !== 'number' || !Number.isSafeInteger(ownerId) || ownerId <= 0) {
+    throw new ProblemOwnerError('ownerId must be a positive integer');
+  }
+  if (ownerType === 'user') {
+    if (!getUserById(db, ownerId)) {
+      throw new ProblemOwnerError('owner user not found');
+    }
+  } else if (!getTeamRow(db, ownerId)) {
+    throw new ProblemOwnerError('owner team not found');
+  }
+  return { ownerType, ownerId };
+}
+
+export type CreateProblemWithOwnerInput = Omit<
+  CreateProblemInput,
+  'ownerType' | 'ownerId'
+> & {
+  ownerType?: unknown;
+  ownerId?: unknown;
+};
+
+/** Creates a problem after validating its owner type/id. */
+export function createProblemWithOwner(
+  db: DatabaseSync,
+  input: CreateProblemWithOwnerInput,
+): number {
+  const { ownerType, ownerId, ...rest } = input;
+  const owner = resolveProblemOwner(db, { ownerType, ownerId });
+  return createProblem(db, { ...rest, ...owner });
+}
+
+export type UpdateProblemWithOwnerPatch = Omit<
+  UpdateProblemPatch,
+  'ownerType' | 'ownerId'
+> & {
+  ownerType?: unknown;
+  ownerId?: unknown;
+};
+
+/** Updates a problem and validates ownership changes before writing. */
+export function updateProblemWithOwner(
+  db: DatabaseSync,
+  id: number,
+  patch: UpdateProblemWithOwnerPatch,
+): boolean {
+  const current = getProblem(db, id);
+  if (!current) return false;
+  const { ownerType, ownerId, ...rest } = patch;
+  if (ownerType === undefined && ownerId === undefined) {
+    return updateProblem(db, id, rest);
+  }
+  const nextType = ownerType ?? current.owner_type;
+  const nextId =
+    nextType === 'system'
+      ? ownerId
+      : ownerId !== undefined
+        ? ownerId
+        : current.owner_id;
+  const owner = resolveProblemOwner(db, { ownerType: nextType, ownerId: nextId });
+  return updateProblem(db, id, { ...rest, ...owner });
+}
 
 interface ProblemJson {
   title: string;
@@ -50,6 +153,8 @@ export function problemToSummary(row: ProblemRow): ProblemSummaryDto {
     tags: JSON.parse(row.tags_json) as string[],
     timeMs: row.time_ms,
     memoryMb: row.memory_mb,
+    ownerType: row.owner_type,
+    ownerId: row.owner_id,
   };
 }
 
@@ -197,6 +302,8 @@ export function importProblemDirectory(options: {
     checkerMode,
     compareMode: manifest.checker?.compare ?? 'ignore-trailing',
     objective: manifest.objective,
+    ownerType: 'system',
+    ownerId: null,
     testcases: (manifest.testcases ?? []).map((testcase) => ({
       inputPath: testcase.input,
       outputPath: testcase.output,

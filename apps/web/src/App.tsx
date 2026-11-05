@@ -28,6 +28,11 @@ const ContestRankingPage = lazy(() =>
     default: module.ContestRankingPage,
   })),
 );
+const ContestAwardsPage = lazy(() =>
+  import('./pages/ContestAwardsPage').then((module) => ({
+    default: module.ContestAwardsPage,
+  })),
+);
 const SubmissionDetailPage = lazy(() =>
   import('./pages/SubmissionDetailPage').then((module) => ({
     default: module.SubmissionDetailPage,
@@ -63,6 +68,20 @@ const AdminContestBatchPage = lazy(() =>
 const AdminUsersPage = lazy(() =>
   import('./pages/AdminUsersPage').then((module) => ({ default: module.AdminUsersPage })),
 );
+const TeamsPage = lazy(() =>
+  import('./pages/TeamsPage').then((module) => ({ default: module.TeamsPage })),
+);
+const TeamDetailPage = lazy(() =>
+  import('./pages/TeamDetailPage').then((module) => ({ default: module.TeamDetailPage })),
+);
+const ProblemSetsPage = lazy(() =>
+  import('./pages/ProblemSetsPage').then((module) => ({ default: module.ProblemSetsPage })),
+);
+const ProblemSetDetailPage = lazy(() =>
+  import('./pages/ProblemSetDetailPage').then((module) => ({
+    default: module.ProblemSetDetailPage,
+  })),
+);
 const DiscussPage = lazy(() =>
   import('./pages/DiscussPage').then((module) => ({ default: module.DiscussPage })),
 );
@@ -82,6 +101,9 @@ const ContestScreenPage = lazy(() =>
 );
 const AdminAuditPage = lazy(() =>
   import('./pages/AdminAuditPage').then((module) => ({ default: module.AdminAuditPage })),
+);
+const AdminSystemPage = lazy(() =>
+  import('./pages/AdminSystemPage').then((module) => ({ default: module.AdminSystemPage })),
 );
 const AdminRankingPluginsPage = lazy(() =>
   import('./pages/AdminRankingPluginsPage').then((module) => ({
@@ -110,6 +132,7 @@ export function AppRoutes() {
         <Route path="/problem/:problemId" element={<ProblemPage />} />
         <Route path="/contest/:contestId" element={<ContestOverviewPage />} />
         <Route path="/contest/:contestId/ranking" element={<ContestRankingPage />} />
+        <Route path="/contest/:contestId/awards" element={<ContestAwardsPage />} />
         <Route path="/contest/:contestId/correction" element={<ContestCorrectionPage />} />
         <Route path="/help" element={<HelpPage />} />
         <Route path="/contest/:contestId/problem/:problemId" element={<ProblemPage />} />
@@ -200,6 +223,46 @@ export function AppRoutes() {
             <AdminOnlyRoute>
               <AdminRankingPluginsPage />
             </AdminOnlyRoute>
+          }
+        />
+        <Route
+          path="/admin/system"
+          element={
+            <AdminOnlyRoute>
+              <AdminSystemPage />
+            </AdminOnlyRoute>
+          }
+        />
+        <Route
+          path="/teams"
+          element={
+            <ProtectedRoute>
+              <TeamsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/teams/:id"
+          element={
+            <ProtectedRoute>
+              <TeamDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/problem-sets"
+          element={
+            <ProtectedRoute>
+              <ProblemSetsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/problem-sets/:id"
+          element={
+            <ProtectedRoute>
+              <ProblemSetDetailPage />
+            </ProtectedRoute>
           }
         />
         <Route path="/discuss" element={<DiscussPage />} />

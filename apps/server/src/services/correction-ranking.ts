@@ -9,6 +9,7 @@ import { listOfficialScores, seedOfficialScoresFromSubmissions } from '../storag
 import { listContestSubmissions } from '../storage/repos/submissions.js';
 import { getProblem } from '../storage/repos/problems.js';
 import { getUserById } from '../storage/repos/users.js';
+import { invalidateOfficialRanking } from './official-ranking.js';
 
 export interface CorrectionCell {
   problemId: number;
@@ -56,7 +57,10 @@ export function getCorrectionRanking(
   }));
   const userIds = getVisibleParticipants(db, contestId);
   if (listOfficialScores(db, contestId).length === 0) {
-    seedOfficialScoresFromSubmissions(db, contestId);
+    // Seeding writes official cells, so the cached official ranking is stale.
+    if (seedOfficialScoresFromSubmissions(db, contestId) > 0) {
+      invalidateOfficialRanking(db, contestId);
+    }
   }
   const official = new Map(
     listOfficialScores(db, contestId).map((row) => [
@@ -139,6 +143,9 @@ export function getCorrectionRanking(
     row.rank = rows[index - 1].correctedTotal === row.correctedTotal ? rows[index - 1].rank : index + 1;
   });
 
+  const endedBySchedule =
+    contest.end_at !== null && now >= contest.end_at && contest.status !== 'draft';
+
   return {
     contest,
     problems,
@@ -146,7 +153,7 @@ export function getCorrectionRanking(
     correctionsOpen:
       contest.status === 'ended' ||
       contest.status === 'archived' ||
-      (contest.end_at !== null && now >= contest.end_at),
+      endedBySchedule,
     archived: contest.archived_at !== null,
   };
 }

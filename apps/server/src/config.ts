@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { cpus, homedir } from 'node:os';
 import { join } from 'node:path';
+import { readPersistedSettings } from './services/settings.js';
 
 export interface Config {
   host: string;
@@ -58,22 +59,27 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       ? join(repoRoot, 'runtime')
       : join(env.LOCALAPPDATA ?? join(homedir(), 'AppData', 'Local'), 'OiJudge');
   }
+
+  // Priority: explicit environment variable > persisted settings.json > default.
+  // The data directory must be known first so the settings file can be located.
+  const persisted = readPersistedSettings(dataDir);
+  const defaultConcurrency = Math.min(4, cpus().length);
   return {
-    host: env.OIJ_HOST ?? '0.0.0.0',
-    port: Number(env.OIJ_PORT ?? 8787),
+    host: env.OIJ_HOST ?? persisted.host ?? '0.0.0.0',
+    port: Number(env.OIJ_PORT ?? persisted.port ?? 8787),
     dataDir,
     judgeConcurrency: Math.max(
       1,
-      Number(env.OIJ_JUDGE_CONCURRENCY ?? Math.min(4, cpus().length)),
+      Number(env.OIJ_JUDGE_CONCURRENCY ?? persisted.judgeConcurrency ?? defaultConcurrency),
     ),
-    gxx: detectGxx(env),
+    gxx: env.OIJ_GXX !== undefined ? detectGxx(env) : (persisted.gxx ?? detectGxx(env)),
     runnerPath: env.OIJ_RUNNER ?? join(process.cwd(), 'native/runner/out/ojrunner.exe'),
     interactRunnerPath:
       env.OIJ_INTERACT_RUNNER ?? join(process.cwd(), 'native/interact/out/ojinteract.exe'),
     adminUsername: env.OIJ_ADMIN_USERNAME ?? 'admin',
     adminPassword: env.OIJ_ADMIN_PASSWORD ?? 'admin123',
     sessionSecret: env.OIJ_SESSION_SECRET ?? 'dev-only-change-me',
-    sessionTtlSec: Number(env.OIJ_SESSION_TTL ?? 8 * 3600),
+    sessionTtlSec: Number(env.OIJ_SESSION_TTL ?? persisted.sessionTtlSec ?? 8 * 3600),
   };
 }
 

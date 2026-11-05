@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
-import { getOfficialRanking } from '../src/services/official-ranking.js';
+import { getOfficialRanking, invalidateOfficialRanking } from '../src/services/official-ranking.js';
 import { createContest } from '../src/storage/repos/contests.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import {
@@ -75,6 +75,9 @@ export function compute(input) {
     expect(first?.rows.map((row) => row.totalScore)).toEqual([20, 10]);
 
     setRankingPluginEnabled(db, plugin.id, false);
+    // Disabling a plugin goes through the admin route, which invalidates the
+    // cached ranking; this direct repository call must do the same.
+    invalidateOfficialRanking(db, contestId);
     const fallback = await getOfficialRanking(db, contestId, root);
     expect(fallback?.preset).toBe('plugin:reverse');
     expect(fallback?.pluginError).toContain('missing or disabled');

@@ -3,6 +3,8 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 
+import { JudgeCanceledError } from './cancellation.js';
+
 const execFileAsync = promisify(execFile);
 
 export interface RunOptions {
@@ -26,6 +28,8 @@ export interface RunOptions {
   stdoutFile: string;
   /** File redirected to the child's stderr. */
   stderrFile: string;
+  /** Aborting this signal terminates the sandboxed runner process. */
+  signal?: AbortSignal;
 }
 
 export interface RunResult {
@@ -107,6 +111,9 @@ function toText(value: string | Buffer): string {
  */
 export async function runSandboxed(o: RunOptions): Promise<RunResult> {
   const runner = o.runner ?? defaultRunnerPath();
+  if (o.signal?.aborted) {
+    throw new JudgeCanceledError();
+  }
   if (!existsSync(runner)) {
     throw new Error(
       `ojrunner not found at ${runner}; run "node tools/build-runner.mjs" first`,
@@ -140,13 +147,24 @@ export async function runSandboxed(o: RunOptions): Promise<RunResult> {
       windowsHide: true,
       maxBuffer: 1024 * 1024,
       encoding: 'utf8',
+      signal: o.signal,
     });
     stdout = toText(outcome.stdout);
   } catch (err) {
     const failure = err as NodeJS.ErrnoException & {
       stdout?: string | Buffer;
       stderr?: string | Buffer;
+      name?: string;
     };
+    // Cancellation is not a runner failure: the process was terminated on
+    // purpose, so surface a dedicated error the pipeline can map to `canceled`.
+    if (
+      o.signal?.aborted ||
+      failure.name === 'AbortError' ||
+      failure.code === 'ABORT_ERR'
+    ) {
+      throw new JudgeCanceledError();
+    }
     // The runner prints a JSON diagnostic even on internal failures, so prefer
     // that over the generic exec error when both are available.
     if (failure.stdout !== undefined && toText(failure.stdout).trim().length > 0) {
@@ -162,6 +180,10 @@ export async function runSandboxed(o: RunOptions): Promise<RunResult> {
     }
   }
 
+  // A signal can fire between the runner exiting and stdout being parsed.
+  if (o.signal?.aborted) {
+    throw new JudgeCanceledError();
+  }
   const result = parseRunnerOutput(stdout);
   if (result.ok === false || result.error !== undefined) {
     throw new Error(`ojrunner internal error: ${result.error ?? 'unknown'}`);

@@ -73,6 +73,12 @@ export function AppShell() {
             </NavLink>
             {user ? (
               <>
+                <NavLink to="/problem-sets" className={navClass}>
+                  题单
+                </NavLink>
+                <NavLink to="/teams" className={navClass}>
+                  团队
+                </NavLink>
                 <NavLink to="/records" className={navClass}>
                   我的记录
                 </NavLink>
@@ -108,6 +114,9 @@ export function AppShell() {
                 </NavLink>
                 <NavLink to="/admin/ranking-plugins" className={navClass}>
                   排名插件
+                </NavLink>
+                <NavLink to="/admin/system" className={navClass}>
+                  系统运维
                 </NavLink>
               </>
             ) : null}

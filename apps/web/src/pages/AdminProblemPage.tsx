@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type DragEvent } from 'react';
 import {
   Alert,
   App,
   Button,
   Card,
   Col,
+  Descriptions,
   Empty,
   Form,
   Input,
@@ -33,6 +34,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { ApiError, apiDelete, apiGet, apiPost, apiPut, apiUpload } from '../api/client';
 import type {
   AdminDataImportResult,
+  AdminProblemDetail,
   AdminTestcase,
   AssetKind,
   CompileAssetResult,
@@ -40,19 +42,23 @@ import type {
   ObjectiveQuestion,
   ProblemAsset,
   ProblemAssetSource,
-  ProblemDetail,
+  ProblemOwnerType,
   ProblemType,
   SelfTestResult,
   SelfTestTestcaseResult,
   StressResult,
+  TeamSummary,
   UpdateProblemRequest,
   ValidateResult,
   ValidateTestcaseResult,
 } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
 import { CodeBlock } from '../components/CodeBlock';
 import { ObjectiveQuestionEditor, validateObjectiveQuestions } from '../components/ObjectiveQuestionEditor';
+import { DataPlanPanel } from '../components/DataPlanPanel';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
+import { ProblemSharePanel } from '../components/ProblemSharePanel';
 import { VerdictBadge } from '../components/VerdictBadge';
 import {
   formatBytes,
@@ -62,6 +68,14 @@ import {
   formatRunTime,
   formatTimeLimit,
 } from '../utils/format';
+import {
+  PROBLEM_OWNER_TYPE_LABEL,
+  PROBLEM_OWNER_TYPE_OPTIONS,
+  canManageProblemShares,
+  describeProblemAclError,
+  problemOwnerColor,
+  problemOwnerLabel,
+} from '../utils/problemAcl';
 import {
   PROBLEM_TYPE_LABEL,
   difficultyLabel,
@@ -264,7 +278,7 @@ function OutputBlock({ title, content }: { title: string; content: string }) {
   );
 }
 
-function toBasicFormValues(problem: ProblemDetail): BasicFormValues {
+function toBasicFormValues(problem: AdminProblemDetail): BasicFormValues {
   return {
     title: problem.title,
     type: problem.type,
@@ -287,9 +301,12 @@ export function AdminProblemPage() {
   const problemId = Number(params.problemId);
   const validId = Number.isInteger(problemId) && problemId > 0;
   const { message } = App.useApp();
+  const { user } = useAuth();
   const queryClient = useQueryClient();
   const [activeTab, setActiveTab] = useState('basic');
   const [basicForm] = Form.useForm<BasicFormValues>();
+  const [ownerTypeDraft, setOwnerTypeDraft] = useState<ProblemOwnerType>('system');
+  const [ownerIdDraft, setOwnerIdDraft] = useState<number | null>(null);
   const basicIoMode = Form.useWatch('ioMode', basicForm);
   const basicType = Form.useWatch('type', basicForm);
   const [objectiveDraft, setObjectiveDraft] = useState<ObjectiveQuestion[]>([]);
@@ -340,8 +357,14 @@ export function AdminProblemPage() {
 
   const problemQuery = useQuery({
     queryKey: ['admin-problem', problemId],
-    queryFn: () => apiGet<ProblemDetail>(`/api/admin/problems/${problemId}`),
+    queryFn: () => apiGet<AdminProblemDetail>(`/api/admin/problems/${problemId}`),
     enabled: validId,
+  });
+  const teamsQuery = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => apiGet<TeamSummary[]>('/api/teams'),
+    enabled: validId,
+    staleTime: 60_000,
   });
   const assetsQuery = useQuery({
     queryKey: ['admin-assets', problemId],
@@ -357,11 +380,37 @@ export function AdminProblemPage() {
   const problem = problemQuery.data ?? null;
   const isObjective = (basicType ?? problem?.type) === 'objective';
   const isOutputOnly = (basicType ?? problem?.type) === 'output-only';
+  const teams = teamsQuery.data ?? [];
+  const teamNames = useMemo(
+    () => new Map(teams.map((team) => [team.id, team.name] as const)),
+    [teams],
+  );
+  const canManage = problem
+    ? canManageProblemShares({
+        ownerType: problem.ownerType,
+        ownerId: problem.ownerId,
+        userId: user?.id,
+        role: user?.role,
+        teams,
+      })
+    : false;
+  const ownerLabel = problem
+    ? problemOwnerLabel(problem.ownerType, problem.ownerId, {
+        currentUserId: user?.id,
+        teamNames,
+      })
+    : '';
 
   useEffect(() => {
     if (!problem) return;
     basicForm.setFieldsValue(toBasicFormValues(problem));
   }, [basicForm, problem]);
+
+  useEffect(() => {
+    if (!problem) return;
+    setOwnerTypeDraft(problem.ownerType);
+    setOwnerIdDraft(problem.ownerId);
+  }, [problem?.id, problem?.ownerType, problem?.ownerId]);
 
   useEffect(() => {
     if (!problem) return;
@@ -381,7 +430,12 @@ export function AdminProblemPage() {
   }, [problem?.type]);
 
   useEffect(() => {
-    if (isObjective && activeTab !== 'basic' && activeTab !== 'objective') {
+    if (
+      isObjective &&
+      activeTab !== 'basic' &&
+      activeTab !== 'objective' &&
+      activeTab !== 'ownership'
+    ) {
       setActiveTab('objective');
     } else if (!isObjective && activeTab === 'objective') {
       setActiveTab('basic');
@@ -594,6 +648,27 @@ export function AdminProblemPage() {
     },
     onError: (error) => {
       message.error(error instanceof Error ? error.message : '保存失败');
+    },
+  });
+
+  const updateOwnerMutation = useMutation({
+    mutationFn: (draft: { ownerType: ProblemOwnerType; ownerId: number | null }) => {
+      const payload: UpdateProblemRequest = {
+        ownerType: draft.ownerType,
+        // 系统题不允许带 ownerId；服务端据此把归属对象置空。
+        ownerId: draft.ownerType === 'system' ? null : draft.ownerId,
+      };
+      return apiPut<{ id: number }>(`/api/admin/problems/${problemId}`, payload);
+    },
+    onSuccess: () => {
+      message.success('题目归属已更新');
+      void queryClient.invalidateQueries({ queryKey: ['admin-problem', problemId] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-problems'] });
+      void queryClient.invalidateQueries({ queryKey: ['problems'] });
+      void queryClient.invalidateQueries({ queryKey: ['problem-shares', problemId] });
+    },
+    onError: (error) => {
+      message.error(describeProblemAclError(error, '保存归属失败'));
     },
   });
 
@@ -810,6 +885,138 @@ export function AdminProblemPage() {
   }
 
   const assetsById = new Map((assetsQuery.data ?? []).map((asset) => [asset.kind, asset]));
+
+  const ownerDirty =
+    ownerTypeDraft !== problem.ownerType ||
+    (ownerTypeDraft !== 'system' && ownerIdDraft !== problem.ownerId);
+  const ownerValid =
+    ownerTypeDraft === 'system' ||
+    (typeof ownerIdDraft === 'number' &&
+      Number.isInteger(ownerIdDraft) &&
+      ownerIdDraft > 0);
+
+  const changeOwnerType = (value: ProblemOwnerType) => {
+    setOwnerTypeDraft(value);
+    if (value === 'system') {
+      setOwnerIdDraft(null);
+    } else if (value === 'user') {
+      setOwnerIdDraft(
+        problem.ownerType === 'user' ? problem.ownerId : (user?.id ?? null),
+      );
+    } else {
+      setOwnerIdDraft(
+        problem.ownerType === 'team' ? problem.ownerId : (teams[0]?.id ?? null),
+      );
+    }
+  };
+
+  const saveOwner = () => {
+    updateOwnerMutation.mutate({
+      ownerType: ownerTypeDraft,
+      ownerId: ownerTypeDraft === 'system' ? null : ownerIdDraft,
+    });
+  };
+
+  const ownershipPanel = (
+    <div className="stack">
+      <Card
+        className="oij-card"
+        title="题目归属"
+        extra={
+          <Tag color={problemOwnerColor(problem.ownerType)}>{ownerLabel}</Tag>
+        }
+      >
+        <Descriptions
+          size="small"
+          column={{ xs: 1, sm: 2 }}
+          items={[
+            {
+              key: 'type',
+              label: '归属类型',
+              children: PROBLEM_OWNER_TYPE_LABEL[problem.ownerType],
+            },
+            {
+              key: 'owner',
+              label: '归属对象',
+              children:
+                problem.ownerType === 'system' ? (
+                  <span className="muted">—</span>
+                ) : (
+                  <span className="mono">#{problem.ownerId ?? '—'}</span>
+                ),
+            },
+          ]}
+        />
+        <div className="problem-owner-editor">
+          <label className="problem-owner-field">
+            <span className="muted">归属类型</span>
+            <Select<ProblemOwnerType>
+              value={ownerTypeDraft}
+              onChange={changeOwnerType}
+              options={PROBLEM_OWNER_TYPE_OPTIONS}
+              style={{ width: 140 }}
+            />
+          </label>
+          {ownerTypeDraft === 'user' ? (
+            <label className="problem-owner-field">
+              <span className="muted">用户 ID</span>
+              <InputNumber
+                min={1}
+                precision={0}
+                value={ownerIdDraft}
+                onChange={(value) =>
+                  setOwnerIdDraft(typeof value === 'number' ? value : null)
+                }
+                placeholder="用户 ID"
+                style={{ width: 160 }}
+              />
+            </label>
+          ) : null}
+          {ownerTypeDraft === 'team' && teams.length > 0 ? (
+            <label className="problem-owner-field">
+              <span className="muted">团队</span>
+              <Select<number>
+                value={ownerIdDraft}
+                onChange={(value) => setOwnerIdDraft(value)}
+                placeholder="选择团队"
+                options={teams.map((team) => ({
+                  value: team.id,
+                  label: team.name,
+                }))}
+                style={{ width: 220 }}
+              />
+            </label>
+          ) : null}
+          <Button
+            type="primary"
+            disabled={!ownerDirty || !ownerValid}
+            loading={updateOwnerMutation.isPending}
+            onClick={saveOwner}
+          >
+            保存归属
+          </Button>
+        </div>
+        {ownerTypeDraft === 'team' && teams.length === 0 ? (
+          <Alert
+            style={{ marginTop: 12 }}
+            type="warning"
+            showIcon
+            message="还没有可归属的团队"
+            description={
+              <span>
+                请先在 <Link to="/teams">团队</Link> 页创建或加入团队。
+              </span>
+            }
+          />
+        ) : null}
+        <div className="basic-form-footer muted">
+          系统题仅管理员可维护；团队题由队长管理与分享；个人题由所有者管理与分享。
+        </div>
+      </Card>
+
+      {canManage ? <ProblemSharePanel problemId={problemId} /> : null}
+    </div>
+  );
 
   const basicPanel = (
     <Card
@@ -1619,6 +1826,10 @@ export function AdminProblemPage() {
     </div>
   );
 
+  const dataPlanPanel = problem ? (
+    <DataPlanPanel problemId={problemId} problem={problem} />
+  ) : null;
+
   const validateColumns: TableColumnsType<ValidateTestcaseResult> = [
     {
       title: '测试点 ID',
@@ -1919,6 +2130,7 @@ export function AdminProblemPage() {
             <Tag color={problem.visibility === 'hidden' ? 'gold' : 'green'}>
               {problem.visibility === 'hidden' ? '隐藏' : '公开'}
             </Tag>
+            <Tag color={problemOwnerColor(problem.ownerType)}>{ownerLabel}</Tag>
             <Tag color="blue">{problemTypeLabel(problem.type)}</Tag>
             <Tag>{difficultyLabel(problem.difficulty)}</Tag>
           </>
@@ -1972,6 +2184,11 @@ export function AdminProblemPage() {
             ? [
                 { key: 'basic', label: '基本信息', children: basicPanel },
                 {
+                  key: 'ownership',
+                  label: '归属与分享',
+                  children: ownershipPanel,
+                },
+                {
                   key: 'objective',
                   label: `客观题 (${objectiveDraft.length})`,
                   children: objectivePanel,
@@ -1979,7 +2196,13 @@ export function AdminProblemPage() {
               ]
             : [
                 { key: 'basic', label: '基本信息', children: basicPanel },
+                {
+                  key: 'ownership',
+                  label: '归属与分享',
+                  children: ownershipPanel,
+                },
                 { key: 'assets', label: '程序资产', children: assetsPanel },
+                { key: 'plan', label: '数据计划', children: dataPlanPanel },
                 { key: 'data', label: '测试数据', children: dataPanel },
                 { key: 'tools', label: '生成与对拍', children: toolsPanel },
                 { key: 'validation', label: '校验与自测', children: validationPanel },

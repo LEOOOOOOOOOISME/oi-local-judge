@@ -28,7 +28,6 @@ import type {
   HackTarget,
   ObjectiveAnswerValue,
   ProblemDetail,
-  RankingRow,
   Submission,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
@@ -37,9 +36,11 @@ import { MetaList } from '../components/MetaList';
 import { ObjectiveAnswerForm } from '../components/ObjectiveAnswerForm';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
+import { ProblemSharePanel } from '../components/ProblemSharePanel';
 import { StatementHtml } from '../components/StatementHtml';
 import { SubmissionTable } from '../components/SubmissionTable';
 import { formatDateTime, formatMemoryLimit, formatTimeLimit } from '../utils/format';
+import { fetchOfficialRanking } from '../utils/officialRanking';
 import {
   difficultyLabel,
   problemLetter,
@@ -142,11 +143,13 @@ export function ProblemPage() {
     (contest.status === 'ended' ||
       contest.status === 'archived' ||
       (contest.end_at !== null && Date.now() >= contest.end_at));
+  // 题号来自正式榜的题目顺序（official-ranking 与比赛页/正式榜同源）。
   const rankingQuery = useQuery({
-    queryKey: ['ranking', contestId],
-    queryFn: () => apiGet<RankingRow[]>(`/api/contests/${contestId}/ranking`),
+    queryKey: ['official-ranking', contestId],
+    queryFn: () => fetchOfficialRanking(contestId as number),
     enabled: contestId !== null && validContest,
     staleTime: 5_000,
+    retry: false,
   });
   const submissionsQuery = useQuery({
     queryKey: ['submissions', { scope: 'mine', problemId, contestId }],
@@ -231,7 +234,6 @@ export function ProblemPage() {
       void queryClient.invalidateQueries({ queryKey: ['official-ranking', contestId] });
       void queryClient.invalidateQueries({ queryKey: ['correction-ranking', contestId] });
       void queryClient.invalidateQueries({ queryKey: ['submissions'] });
-      void queryClient.invalidateQueries({ queryKey: ['ranking', contestId] });
     }
   }, [hackStatusQuery.data, queryClient, contestId, problemId]);
 
@@ -263,11 +265,11 @@ export function ProblemPage() {
     },
   });
 
-  const firstRankingRow = rankingQuery.data?.[0];
-  const ordinalIndex = firstRankingRow
-    ? firstRankingRow.problems.findIndex((cell) => cell.problemId === problemId)
-    : -1;
-  const letter = ordinalIndex >= 0 ? problemLetter(ordinalIndex) : null;
+  const contestProblem = rankingQuery.data?.problems.find(
+    (item) => item.id === problemId,
+  );
+  const letter =
+    contestProblem !== undefined ? problemLetter(contestProblem.ordinal - 1) : null;
 
   const loginHref = `/login?next=${encodeURIComponent(
     contestId !== null ? `/contest/${contestId}/problem/${problemId}` : `/problem/${problemId}`,
@@ -1227,6 +1229,10 @@ export function ProblemPage() {
               {isObjective || isOutputOnly ? '去作答' : '提交代码'}
             </Button>
           </Card>
+
+          {contestId === null && user ? (
+            <ProblemSharePanel problemId={problem.id} />
+          ) : null}
 
           {contestId !== null ? (
             <Card className="oij-card" size="small" title="所属比赛">

@@ -11,6 +11,7 @@ import {
   setRankingPluginEnabled,
   upsertRankingPlugin,
 } from '../storage/repos/ranking-plugins.js';
+import { invalidateOfficialRanking } from '../services/official-ranking.js';
 
 export interface AdminRankingRouteOptions {
   db: DatabaseSync;
@@ -73,6 +74,7 @@ export function registerAdminRankingRoutes(
       options.db
         .prepare('UPDATE contests SET official_frozen_until = NULL WHERE id = ?')
         .run(contest.id);
+      invalidateOfficialRanking(options.db, contest.id);
       return { ok: true, data: { released: true } };
     },
   );
@@ -107,6 +109,7 @@ export function registerAdminRankingRoutes(
       options.db
         .prepare('UPDATE contests SET ranking_rule_json = ? WHERE id = ?')
         .run(JSON.stringify(config), contest.id);
+      invalidateOfficialRanking(options.db, contest.id);
       return { ok: true, data: config };
     },
   );
@@ -158,6 +161,8 @@ export function registerAdminRankingRoutes(
     { preHandler: options.pluginGuard },
     async (request) => {
       setRankingPluginEnabled(options.db, Number(request.params.id), request.body?.enabled === true);
+      // A plugin can be referenced by any contest, so drop every cached ranking.
+      invalidateOfficialRanking(options.db);
       return { ok: true, data: null };
     },
   );

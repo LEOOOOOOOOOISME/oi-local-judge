@@ -207,6 +207,10 @@ export function registerAdminBatchRoutes(
           language,
           code: source.code,
           contestId: null,
+          skipCooldown: true,
+          // Admin batch pipelines submit on behalf of synthetic students, so the
+          // practice read ACL does not apply.
+          skipAccessCheck: true,
         },
       );
       addBatchItem(options.db, {

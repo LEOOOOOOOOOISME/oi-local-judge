@@ -9,6 +9,8 @@ dist/
 build/
 out/
 release/
+# Source code that happens to live in a `release/` directory.
+!tools/release/
 *.tsbuildinfo
 
 # Runtime data (never commit)

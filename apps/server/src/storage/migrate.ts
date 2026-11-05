@@ -10,14 +10,18 @@ CREATE TABLE IF NOT EXISTS users(
 CREATE TABLE IF NOT EXISTS problems(
   id INTEGER PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL,
   difficulty INTEGER, tags_json TEXT NOT NULL DEFAULT '[]', time_ms INTEGER NOT NULL,
-  memory_mb INTEGER NOT NULL, io_mode TEXT NOT NULL DEFAULT 'stdio',
+  memory_mb INTEGER NOT NULL, output_mb INTEGER NOT NULL DEFAULT 64,
+  io_mode TEXT NOT NULL DEFAULT 'stdio',
   input_file TEXT, output_file TEXT, statement_html TEXT NOT NULL DEFAULT '',
   samples_json TEXT NOT NULL DEFAULT '[]',
   checker_mode TEXT NOT NULL DEFAULT 'builtin',
   checker_path TEXT,
   compare_mode TEXT NOT NULL DEFAULT 'ignore-trailing',
   objective_json TEXT NOT NULL DEFAULT '{}',
-  visibility TEXT NOT NULL DEFAULT 'public', version INTEGER NOT NULL DEFAULT 1,
+  visibility TEXT NOT NULL DEFAULT 'public',
+  owner_type TEXT NOT NULL DEFAULT 'system',
+  owner_id INTEGER,
+  version INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS problem_testcases(
@@ -32,6 +36,18 @@ CREATE TABLE IF NOT EXISTS problem_subtasks(
   points INTEGER NOT NULL, aggregation TEXT NOT NULL DEFAULT 'min',
   FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS problem_shares(
+  problem_id INTEGER NOT NULL,
+  grantee_type TEXT NOT NULL,
+  grantee_id INTEGER NOT NULL,
+  permission TEXT NOT NULL,
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(problem_id, grantee_type, grantee_id),
+  FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_problem_shares_grantee
+  ON problem_shares(grantee_type, grantee_id);
 CREATE TABLE IF NOT EXISTS problem_assets(
   id INTEGER PRIMARY KEY, problem_id INTEGER NOT NULL, kind TEXT NOT NULL,
   name TEXT NOT NULL, path TEXT NOT NULL, language TEXT,
@@ -41,7 +57,7 @@ CREATE TABLE IF NOT EXISTS problem_assets(
 );
 CREATE TABLE IF NOT EXISTS submissions(
   id INTEGER PRIMARY KEY, contest_id INTEGER, problem_id INTEGER NOT NULL,
-  user_id INTEGER NOT NULL, language TEXT NOT NULL, source_path TEXT NOT NULL,
+  user_id INTEGER NOT NULL, team_id INTEGER, language TEXT NOT NULL, source_path TEXT NOT NULL,
   source_hash TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'queued',
   verdict TEXT, score INTEGER NOT NULL DEFAULT 0, time_ms INTEGER NOT NULL DEFAULT 0,
   memory_kb INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL DEFAULT '',
@@ -65,6 +81,9 @@ CREATE TABLE IF NOT EXISTS judge_tasks(
 CREATE INDEX IF NOT EXISTS idx_judge_tasks_claim ON judge_tasks(status, priority DESC, id);
 CREATE TABLE IF NOT EXISTS contests(
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, mode TEXT NOT NULL DEFAULT 'oi',
+  team_mode TEXT NOT NULL DEFAULT 'individual',
+  registration_mode TEXT NOT NULL DEFAULT 'manual',
+  registration_open_at INTEGER, registration_close_at INTEGER,
   start_at INTEGER, end_at INTEGER, freeze_at INTEGER, unfreeze_at INTEGER,
   status TEXT NOT NULL DEFAULT 'draft', rules_json TEXT NOT NULL DEFAULT '{}'
 );
@@ -75,6 +94,7 @@ CREATE TABLE IF NOT EXISTS contest_problems(
 CREATE TABLE IF NOT EXISTS contest_participants(
   contest_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'accepted', extra_time INTEGER NOT NULL DEFAULT 0,
+  registered_at INTEGER, checked_in_at INTEGER, reviewed_at INTEGER, reviewed_by INTEGER,
   PRIMARY KEY(contest_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS contest_official_scores(
@@ -170,16 +190,75 @@ CREATE TABLE IF NOT EXISTS audit_logs(
   ip TEXT, created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(id DESC);
+CREATE TABLE IF NOT EXISTS teams(
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL UNIQUE,
+  owner_id INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS team_members(
+  team_id INTEGER NOT NULL,
+  user_id INTEGER NOT NULL,
+  role TEXT NOT NULL DEFAULT 'member',
+  joined_at INTEGER NOT NULL,
+  PRIMARY KEY(team_id, user_id),
+  FOREIGN KEY(team_id) REFERENCES teams(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_team_members_user ON team_members(user_id);
+CREATE TABLE IF NOT EXISTS contest_teams(
+  contest_id INTEGER NOT NULL,
+  team_id INTEGER NOT NULL,
+  registered_by INTEGER,
+  registered_at INTEGER NOT NULL,
+  PRIMARY KEY(contest_id, team_id)
+);
+CREATE INDEX IF NOT EXISTS idx_contest_teams_team ON contest_teams(team_id);
+CREATE TABLE IF NOT EXISTS problem_sets(
+  id INTEGER PRIMARY KEY,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  owner_type TEXT NOT NULL,
+  owner_id INTEGER NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'private',
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_problem_sets_owner ON problem_sets(owner_type, owner_id);
+CREATE INDEX IF NOT EXISTS idx_problem_sets_visibility ON problem_sets(visibility, updated_at DESC);
+CREATE TABLE IF NOT EXISTS problem_set_items(
+  set_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  added_at INTEGER NOT NULL,
+  PRIMARY KEY(set_id, problem_id)
+);
+CREATE INDEX IF NOT EXISTS idx_problem_set_items_order ON problem_set_items(set_id, ordinal);
+CREATE INDEX IF NOT EXISTS idx_problem_set_items_problem ON problem_set_items(problem_id);
+CREATE TABLE IF NOT EXISTS problem_set_shares(
+  set_id INTEGER NOT NULL,
+  grantee_type TEXT NOT NULL,
+  grantee_id INTEGER NOT NULL,
+  permission TEXT NOT NULL,
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY(set_id, grantee_type, grantee_id)
+);
+CREATE INDEX IF NOT EXISTS idx_problem_set_shares_grantee
+  ON problem_set_shares(grantee_type, grantee_id);
 `;
 
 export function migrate(db: DatabaseSync): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
   db.exec(SCHEMA);
   ensureColumn(db, 'problems', 'samples_json', "TEXT NOT NULL DEFAULT '[]'");
+  ensureColumn(db, 'problems', 'output_mb', 'INTEGER NOT NULL DEFAULT 64');
   ensureColumn(db, 'problems', 'checker_mode', "TEXT NOT NULL DEFAULT 'builtin'");
   ensureColumn(db, 'problems', 'checker_path', 'TEXT');
   ensureColumn(db, 'problems', 'compare_mode', "TEXT NOT NULL DEFAULT 'ignore-trailing'");
   ensureColumn(db, 'problems', 'objective_json', "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, 'problems', 'owner_type', "TEXT NOT NULL DEFAULT 'system'");
+  ensureColumn(db, 'problems', 'owner_id', 'INTEGER');
   ensureColumn(db, 'batch_items', 'problem_id', 'INTEGER');
   ensureColumn(db, 'batch_items', 'score', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'batch_items', 'verdict', 'TEXT');
@@ -193,9 +272,17 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'batch_jobs', 'meta_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'batch_jobs', 'created_by', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'hidden_at', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'registered_at', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'checked_in_at', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'reviewed_at', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'reviewed_by', 'INTEGER');
+  ensureColumn(db, 'contests', 'registration_mode', "TEXT NOT NULL DEFAULT 'manual'");
+  ensureColumn(db, 'contests', 'registration_open_at', 'INTEGER');
+  ensureColumn(db, 'contests', 'registration_close_at', 'INTEGER');
   ensureColumn(db, 'submissions', 'phase', "TEXT NOT NULL DEFAULT 'contest'");
   ensureColumn(db, 'submissions', 'batch_id', 'INTEGER');
   ensureColumn(db, 'contests', 'ranking_rule_json', "TEXT NOT NULL DEFAULT '{}'");
+  ensureColumn(db, 'contests', 'award_config_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'contests', 'archived_at', 'INTEGER');
   ensureColumn(db, 'contests', 'official_frozen_until', 'INTEGER');
   ensureColumn(db, 'submissions', 'hacked_at', 'INTEGER');
@@ -205,6 +292,8 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'contest_official_scores', 'batch_score', 'INTEGER');
   ensureColumn(db, 'contest_official_scores', 'batch_verdict', 'TEXT');
   ensureColumn(db, 'submissions', 'message', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'contests', 'team_mode', "TEXT NOT NULL DEFAULT 'individual'");
+  ensureColumn(db, 'submissions', 'team_id', 'INTEGER');
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
     db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)').run(Date.now());

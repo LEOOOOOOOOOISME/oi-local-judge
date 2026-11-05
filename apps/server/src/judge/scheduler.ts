@@ -12,6 +12,11 @@ import {
   finishJudgeTask,
   type JudgeTaskRow,
 } from '../storage/repos/judge.js';
+import {
+  isJudgeCanceledError,
+  registerCancellation,
+  releaseCancellation,
+} from './cancellation.js';
 import { judgeSubmission, type EventPublisher } from './pipeline.js';
 
 export interface SchedulerOptions {
@@ -55,25 +60,30 @@ export function startScheduler(options: SchedulerOptions): SchedulerHandle {
   };
 
   async function runTask(task: JudgeTaskRow): Promise<void> {
-    let outcome: 'done' | 'failed' = 'failed';
+    const controller = registerCancellation(task.submission_id);
+    let outcome: 'done' | 'failed' | 'canceled' = 'failed';
     try {
       await judgeSubmission({
         db,
         config,
         submissionId: task.submission_id,
         events,
+        signal: controller.signal,
       });
       // judgeSubmission records pipeline failures itself as failed + SE, so the
-      // task itself was processed successfully.
-      outcome = 'done';
-    } catch {
-      outcome = 'failed';
+      // task itself was processed successfully. An aborted signal means the run
+      // stopped through the cancel service instead.
+      outcome = controller.signal.aborted ? 'canceled' : 'done';
+    } catch (err) {
+      outcome =
+        controller.signal.aborted || isJudgeCanceledError(err) ? 'canceled' : 'failed';
     } finally {
       try {
         finishJudgeTask(db, task.id, outcome);
       } catch {
         // Never let bookkeeping failure leave a dangling promise.
       }
+      releaseCancellation(task.submission_id);
       inFlight -= 1;
     }
   }

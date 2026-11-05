@@ -8,17 +8,23 @@ import { loadConfig, type Config } from './config.js';
 import { healthRoutes } from './http/health.js';
 import { registerAuthRoutes } from './http/auth.js';
 import { registerProblemRoutes } from './http/problems.js';
+import { registerProblemShareRoutes } from './http/problem-shares.js';
 import { registerAdminProblemRoutes } from './http/admin-problems.js';
 import { registerAdminToolRoutes } from './http/admin-tools.js';
+import { registerAdminAuthoringRoutes } from './http/admin-authoring.js';
 import { registerAdminBatchRoutes } from './http/admin-batch.js';
 import { registerAdminUserRoutes } from './http/admin-users.js';
 import { registerCommunityRoutes } from './http/community.js';
 import { registerContestRoutes } from './http/contests.js';
+import { registerAdminRegistrationRoutes } from './http/admin-registrations.js';
 import { registerSubmissionRoutes } from './http/submissions.js';
 import { registerAdminSystemRoutes } from './http/admin-system.js';
 import { registerContestBatchRoutes } from './http/admin-contest-batch.js';
 import { registerAdminRankingRoutes } from './http/admin-ranking.js';
+import { registerAdminJudgeRoutes } from './http/admin-judge.js';
 import { registerHackRoutes } from './http/hacks.js';
+import { registerTeamRoutes } from './http/teams.js';
+import { registerProblemSetRoutes } from './http/problem-sets.js';
 import { recordAudit } from './storage/repos/audit.js';
 import { createHub, type Hub } from './realtime/hub.js';
 import { authenticateRequest, requireAuth, requireRole } from './security/auth.js';
@@ -67,12 +73,18 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     config,
     adminGuard: requireRole(['admin', 'setter'], { db, config }),
   });
+  registerProblemShareRoutes(app, { db, config });
   registerAdminProblemRoutes(app, {
     db,
     config,
     adminGuard: requireRole(['admin', 'setter'], { db, config }),
   });
   registerAdminToolRoutes(app, {
+    db,
+    config,
+    adminGuard: requireRole(['admin', 'setter'], { db, config }),
+  });
+  registerAdminAuthoringRoutes(app, {
     db,
     config,
     adminGuard: requireRole(['admin', 'setter'], { db, config }),
@@ -89,6 +101,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   registerCommunityRoutes(app, { db, config });
   registerAdminSystemRoutes(app, {
     db,
+    config,
     adminGuard: requireRole(['admin'], { db, config }),
   });
   registerContestBatchRoutes(app, {
@@ -102,17 +115,31 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
     pluginGuard: requireRole(['admin'], { db, config }),
   });
+  registerAdminJudgeRoutes(app, {
+    db,
+    config,
+    adminGuard: requireRole(['admin', 'setter', 'contestmanager'], { db, config }),
+  });
   registerHackRoutes(app, {
     db,
     config,
     auth: requireAuth({ db, config }),
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
-  });  registerContestRoutes(app, {
+  });
+  const auth = requireAuth({ db, config });
+  registerContestRoutes(app, {
     db,
     config,
+    auth,
+    adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
+  });
+  registerAdminRegistrationRoutes(app, {
+    db,
     adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
   });
   registerSubmissionRoutes(app, { db, config });
+  registerTeamRoutes(app, { db, config, auth });
+  registerProblemSetRoutes(app, { db, config, auth });
 
   const webDist = join(process.cwd(), 'apps/web/dist');
   if (existsSync(webDist)) {
@@ -153,6 +180,9 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     }
     const rooms = [`user:${authenticated.user.id}`];
     if (authenticated.user.role === 'admin') rooms.push('admin');
+    const rawContestId = (request.query as { contestId?: unknown } | undefined)?.contestId;
+    const contestId = typeof rawContestId === 'string' ? Number(rawContestId) : Number.NaN;
+    if (Number.isInteger(contestId) && contestId > 0) rooms.push(`contest:${contestId}`);
     hub.subscribe(socket, rooms);
 
     socket.send(JSON.stringify({ v: 1, type: 'hello', data: { userId: authenticated.user.id } }));

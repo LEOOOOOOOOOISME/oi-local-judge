@@ -1,5 +1,6 @@
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -8,6 +9,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Radio,
   Row,
   Select,
   Space,
@@ -23,11 +25,19 @@ import type {
   AdminProblemSummary,
   CreateProblemRequest,
   CreateProblemResult,
+  ProblemOwnerType,
   ProblemType,
+  TeamSummary,
 } from '../api/types';
+import { useAuth } from '../auth/AuthContext';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { formatMemoryLimit, formatTimeLimit } from '../utils/format';
+import {
+  PROBLEM_OWNER_TYPE_LABEL,
+  problemOwnerColor,
+  problemOwnerLabel,
+} from '../utils/problemAcl';
 import { PROBLEM_TYPE_LABEL, difficultyLabel, problemTypeLabel } from '../utils/status';
 import '../styles/admin.css';
 
@@ -42,6 +52,8 @@ interface CreateProblemFormValues {
   inputFile?: string;
   outputFile?: string;
   statement?: string;
+  ownerType: ProblemOwnerType;
+  teamId?: number;
 }
 
 const TYPE_OPTIONS = (Object.keys(PROBLEM_TYPE_LABEL) as ProblemType[]).map((value) => ({
@@ -56,10 +68,12 @@ const DEFAULT_FORM_VALUES: Partial<CreateProblemFormValues> = {
   ioMode: 'stdio',
   tags: [],
   statement: '',
+  ownerType: 'user',
 };
 
 export function AdminProblemsPage() {
   const { message } = App.useApp();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -67,12 +81,35 @@ export function AdminProblemsPage() {
   const [importing, setImporting] = useState(false);
   const [form] = Form.useForm<CreateProblemFormValues>();
   const ioMode = Form.useWatch('ioMode', form);
+  const ownerType = (Form.useWatch('ownerType', form) ?? 'user') as ProblemOwnerType;
 
   const problemsQuery = useQuery({
     queryKey: ['admin-problems'],
     queryFn: () => apiGet<AdminProblemSummary[]>('/api/admin/problems'),
     staleTime: 30_000,
   });
+  const teamsQuery = useQuery({
+    queryKey: ['teams'],
+    queryFn: () => apiGet<TeamSummary[]>('/api/teams'),
+    staleTime: 60_000,
+  });
+  const teams = teamsQuery.data ?? [];
+  const teamNames = useMemo(
+    () => new Map(teams.map((team) => [team.id, team.name] as const)),
+    [teams],
+  );
+  const ownerTypeOptions = [
+    { value: 'user', label: PROBLEM_OWNER_TYPE_LABEL.user },
+    {
+      value: 'team',
+      label:
+        teams.length === 0
+          ? `${PROBLEM_OWNER_TYPE_LABEL.team}（需先加入团队）`
+          : PROBLEM_OWNER_TYPE_LABEL.team,
+      disabled: teams.length === 0,
+    },
+    { value: 'system', label: PROBLEM_OWNER_TYPE_LABEL.system },
+  ];
 
   const createMutation = useMutation({
     mutationFn: (values: CreateProblemFormValues) => {
@@ -87,6 +124,10 @@ export function AdminProblemsPage() {
         inputFile: values.ioMode === 'file' ? values.inputFile?.trim() || null : null,
         outputFile: values.ioMode === 'file' ? values.outputFile?.trim() || null : null,
         statement: values.statement ?? '',
+        ownerType: values.ownerType,
+        // 个人题省略 ownerId，由服务端默认归属当前账号；系统题显式置空。
+        ...(values.ownerType === 'team' ? { ownerId: values.teamId ?? null } : {}),
+        ...(values.ownerType === 'system' ? { ownerId: null } : {}),
         ...(values.type === 'objective' ? { objective: { questions: [] } } : {}),
       };
       return apiPost<CreateProblemResult>('/api/admin/problems', payload);
@@ -135,6 +176,19 @@ export function AdminProblemsPage() {
         ) : (
           <Tag color="green">公开</Tag>
         ),
+    },
+    {
+      title: '归属',
+      dataIndex: 'ownerType',
+      width: 170,
+      render: (_value, record) => (
+        <Tag color={problemOwnerColor(record.ownerType)}>
+          {problemOwnerLabel(record.ownerType, record.ownerId, {
+            currentUserId: user?.id,
+            teamNames,
+          })}
+        </Tag>
+      ),
     },
     {
       title: '类型',
@@ -359,6 +413,40 @@ export function AdminProblemsPage() {
                 </Form.Item>
               </Col>
             </Row>
+          ) : null}
+
+          <Form.Item
+            label="归属"
+            name="ownerType"
+            extra="个人题归当前账号；团队题需选择你所在的团队；系统题由管理员统一维护。"
+          >
+            <Radio.Group options={ownerTypeOptions} />
+          </Form.Item>
+
+          {ownerType === 'team' ? (
+            teams.length === 0 ? (
+              <Alert
+                type="warning"
+                showIcon
+                message="还没有可归属的团队"
+                description={
+                  <span>
+                    请先在 <Link to="/teams">团队</Link> 页创建或加入团队，再创建团队题目。
+                  </span>
+                }
+              />
+            ) : (
+              <Form.Item
+                label="团队"
+                name="teamId"
+                rules={[{ required: true, message: '请选择团队' }]}
+              >
+                <Select
+                  placeholder="选择团队"
+                  options={teams.map((team) => ({ value: team.id, label: team.name }))}
+                />
+              </Form.Item>
+            )
           ) : null}
 
           <Form.Item label="标签" name="tags">
