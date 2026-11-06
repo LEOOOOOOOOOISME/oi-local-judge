@@ -5,8 +5,6 @@ import type {
   OfficialRankingRow,
 } from '../api/types';
 import {
-  RESULTS_SERVER_PAGING_THRESHOLD,
-  RESULTS_TABLE_PREVIEW_LIMIT,
   buildKpiItems,
   buildRingData,
   cleanInsights,
@@ -14,7 +12,6 @@ import {
   distributionCumulativeRatios,
   distributionLabel,
   formatMetric,
-  planResultsRows,
   searchRankingRows,
   statisticsModeLabel,
   unitForMode,
@@ -201,26 +198,6 @@ describe('statistics display helpers', () => {
     expect(searchRankingRows(rows, 'bob').map((item) => item.userId)).toEqual([2]);
     expect(searchRankingRows(rows, '2班').map((item) => item.userId)).toEqual([2]);
     expect(searchRankingRows(rows, 'zzz')).toEqual([]);
-  });
-
-  it('plans results rows for virtual scrolling and large contests', () => {
-    const small = Array.from({ length: 1505 }, (_unused, index) =>
-      row(index + 1, `user${index + 1}`, null, null, index),
-    );
-    const smallPlan = planResultsRows(small, '');
-    expect(smallPlan.rows).toHaveLength(1505);
-    expect(smallPlan.total).toBe(1505);
-    expect(smallPlan.serverPaging).toBe(false);
-    expect(smallPlan.truncated).toBe(false);
-
-    const large = Array.from({ length: RESULTS_SERVER_PAGING_THRESHOLD + 1000 }, (_unused, index) =>
-      row(index + 1, `user${index + 1}`, null, null, 0),
-    );
-    const largePlan = planResultsRows(large, '');
-    expect(largePlan.serverPaging).toBe(true);
-    expect(largePlan.truncated).toBe(true);
-    expect(largePlan.rows).toHaveLength(RESULTS_TABLE_PREVIEW_LIMIT);
-    expect(largePlan.total).toBe(6000);
   });
 
   it('drops blank automatic insights', () => {

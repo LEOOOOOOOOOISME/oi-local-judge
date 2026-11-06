@@ -3,12 +3,14 @@ import type {
   Contest,
   OfficialRanking,
   OfficialRankingCell,
+  OfficialRankingPage,
   OfficialRankingProblem,
   OfficialRankingRow,
   RankingPreset,
   RankingRow,
 } from '../api/types';
 import { rankingProblemLetter } from './ranking';
+import { searchRankingRows } from './statistics';
 
 export const PRESET_LABEL: Record<RankingPreset, string> = {
   oi: 'OI 正式榜',
@@ -110,6 +112,47 @@ export async function fetchOfficialRanking(
     } catch {
       throw error;
     }
+  }
+}
+
+export interface RankingPageParams {
+  offset: number;
+  limit: number;
+  query?: string;
+}
+
+/**
+ * 统计页成绩表的服务端分页：只请求当前页，后端负责搜索与切片。
+ * 旧后端（/page 404）回退到完整正式榜，并在前端做同样的切片。
+ */
+export async function fetchOfficialRankingPage(
+  contestId: number,
+  params: RankingPageParams,
+  includeHidden = false,
+): Promise<OfficialRankingPage> {
+  const search = new URLSearchParams({
+    offset: String(Math.max(0, Math.floor(params.offset))),
+    limit: String(Math.max(1, Math.floor(params.limit))),
+  });
+  const query = params.query?.trim();
+  if (query) search.set('query', query);
+  if (includeHidden) search.set('includeHidden', '1');
+  const path = `/api/contests/${contestId}/official-ranking/page?${search.toString()}`;
+  try {
+    return await apiGet<OfficialRankingPage>(path);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    const ranking = await fetchOfficialRanking(contestId, includeHidden);
+    const filtered = searchRankingRows(ranking.rows, query ?? '');
+    return {
+      ...ranking,
+      items: filtered.slice(params.offset, params.offset + params.limit),
+      total: filtered.length,
+      allTotal: ranking.rows.length,
+      offset: params.offset,
+      limit: params.limit,
+      query: query ?? '',
+    };
   }
 }
 

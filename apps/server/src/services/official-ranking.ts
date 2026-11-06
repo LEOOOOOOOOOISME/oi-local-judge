@@ -103,6 +103,80 @@ export function parseRankingConfig(contest: ContestRow): {
 /** Default lifetime of a cached official ranking. */
 export const DEFAULT_RANKING_CACHE_TTL_MS = 1000;
 
+/** Default / maximum page size of the statistics results table. */
+export const OFFICIAL_RANKING_PAGE_DEFAULT_LIMIT = 100;
+export const OFFICIAL_RANKING_PAGE_MAX_LIMIT = 500;
+
+/** Query shape accepted by the paged official-ranking endpoint. */
+export interface OfficialRankingPageInput {
+  offset?: unknown;
+  limit?: unknown;
+  query?: unknown;
+}
+
+/**
+ * One page of the official ranking. `total` is the number of rows matching the
+ * search (the UI's pagination total), `allTotal` is the unfiltered visible row
+ * count, and `items` is the requested slice in rank order.
+ */
+export interface OfficialRankingPage {
+  items: OfficialRankingRow[];
+  total: number;
+  allTotal: number;
+  offset: number;
+  limit: number;
+  query: string;
+}
+
+function normalizeOffset(raw: unknown): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 0;
+  return Math.floor(parsed);
+}
+
+function normalizeLimit(raw: unknown): number {
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed <= 0) return OFFICIAL_RANKING_PAGE_DEFAULT_LIMIT;
+  return Math.min(OFFICIAL_RANKING_PAGE_MAX_LIMIT, Math.max(1, Math.floor(parsed)));
+}
+
+/** Case-insensitive username / real name / class search used by the table. */
+export function searchOfficialRankingRows(
+  rows: readonly OfficialRankingRow[],
+  rawQuery: unknown,
+): OfficialRankingRow[] {
+  const query = typeof rawQuery === 'string' ? rawQuery.trim().toLowerCase() : '';
+  if (!query) return [...rows];
+  return rows.filter((row) =>
+    [row.username, row.realName ?? '', row.className ?? ''].some((value) =>
+      value.toLowerCase().includes(query),
+    ),
+  );
+}
+
+/**
+ * Slices a complete ranking for the statistics results table. Ranking order is
+ * owned by the scoring pipeline, so this only filters and paginates — it never
+ * recomputes ranks or scores.
+ */
+export function pageOfficialRanking(
+  rows: readonly OfficialRankingRow[],
+  input: OfficialRankingPageInput = {},
+): OfficialRankingPage {
+  const offset = normalizeOffset(input.offset);
+  const limit = normalizeLimit(input.limit);
+  const query = typeof input.query === 'string' ? input.query.trim() : '';
+  const filtered = searchOfficialRankingRows(rows, query);
+  return {
+    items: filtered.slice(offset, offset + limit),
+    total: filtered.length,
+    allTotal: rows.length,
+    offset,
+    limit,
+    query,
+  };
+}
+
 interface OfficialRankingCacheEntry {
   dataDir: string;
   expiresAt: number;
