@@ -18,7 +18,8 @@ import {
 import type { TableColumnsType } from 'antd';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, apiGet, apiPost } from '../api/client';
+import { DownloadOutlined } from '@ant-design/icons';
+import { ApiError, apiGet, apiPost, downloadApiFile } from '../api/client';
 import type {
   AnswerFile,
   Contest,
@@ -27,6 +28,7 @@ import type {
   HackSource,
   HackTarget,
   ObjectiveAnswerValue,
+  ProblemAttachment,
   ProblemDetail,
   Submission,
 } from '../api/types';
@@ -39,7 +41,7 @@ import { ErrorResult, PageLoading } from '../components/PageStates';
 import { ProblemSharePanel } from '../components/ProblemSharePanel';
 import { StatementHtml } from '../components/StatementHtml';
 import { SubmissionTable } from '../components/SubmissionTable';
-import { formatDateTime, formatMemoryLimit, formatTimeLimit } from '../utils/format';
+import { formatBytes, formatDateTime, formatMemoryLimit, formatTimeLimit } from '../utils/format';
 import { fetchOfficialRanking } from '../utils/officialRanking';
 import {
   difficultyLabel,
@@ -180,6 +182,12 @@ export function ProblemPage() {
     queryFn: () => apiGet<AnswerFile[]>(`/api/problems/${problemId}/answer-files`),
     enabled: problemId !== null && problem?.type === 'output-only',
   });
+  const attachmentsQuery = useQuery({
+    queryKey: ['problem-attachments', problemId],
+    queryFn: () => apiGet<ProblemAttachment[]>(`/api/problems/${problemId}/attachments`),
+    enabled: problemId !== null,
+  });
+  const attachments = attachmentsQuery.data ?? [];
   const hackTargetsQuery = useQuery({
     queryKey: ['hack-targets', contestId, problemId],
     queryFn: async (): Promise<{ locked: boolean; targets: HackTarget[] }> => {
@@ -1084,6 +1092,39 @@ export function ProblemPage() {
     </Card>
   );
 
+  const downloadAttachment = async (attachment: ProblemAttachment) => {
+    try {
+      await downloadApiFile(attachment.downloadUrl, attachment.filename);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '下载附件失败');
+    }
+  };
+
+  const attachmentsPanel = (
+    <Card className="oij-card" title="附件">
+      <Space direction="vertical" style={{ width: '100%' }} size={10}>
+        {attachments.length === 0 ? (
+          <span className="muted">暂无附件</span>
+        ) : (
+          attachments.map((attachment) => (
+            <Space key={attachment.id} wrap size={8}>
+              <Tag>{attachment.mime}</Tag>
+              <span className="mono">{attachment.filename}</span>
+              <span className="muted">{formatBytes(attachment.size)}</span>
+              <Button
+                size="small"
+                icon={<DownloadOutlined />}
+                onClick={() => void downloadAttachment(attachment)}
+              >
+                下载
+              </Button>
+            </Space>
+          ))
+        )}
+      </Space>
+    </Card>
+  );
+
   return (
     <div>
       <PageHead
@@ -1140,6 +1181,15 @@ export function ProblemPage() {
             isObjective || isOutputOnly
               ? [
                   { key: 'statement', label: '题目描述', children: statementPanel },
+                  ...(attachments.length > 0
+                    ? [
+                        {
+                          key: 'attachments',
+                          label: `附件 (${attachments.length})`,
+                          children: attachmentsPanel,
+                        },
+                      ]
+                    : []),
                   {
                     key: 'submissions',
                     label: `我的提交${
@@ -1150,6 +1200,15 @@ export function ProblemPage() {
                 ]
               : [
                   { key: 'statement', label: '题目描述', children: statementPanel },
+                  ...(attachments.length > 0
+                    ? [
+                        {
+                          key: 'attachments',
+                          label: `附件 (${attachments.length})`,
+                          children: attachmentsPanel,
+                        },
+                      ]
+                    : []),
                   { key: 'submit', label: '提交代码', children: submitPanel },
                   {
                     key: 'submissions',
