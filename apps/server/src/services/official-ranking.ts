@@ -8,6 +8,7 @@ import {
 import {
   getContest,
   getContestProblemEntries,
+  getParticipants,
   getVisibleParticipants,
   type ContestRow,
 } from '../storage/repos/contests.js';
@@ -195,11 +196,26 @@ export function invalidateOfficialRanking(db: DatabaseSync, contestId?: number):
   return nextVersion;
 }
 
+export interface ComputeOfficialRankingOptions {
+  /**
+   * Include participants hidden from the public board. Only statistics/report
+   * callers that already checked for the manager role should set this; the
+   * scoring itself is unchanged.
+   */
+  includeHidden?: boolean;
+}
+
+/** Current monotonic version of a contest ranking snapshot. */
+export function getOfficialRankingVersion(db: DatabaseSync, contestId: number): number {
+  return currentRankingVersion(db, contestId);
+}
+
 export async function computeOfficialRanking(
   db: DatabaseSync,
   contestId: number,
   dataDir = process.cwd(),
   version = currentRankingVersion(db, contestId),
+  options: ComputeOfficialRankingOptions = {},
 ): Promise<OfficialRankingResult | null> {
   const contest = getContest(db, contestId);
   if (!contest) return null;
@@ -212,7 +228,9 @@ export async function computeOfficialRanking(
     title: getProblem(db, entry.problem_id)?.title ?? `#${entry.problem_id}`,
   }));
   const problemIds = problems.map((problem) => problem.id);
-  const userIds = getVisibleParticipants(db, contestId);
+  const userIds = options.includeHidden
+    ? getParticipants(db, contestId)
+    : getVisibleParticipants(db, contestId);
   const parsed = parseRankingConfig(contest);
 
   if (

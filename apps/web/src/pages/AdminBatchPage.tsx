@@ -10,6 +10,7 @@ import {
   Spin,
   Table,
   Tag,
+  Tooltip,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import { DownloadOutlined, InboxOutlined, PlayCircleOutlined } from '@ant-design/icons';
@@ -17,6 +18,9 @@ import { useQuery } from '@tanstack/react-query';
 import { ApiError, apiGet, apiPost, apiUpload } from '../api/client';
 import type {
   AdminProblemSummary,
+  BatchFailureItem,
+  BatchImportStatus,
+  BatchItemStatus,
   BatchJob,
   BatchResultItem,
   BatchRunResult,
@@ -34,8 +38,11 @@ import { SUBMISSION_STATUS_LABEL } from '../utils/status';
 import '../styles/admin.css';
 import '../styles/batch.css';
 
-const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
-const SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx']);
+// P0 上限与后端 10 GB bodyLimit 对齐；真正的流式上传/解压在 P1 实现。
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024 * 1024;
+const SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx', '.c']);
+const DEFAULT_PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = ['20', '50', '100', '200'];
 const LEVEL_OPTIONS = Array.from({ length: 6 }, (_, index) => ({
   value: index + 1,
   label: `第 ${index + 1} 层`,
@@ -105,16 +112,77 @@ function parseStudents(files: string[], level: number): ParsedStudent[] {
     .sort((left, right) => left.student.localeCompare(right.student));
 }
 
-function statusLabel(status: BatchResultItem['status']): string {
+function statusLabel(status: BatchItemStatus): string {
   if (status === 'missing') return '缺失';
+  if (status === 'skipped') return '已跳过';
+  if (status === 'error') return '导入失败';
   return SUBMISSION_STATUS_LABEL[status as SubmissionStatus] ?? status;
 }
 
-function statusColor(status: BatchResultItem['status']): string {
+function statusColor(status: BatchItemStatus): string {
   if (status === 'missing') return 'red';
+  if (status === 'skipped') return 'orange';
+  if (status === 'error') return 'red';
   if (status === 'finished') return 'green';
   if (status === 'failed' || status === 'canceled') return 'red';
   return 'blue';
+}
+
+function importStatusLabel(status: BatchImportStatus | null): string {
+  if (status === 'imported') return '已导入';
+  if (status === 'skipped') return '已跳过';
+  if (status === 'error') return '导入失败';
+  return '—';
+}
+
+const ERROR_CODE_LABEL: Record<string, string> = {
+  SOURCE_TOO_LARGE: '源码超过管理员上限',
+  EMPTY_SOURCE: '源码为空',
+  UNSUPPORTED_SOURCE: '题目类型不支持该源码',
+  UNMAPPED_PROBLEM: '题目文件夹未映射',
+  INVALID_STUDENT_FOLDER: '无效学生文件夹（缺少可用源码）',
+  USER_CREATE_FAILED: '创建合成学生失败',
+  SUBMIT_FAILED: '创建提交失败',
+  UNSAFE_PATH: 'zip 路径不安全',
+};
+
+function errorCodeLabel(code: string | null): string {
+  if (!code) return '—';
+  return ERROR_CODE_LABEL[code] ?? code;
+}
+
+function FailureList({
+  items,
+  total,
+  tone,
+}: {
+  items: BatchFailureItem[];
+  total: number;
+  tone: 'warning' | 'error';
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="batch-failure-list">
+      {items.map((item) => (
+        <div className="batch-failure-row" key={item.id}>
+          <span className="batch-failure-student">{item.student}</span>
+          <span className="mono batch-failure-path" title={item.sourcePath}>
+            {item.sourcePath}
+          </span>
+          <Tag color={tone === 'warning' ? 'orange' : 'red'}>{item.errorCode ?? 'ERROR'}</Tag>
+          <span className="batch-failure-message">
+            {errorCodeLabel(item.errorCode)}
+            {item.errorMessage ? `：${item.errorMessage}` : ''}
+          </span>
+        </div>
+      ))}
+      {total > items.length ? (
+        <div className="muted batch-failure-more">
+          仅显示前 {items.length} 条，共 {total} 条；可翻页查看全部条目。
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 function csvCell(value: string): string {
@@ -134,7 +202,7 @@ function describeBatchError(error: unknown): string {
       case 'UNSAFE_PATH':
         return `zip 内含不安全路径：${error.message}`;
       case 'NO_SOURCES':
-        return '当前层级没有识别到 .cpp 源文件，请调整层级或检查 zip 目录结构。';
+        return '当前层级没有识别到学生目录或 .cpp 源文件，请调整层级或检查 zip 目录结构。';
       case 'UPLOAD_NOT_FOUND':
         return '上传记录不存在，请重新上传 zip。';
       case 'BAD_UPLOAD_ID':
@@ -142,7 +210,20 @@ function describeBatchError(error: unknown): string {
       case 'PROBLEM_NOT_FOUND':
         return '题目不存在';
       case 'UNMAPPED_PROBLEMS':
+      case 'UNMAPPED_PROBLEM':
         return `有题目文件夹未映射：${error.message}`;
+      case 'SOURCE_TOO_LARGE':
+        return `源码超过大小上限：${error.message}`;
+      case 'EMPTY_SOURCE':
+        return '源码为空';
+      case 'UNSUPPORTED_SOURCE':
+        return `题目类型不支持该源码：${error.message}`;
+      case 'INVALID_STUDENT_FOLDER':
+        return '无效学生文件夹（缺少可用源码或空目录）';
+      case 'USER_CREATE_FAILED':
+        return '创建合成学生失败，请检查用户名冲突。';
+      case 'SUBMIT_FAILED':
+        return `创建提交失败：${error.message}`;
       case 'BAD_REQUEST':
         return '请求参数有误';
       default:
@@ -167,6 +248,9 @@ export function AdminBatchPage() {
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
   const [batchId, setBatchId] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [exporting, setExporting] = useState(false);
 
   const problemsQuery = useQuery({
     queryKey: ['admin-problems'],
@@ -174,8 +258,11 @@ export function AdminBatchPage() {
     staleTime: 30_000,
   });
   const batchQuery = useQuery({
-    queryKey: ['batch', batchId],
-    queryFn: () => apiGet<BatchJob>(`/api/admin/batch/${batchId}`),
+    queryKey: ['batch', batchId, page, pageSize],
+    queryFn: () =>
+      apiGet<BatchJob>(
+        `/api/admin/batch/${batchId}?offset=${(page - 1) * pageSize}&limit=${pageSize}`,
+      ),
     enabled: batchId !== null,
     retry: false,
     refetchInterval: (query) => {
@@ -295,7 +382,7 @@ export function AdminBatchPage() {
     });
   }, [multiProblem, uploadResult, folderKeys, problemsById]);
 
-  const batchRunning = batchId !== null && job?.status !== 'finished';
+  const batchRunning = batchId !== null && (job === null || job.status === 'running');
   const multiReady =
     multiProblem &&
     multiPreview.pairs.length > 0 &&
@@ -312,7 +399,7 @@ export function AdminBatchPage() {
       return;
     }
     if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError('zip 超过 80 MB 限制');
+      setUploadError('zip 超过 5 GB 限制');
       return;
     }
     setUploading(true);
@@ -320,6 +407,7 @@ export function AdminBatchPage() {
     setRunError(null);
     setUploadResult(null);
     setBatchId(null);
+    setPage(1);
     setUploadFileName(file.name);
     try {
       const result = await apiUpload<BatchUploadResult>(
@@ -371,7 +459,10 @@ export function AdminBatchPage() {
           : { problemId }),
       });
       setBatchId(result.id);
-      message.success(`已提交 ${result.count} 份代码，开始评测`);
+      setPage(1);
+      message.success(
+        `已提交 ${result.count} 份代码，跳过 ${result.skippedCount} 项，失败 ${result.errorCount} 项`,
+      );
     } catch (error) {
       setRunError(describeBatchError(error));
       message.error(describeBatchError(error));
@@ -380,32 +471,65 @@ export function AdminBatchPage() {
     }
   };
 
-  const exportCsv = () => {
-    if (!job || job.items.length === 0) return;
-    const header = ['选手', '题目', '源文件', '状态', 'Verdict', '得分', '用时(ms)', '内存(KB)'];
-    const rows = job.items.map((item) => [
-      item.student,
-      item.problemTitle ?? `#${item.problemId}`,
-      item.sourcePath,
-      statusLabel(item.status),
-      item.verdict ?? '',
-      String(item.score),
-      String(item.timeMs),
-      String(item.memoryKb),
-    ]);
-    const csv = [header, ...rows]
-      .map((row) => row.map((cell) => csvCell(cell)).join(','))
-      .join('\r\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `batch-${job.id}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    message.success('CSV 已导出');
+  const exportCsv = async () => {
+    if (!job || job.total === 0) return;
+    setExporting(true);
+    try {
+      // 分页接口单次最多 1000 条；导出时按页拉取全部结果，避免只导出当前页。
+      const allItems: BatchResultItem[] = [];
+      let offset = 0;
+      while (offset < job.total) {
+        const pageData = await apiGet<BatchJob>(
+          `/api/admin/batch/${job.id}?offset=${offset}&limit=1000`,
+        );
+        allItems.push(...pageData.items);
+        if (pageData.items.length === 0) break;
+        offset += pageData.items.length;
+      }
+      const header = [
+        '选手',
+        '题目',
+        '源文件',
+        '导入状态',
+        '错误码',
+        '错误信息',
+        '状态',
+        'Verdict',
+        '得分',
+        '用时(ms)',
+        '内存(KB)',
+      ];
+      const rows = allItems.map((item) => [
+        item.student,
+        item.problemTitle ?? (item.problemId === null ? '' : `#${item.problemId}`),
+        item.sourcePath,
+        importStatusLabel(item.importStatus),
+        item.errorCode ?? '',
+        item.errorMessage ?? '',
+        statusLabel(item.status),
+        item.verdict ?? '',
+        String(item.score),
+        String(item.timeMs),
+        String(item.memoryKb),
+      ]);
+      const csv = [header, ...rows]
+        .map((row) => row.map((cell) => csvCell(cell)).join(','))
+        .join('\r\n');
+      const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = `batch-${job.id}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+      message.success(`CSV 已导出（${allItems.length} 条）`);
+    } catch (error) {
+      message.error(describeBatchError(error));
+    } finally {
+      setExporting(false);
+    }
   };
 
   const columns: TableColumnsType<BatchResultItem> = [
@@ -415,8 +539,8 @@ export function AdminBatchPage() {
       dataIndex: 'problemTitle',
       width: 180,
       render: (_value, item) => (
-        <span title={item.problemTitle ?? `#${item.problemId}`}>
-          {item.problemTitle ?? `#${item.problemId}`}
+        <span title={item.problemTitle ?? (item.problemId === null ? '—' : `#${item.problemId}`)}>
+          {item.problemTitle ?? (item.problemId === null ? '—' : `#${item.problemId}`)}
         </span>
       ),
     },
@@ -430,10 +554,40 @@ export function AdminBatchPage() {
       ),
     },
     {
+      title: '导入',
+      dataIndex: 'importStatus',
+      width: 90,
+      render: (value: BatchImportStatus | null) =>
+        value === 'error' ? (
+          <Tag color="red">{importStatusLabel(value)}</Tag>
+        ) : value === 'skipped' ? (
+          <Tag color="orange">{importStatusLabel(value)}</Tag>
+        ) : (
+          <Tag color="green">{importStatusLabel(value)}</Tag>
+        ),
+    },
+    {
+      title: '错误',
+      dataIndex: 'errorCode',
+      width: 210,
+      render: (_value, item) =>
+        item.errorCode ? (
+          <Tooltip
+            title={`${errorCodeLabel(item.errorCode)}${
+              item.errorMessage ? `：${item.errorMessage}` : ''
+            }`}
+          >
+            <span className="batch-error-code mono">{item.errorCode}</span>
+          </Tooltip>
+        ) : (
+          <span className="muted">—</span>
+        ),
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       width: 98,
-      render: (value: BatchResultItem['status']) => (
+      render: (value: BatchItemStatus) => (
         <Tag color={statusColor(value)}>{statusLabel(value)}</Tag>
       ),
     },
@@ -466,18 +620,16 @@ export function AdminBatchPage() {
     },
   ];
 
-  const acCount = (job?.items ?? []).filter((item) => item.verdict === 'AC').length;
-  const totalStudents = job?.items.length ?? 0;
-  const averageScore =
-    totalStudents > 0
-      ? (job?.items ?? []).reduce((sum, item) => sum + item.score, 0) / totalStudents
-      : 0;
-  const judgedCount =
-    job?.items.filter((item) => item.status === 'finished' || item.status === 'failed')
-      .length ?? 0;
+  // 汇总统计来自服务端聚合，不随当前分页变化。
+  const acCount = job?.acCount ?? 0;
+  const totalStudents = job?.total ?? 0;
+  const averageScore = job?.averageScore ?? 0;
+  const judgedCount = job?.judgedCount ?? 0;
   const resultMulti = Boolean(job?.multiProblem);
-  const distinctStudentCount = new Set((job?.items ?? []).map((item) => item.student)).size;
-  const distinctProblemCount = new Set((job?.items ?? []).map((item) => item.problemId)).size;
+  const distinctStudentCount = job?.distinctStudentCount ?? 0;
+  const distinctProblemCount = job?.distinctProblemCount ?? 0;
+  const skippedCount = job?.skippedCount ?? 0;
+  const errorCount = job?.errorCount ?? 0;
 
   const problemOptions = (problemsQuery.data ?? []).map((problem) => ({
     value: problem.id,
@@ -535,7 +687,8 @@ export function AdminBatchPage() {
                 : '拖拽选手代码 zip 到此，或点击选择文件'}
           </div>
           <div className="batch-drop-hint muted">
-            {uploadFileName || '支持 .zip，最大 80 MB；例如 Alice/main.cpp、Bob/main.cpp'}
+            {uploadFileName ||
+              '支持 .zip，最大 5 GB；例如 Alice/main.cpp、Bob/main.cpp（超大文件 P1 将改为流式上传）'}
           </div>
         </div>
         <input
@@ -847,8 +1000,12 @@ export function AdminBatchPage() {
           <Space>
             评测结果
             {job ? (
-              <Tag color={job.status === 'finished' ? 'green' : 'blue'}>
-                {job.status === 'finished' ? '已完成' : '评测中'}
+              <Tag
+                color={
+                  job.status === 'finished' ? 'green' : job.status === 'failed' ? 'red' : 'blue'
+                }
+              >
+                {job.status === 'finished' ? '已完成' : job.status === 'failed' ? '失败' : '评测中'}
               </Tag>
             ) : null}
           </Space>
@@ -858,8 +1015,9 @@ export function AdminBatchPage() {
             {job?.status === 'running' ? <Spin size="small" /> : null}
             <Button
               icon={<DownloadOutlined />}
-              disabled={!job || job.status !== 'finished' || job.items.length === 0}
-              onClick={exportCsv}
+              loading={exporting}
+              disabled={!job || job.status === 'running' || job.total === 0}
+              onClick={() => void exportCsv()}
             >
               导出 CSV
             </Button>
@@ -882,8 +1040,9 @@ export function AdminBatchPage() {
           <div>
             <div className="batch-result-meta muted">
               {job.multiProblem
-                ? `批次 #${job.id} · 多题 · 学生层级 ${job.studentLevel} · 已评测 ${judgedCount} / ${totalStudents}`
-                : `批次 #${job.id} · 题目 #${job.problemId} · 层级 ${job.studentLevel} · 已评测 ${judgedCount} / ${totalStudents}`}
+                ? `批次 #${job.id} · 多题 · 学生层级 ${job.studentLevel} · 已评测 ${judgedCount} / ${job.importedCount}`
+                : `批次 #${job.id} · 题目 #${job.problemId} · 层级 ${job.studentLevel} · 已评测 ${judgedCount} / ${job.importedCount}`}
+              {` · 共 ${job.total} 条（跳过 ${skippedCount} · 失败 ${errorCount}）`}
             </div>
             <div className="batch-summary">
               <div className="batch-stat">
@@ -892,7 +1051,19 @@ export function AdminBatchPage() {
               </div>
               <div className="batch-stat">
                 <span className="batch-stat-value">{totalStudents}</span>
-                <span className="muted">{resultMulti ? '总提交' : '总人数'}</span>
+                <span className="muted">总条目</span>
+              </div>
+              <div className="batch-stat">
+                <span className="batch-stat-value">{job.importedCount}</span>
+                <span className="muted">成功导入</span>
+              </div>
+              <div className="batch-stat">
+                <span className="batch-stat-value">{skippedCount}</span>
+                <span className="muted">跳过文件夹</span>
+              </div>
+              <div className="batch-stat">
+                <span className="batch-stat-value">{errorCount}</span>
+                <span className="muted">导入失败</span>
               </div>
               {resultMulti ? (
                 <>
@@ -911,13 +1082,48 @@ export function AdminBatchPage() {
                 <span className="muted">平均分</span>
               </div>
             </div>
+            {skippedCount > 0 ? (
+              <Alert
+                className="batch-alert"
+                type="warning"
+                showIcon
+                message={`跳过 ${skippedCount} 个无效学生文件夹`}
+                description={
+                  <FailureList items={job.skipped} total={skippedCount} tone="warning" />
+                }
+              />
+            ) : null}
+            {errorCount > 0 ? (
+              <Alert
+                className="batch-alert"
+                type="error"
+                showIcon
+                message={`${errorCount} 条导入失败`}
+                description={<FailureList items={job.errors} total={errorCount} tone="error" />}
+              />
+            ) : null}
             <Table<BatchResultItem>
-              className="oij-table"
-              rowKey={(item) => `${item.student}:${item.problemId}`}
+              className="oij-table batch-result-table"
+              rowKey={(item) => item.id}
               size="small"
               columns={columns}
               dataSource={job.items}
-              pagination={false}
+              pagination={{
+                current: page,
+                pageSize,
+                total: job.total,
+                showSizeChanger: true,
+                pageSizeOptions: PAGE_SIZE_OPTIONS,
+                showTotal: (total, range) => `${range[0]}-${range[1]} / 共 ${total} 条`,
+                onChange: (nextPage, nextPageSize) => {
+                  if (nextPageSize !== pageSize) {
+                    setPageSize(nextPageSize);
+                    setPage(1);
+                  } else {
+                    setPage(nextPage);
+                  }
+                },
+              }}
               locale={{ emptyText: '本批次没有选手' }}
             />
           </div>
