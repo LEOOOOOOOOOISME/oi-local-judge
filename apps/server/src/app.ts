@@ -13,6 +13,7 @@ import { registerAdminProblemRoutes } from './http/admin-problems.js';
 import { registerAdminToolRoutes } from './http/admin-tools.js';
 import { registerAdminAuthoringRoutes } from './http/admin-authoring.js';
 import { registerAdminBatchRoutes } from './http/admin-batch.js';
+import { registerAdminBodyParsers } from './http/admin-body-parser.js';
 import { registerAdminUserRoutes } from './http/admin-users.js';
 import { registerCommunityRoutes } from './http/community.js';
 import { registerContestRoutes } from './http/contests.js';
@@ -93,13 +94,9 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
       ip: request.ip,
     });
   });
-  // Global body-limit for admin routes – extremely large so that admin uploads
-  // (problems, zip imports, batch uploads, etc.) are never rejected by the proxy.
-  app.addContentTypeParser(
-    ['application/octet-stream', 'application/zip'],
-    { parseAs: 'buffer', bodyLimit: 10 * 1024 * 1024 * 1024 }, // 10 GB
-    (_request, body, done) => done(null, body),
-  );
+  // Raw admin uploads: the batch ZIP endpoint streams, everything else stays
+  // buffered (10 GiB P0 limit) so existing problem/asset routes are unchanged.
+  registerAdminBodyParsers(app);
   await app.register(websocket);
   await app.register(healthRoutes);
 

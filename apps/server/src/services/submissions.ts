@@ -39,6 +39,8 @@ export const MAX_SOURCE_BYTES_ADMIN = 512 * 1024 * 1024;
 export const SUBMIT_COOLDOWN_MS = 10_000;
 /** Priority used for admin rejudges so they jump ahead of regular submissions. */
 export const REJUDGE_PRIORITY = 100;
+/** Batch submissions are background work: online submissions (50) come first. */
+export const BATCH_JUDGE_PRIORITY = 10;
 
 /** Thrown when a submission arrives inside the per-key cooldown window. */
 export class SubmissionRateLimitError extends Error {
@@ -120,6 +122,12 @@ export interface SubmitInput {
   teamId?: number | null;
   /** Bypass the cooldown check (admin rejudge/batch internal submissions). */
   skipCooldown?: boolean;
+  /**
+   * Explicit judge task priority. Batch imports use BATCH_JUDGE_PRIORITY so
+   * online submissions always win the queue; other callers keep the historical
+   * 50/100 split.
+   */
+  judgePriority?: number;
   /**
    * Bypass the practice read ACL. Only internal admin batch pipelines set this;
    * user-facing submissions (contest or practice) must pass the ACL checks.
@@ -242,7 +250,16 @@ export function submitSource(
     teamId,
     createdAt: nowMs,
   });
-  createJudgeTask(deps.db, id, input.contestId ? 100 : 50);
+  createJudgeTask(
+    deps.db,
+    id,
+    input.judgePriority ??
+      (input.batchId !== undefined && input.batchId !== null
+        ? BATCH_JUDGE_PRIORITY
+        : input.contestId
+          ? 100
+          : 50),
+  );
   return { id };
 }
 

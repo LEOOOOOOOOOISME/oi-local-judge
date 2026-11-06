@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, normalize } from 'node:path';
 import { unzipSync } from 'fflate';
@@ -6,29 +6,53 @@ import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { hashPassword } from '../security/password.js';
-import {
-  MAX_SOURCE_BYTES_ADMIN,
-  submitSource,
-} from '../services/submissions.js';
+import { cancelSubmission } from '../services/submissions.js';
+import { MAX_SOURCE_BYTES_ADMIN, submitSource } from '../services/submissions.js';
 import { getProblem } from '../storage/repos/problems.js';
 import {
   addBatchItem,
   createBatchJob,
+  findUnfinishedBatchJobForUpload,
   getBatchItemStats,
   getBatchJob,
   listBatchItemFailures,
   listBatchItemsPage,
+  listBatchSubmissionIds,
   setBatchStatus,
+  updateBatchJob,
   type BatchItemImportStatus,
   type BatchItemRow,
   type BatchItemStats,
+  type BatchJobRow,
 } from '../storage/repos/batches.js';
-import { getSubmission } from '../storage/repos/submissions.js';
 import {
-  createUser,
-  getUserByUsername,
-  type UserRow,
-} from '../storage/repos/users.js';
+  createBatchUpload,
+  getBatchUpload,
+  updateBatchUploadScan,
+} from '../storage/repos/batch-uploads.js';
+import { getSubmission } from '../storage/repos/submissions.js';
+import type { UserRow } from '../storage/repos/users.js';import {
+  batchUsername,
+  classifySubmitError,
+  ensureBatchUser,
+  isBatchImportActive,
+  startBatchImport,
+  cancelBatchImport,
+} from '../services/batch-import.js';
+import {
+  MAX_BATCH_FILE_BYTES,
+  MAX_BATCH_UNCOMPRESSED_BYTES,
+  MAX_BATCH_ZIP_BYTES,
+  BatchZipError,
+  freeDiskBytes,
+  scanZipStream,
+  writeStreamedUpload,
+} from '../services/batch-zip.js';
+import {
+  SOURCE_EXTENSIONS,
+  SOURCE_LANGUAGE_BY_EXTENSION,
+  planBatchSources,
+} from '../services/batch-plan.js';
 
 export interface AdminBatchRouteOptions {
   db: DatabaseSync;
@@ -38,14 +62,6 @@ export interface AdminBatchRouteOptions {
   maxSourceBytes?: number;
 }
 
-const SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx', '.c']);
-const SOURCE_LANGUAGE_BY_EXTENSION: Record<string, string> = {
-  '.cpp': 'cpp17',
-  '.cc': 'cpp17',
-  '.cxx': 'cpp17',
-  '.c': 'c11',
-};
-
 // Batch upload limit for admin routes – very large (10 GB) so admins are never
 // blocked by the body-size parser when importing student lists or bulk data.
 const MAX_BATCH_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
@@ -54,6 +70,8 @@ const DEFAULT_PAGE_SIZE = 200;
 const MAX_PAGE_SIZE = 1000;
 /** Cap the skipped/error summaries attached to run/get responses. */
 const REPORT_LIMIT = 50;
+/** A streaming upload response reports the same capped preview failure sample. */
+const PREVIEW_REPORT_LIMIT = 100;
 
 type FailureStatus = Extract<BatchItemImportStatus, 'skipped' | 'error'>;
 
@@ -97,64 +115,115 @@ function parseLimit(value: string | undefined): number {
 }
 
 /**
- * Synthetic student usernames are stable and unique per student. Short names
- * keep the historical `batch_<student>` form so existing accounts are reused;
- * overlong names get a hash suffix instead of colliding after truncation.
+ * P0 remains the compatibility path: the old endpoints still buffer and import
+ * synchronously, while `/api/admin/batch/uploads` + `/uploads/:id/run` stream
+ * and import in the background.
  */
-export function batchUsername(student: string): string {
-  const base = `batch_${student}`;
-  if (base.length <= 64) return base;
-  const digest = createHash('sha1').update(student).digest('hex').slice(0, 8);
-  return `${base.slice(0, 64 - digest.length - 1)}_${digest}`;
-}
+export { batchUsername } from '../services/batch-import.js';
 
-function ensureBatchUser(
-  db: DatabaseSync,
-  student: string,
-  passwordHash: string,
-): UserRow {
-  const username = batchUsername(student);
-  const existing = getUserByUsername(db, username);
-  if (existing) return existing;
+function readMetaForJob(db: DatabaseSync, batchId: number): Record<string, unknown> {
+  const job = getBatchJob(db, batchId);
+  if (!job) return {};
   try {
-    createUser(db, {
-      username,
-      passwordHash,
-      realName: student,
-      role: 'contestant',
-    });
-  } catch (error) {
-    // A concurrent request may have created the same synthetic user.
-    const raced = getUserByUsername(db, username);
-    if (raced) return raced;
-    throw error;
+    const parsed = JSON.parse(job.meta_json) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
   }
-  const created = getUserByUsername(db, username);
-  if (!created) throw new Error(`synthetic user ${username} was not created`);
-  return created;
-}
-
-function classifySubmitError(error: unknown): { code: string; message: string } {
-  const message = error instanceof Error ? error.message : String(error);
-  if (/source is too large/i.test(message)) {
-    return { code: 'SOURCE_TOO_LARGE', message };
-  }
-  if (/source is empty/i.test(message)) {
-    return { code: 'EMPTY_SOURCE', message };
-  }
-  if (/unsupported language|require language|only accepted for/i.test(message)) {
-    return { code: 'UNSUPPORTED_SOURCE', message };
-  }
-  if (/problem not found/i.test(message)) {
-    return { code: 'UNMAPPED_PROBLEM', message };
-  }
-  return { code: 'SUBMIT_FAILED', message };
 }
 
 function resolveBatchStatus(stats: BatchItemStats): 'running' | 'finished' | 'failed' {
   if (stats.imported <= 0) return 'failed';
   return stats.done >= stats.imported ? 'finished' : 'running';
 }
+
+const IMPORT_STATUS_VALUES = new Set<BatchItemImportStatus>(['imported', 'skipped', 'error']);
+
+function parseImportStatus(value: string | undefined): BatchItemImportStatus | null {
+  return value && IMPORT_STATUS_VALUES.has(value as BatchItemImportStatus)
+    ? (value as BatchItemImportStatus)
+    : null;
+}
+
+/**
+ * Status of a streaming async import. `importing` is owned by the background
+ * job; afterwards the phase is derived from persisted batch_items/submissions
+ * so a restart or a missed status write can never strand a job.
+ */
+function resolveAsyncBatchStatus(
+  job: { status: string },
+  stats: BatchItemStats,
+  importActive: boolean,
+): string {
+  if (job.status === 'canceled') return 'canceled';
+  if (job.status === 'failed') return 'failed';
+  if (job.status === 'importing') {
+    if (importActive) return 'importing';
+    return stats.imported > 0 ? 'queued' : 'failed';
+  }
+  if (stats.imported <= 0) return 'failed';
+  if (stats.done >= stats.imported) return 'finished';
+  if (stats.done > 0) return 'judging';
+  return 'queued';
+}
+
+function importProgressFromMeta(
+  job: BatchJobRow | null,
+): { processed: number; totalCandidates: number } | null {
+  if (!job) return null;
+  try {
+    const meta = JSON.parse(job.meta_json) as {
+      progress?: { processed?: number; totalCandidates?: number };
+    };
+    const progress = meta.progress;
+    if (!progress || typeof progress.processed !== 'number') return null;
+    return {
+      processed: progress.processed,
+      totalCandidates: Number(progress.totalCandidates ?? 0),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildProgress(
+  stats: BatchItemStats,
+  status: string,
+  job: BatchJobRow | null,
+): {
+  total: number;
+  imported: number;
+  skipped: number;
+  errors: number;
+  judged: number;
+  percent: number;
+  phase: string;
+  import: { processed: number; totalCandidates: number } | null;
+} {
+  const imported = importProgressFromMeta(job);
+  let percent = 0;
+  if (status === 'importing' && imported) {
+    percent =
+      imported.totalCandidates > 0
+        ? Math.min(99, Math.round((imported.processed / imported.totalCandidates) * 100))
+        : 0;
+  } else if (stats.imported > 0) {
+    percent = Math.min(100, Math.round((stats.done / stats.imported) * 100));
+  } else if (status === 'finished') {
+    percent = 100;
+  }
+  return {
+    total: stats.total,
+    imported: stats.imported,
+    skipped: stats.skipped,
+    errors: stats.errors,
+    judged: stats.done,
+    percent,
+    phase: status,
+    import: imported,
+  };
+}
+
 
 function toFailureDto(row: BatchItemRow): {
   id: number;
@@ -225,6 +294,302 @@ export function registerAdminBatchRoutes(
         .filter((name): name is string => name !== null)
         .sort();
       return reply.code(201).send({ ok: true, data: { uploadId, files: paths } });
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // P1 streaming upload + async import.
+  // -------------------------------------------------------------------------
+
+  app.post(
+    '/api/admin/batch/uploads',
+    { preHandler: guard },
+    async (request, reply) => {
+      const body = request.body as unknown;
+      if (body === undefined || body === null) {
+        return reply
+          .code(400)
+          .send({ ok: false, error: { code: 'EMPTY_BODY', message: 'raw zip body required' } });
+      }
+      const contentLengthHeader = request.headers['content-length'];
+      const contentLength = Number(contentLengthHeader);
+      if (
+        contentLengthHeader === undefined ||
+        !Number.isFinite(contentLength) ||
+        contentLength < 0
+      ) {
+        return reply.code(411).send({
+          ok: false,
+          error: { code: 'LENGTH_REQUIRED', message: 'Content-Length is required' },
+        });
+      }
+      if (contentLength === 0) {
+        return reply.code(400).send({ ok: false, error: { code: 'EMPTY_BODY' } });
+      }
+      if (contentLength > MAX_BATCH_ZIP_BYTES) {
+        return reply.code(413).send({
+          ok: false,
+          error: {
+            code: 'BATCH_ZIP_TOO_LARGE',
+            message: `zip is ${contentLength} bytes; limit is ${MAX_BATCH_ZIP_BYTES} bytes`,
+          },
+        });
+      }
+
+      const uploadDir = join(options.config.dataDir, 'uploads', 'batch');
+      mkdirSync(uploadDir, { recursive: true });
+      const freeBytes = freeDiskBytes(uploadDir);
+      if (freeBytes !== null && freeBytes < contentLength) {
+        return reply.code(507).send({
+          ok: false,
+          error: {
+            code: 'BATCH_DISK_FULL',
+            message: `only ${freeBytes} bytes free, upload needs ${contentLength}`,
+          },
+        });
+      }
+
+      const uploadId = randomUUID();
+      const relativePath = `uploads/batch/${uploadId}.zip`;
+      const targetPath = join(options.config.dataDir, relativePath);
+      let written;
+      try {
+        written = await writeStreamedUpload(body as Buffer | NodeJS.ReadableStream, targetPath, {
+          expectedBytes: contentLength,
+          maxBytes: MAX_BATCH_ZIP_BYTES,
+        });
+      } catch (err) {
+        if (err instanceof BatchZipError) {
+          const status = err.code === 'BATCH_ZIP_TOO_LARGE' ? 413 : 400;
+          return reply.code(status).send({
+            ok: false,
+            error: { code: err.code, message: err.message },
+          });
+        }
+        throw err;
+      }
+      const originalName =
+        typeof request.headers['x-file-name'] === 'string'
+          ? request.headers['x-file-name']
+          : null;
+      createBatchUpload(options.db, {
+        uploadId,
+        originalName,
+        zipPath: relativePath,
+        sizeBytes: written.sizeBytes,
+        sha256: written.sha256,
+        createdBy: request.user?.id ?? null,
+      });
+      return reply.code(201).send({
+        ok: true,
+        data: {
+          uploadId,
+          originalName,
+          status: 'uploaded',
+          sizeBytes: written.sizeBytes,
+          sha256: written.sha256,
+        },
+      });
+    },
+  );
+
+  app.get<{
+    Params: { id: string };
+    Querystring: { studentLevel?: string; problemLevel?: string };
+  }>('/api/admin/batch/uploads/:id/preview', { preHandler: guard }, async (request, reply) => {
+    const upload = getBatchUpload(options.db, request.params.id);
+    if (!upload) {
+      return reply.code(404).send({ ok: false, error: { code: 'UPLOAD_NOT_FOUND' } });
+    }
+    const studentLevel = Math.max(
+      1,
+      Math.floor(Number(request.query.studentLevel ?? 1) || 1),
+    );
+    const problemLevel = Math.max(0, Math.floor(Number(request.query.problemLevel ?? 0) || 0));
+    const zipPath = join(options.config.dataDir, upload.zip_path);
+    let scan;
+    try {
+      scan = await scanZipStream(zipPath, {
+        maxFileBytes: MAX_BATCH_FILE_BYTES,
+        maxTotalUncompressedBytes: MAX_BATCH_UNCOMPRESSED_BYTES,
+      });
+    } catch (err) {
+      if (err instanceof BatchZipError) {
+        const status =
+          err.code === 'BATCH_ENTRY_LIMIT' || err.code === 'BATCH_UNCOMPRESSED_LIMIT'
+            ? 413
+            : 400;
+        return reply.code(status).send({
+          ok: false,
+          error: { code: err.code, message: err.message },
+        });
+      }
+      throw err;
+    }
+    updateBatchUploadScan(
+      options.db,
+      upload.upload_id,
+      scan.entryCount,
+      scan.totalUncompressedBytes,
+    );
+    const plan = planBatchSources({
+      files: scan.files,
+      directories: scan.directories,
+      skipped: scan.skipped,
+      studentLevel,
+      problemLevel,
+      singleProblemId: null,
+      maxSourceBytes,
+      defaultLanguage: 'cpp17',
+      // Preview counts structurally valid sources before any mapping exists.
+      unmapped: 'allow',
+    });
+    return {
+      ok: true,
+      data: {
+        uploadId: upload.upload_id,
+        originalName: upload.original_name,
+        status: 'uploaded',
+        sizeBytes: upload.size_bytes,
+        sha256: upload.sha256,
+        entryCount: scan.entryCount,
+        totalUncompressedBytes: scan.totalUncompressedBytes,
+        studentLevel,
+        problemLevel,
+        treeSample: plan.treeSample,
+        maxDepth: plan.maxDepth,
+        students: plan.studentFolders.length,
+        studentSample: plan.studentSample,
+        problemFolders: plan.problemFolders,
+        invalidStudents: plan.invalidStudents.slice(0, PREVIEW_REPORT_LIMIT),
+        duplicates: plan.duplicates.slice(0, PREVIEW_REPORT_LIMIT),
+        duplicateCount: plan.duplicates.length,
+        validCount: plan.validCount,
+        totalFiles: plan.totalFiles,
+        skipped: plan.skipped.slice(0, PREVIEW_REPORT_LIMIT),
+        failures: plan.failures.slice(0, PREVIEW_REPORT_LIMIT),
+      },
+    };
+  });
+
+  app.post<{
+    Params: { id: string };
+    Body: {
+      studentLevel?: number;
+      problemLevel?: number;
+      problemId?: number;
+      problemMap?: Record<string, number>;
+      language?: string;
+    };
+  }>('/api/admin/batch/uploads/:id/run', { preHandler: guard }, async (request, reply) => {
+    const upload = getBatchUpload(options.db, request.params.id);
+    if (!upload) {
+      return reply.code(404).send({ ok: false, error: { code: 'UPLOAD_NOT_FOUND' } });
+    }
+    const body = request.body ?? {};
+    const studentLevel = Math.max(1, Math.floor(Number(body.studentLevel ?? 1) || 1));
+    const problemLevel = Math.max(0, Math.floor(Number(body.problemLevel ?? 0) || 0));
+    const multiProblem = problemLevel > 0;
+    const language = body.language ?? 'cpp17';
+    const problemId = Number(body.problemId);
+    if (!multiProblem && !Number.isInteger(problemId)) {
+      return reply
+        .code(400)
+        .send({ ok: false, error: { code: 'BAD_REQUEST', message: 'problemId is required' } });
+    }
+    if (!multiProblem && !getProblem(options.db, problemId)) {
+      return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
+    }
+    const problemMap: Record<string, number> = {};
+    for (const [folder, value] of Object.entries(body.problemMap ?? {})) {
+      const id = Number(value);
+      if (!Number.isInteger(id) || !getProblem(options.db, id)) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'BAD_PROBLEM_MAP', message: `unknown problem for folder: ${folder}` },
+        });
+      }
+      problemMap[folder] = id;
+    }
+    const unfinished = findUnfinishedBatchJobForUpload(options.db, upload.upload_id);
+    if (unfinished) {
+      return reply.code(409).send({
+        ok: false,
+        error: { code: 'BATCH_ALREADY_RUNNING', jobId: unfinished.id },
+      });
+    }
+    const batchId = createBatchJob(options.db, {
+      problemId: multiProblem ? 0 : problemId,
+      studentLevel,
+      contestId: null,
+      mode: 'async',
+      problemLevel: multiProblem ? problemLevel : null,
+      problemMap,
+      createdBy: request.user?.id ?? null,
+      status: 'importing',
+      uploadId: upload.upload_id,
+    });
+    startBatchImport(
+      { db: options.db, config: options.config, maxSourceBytes },
+      {
+        batchId,
+        uploadId: upload.upload_id,
+        studentLevel,
+        problemLevel,
+        problemId,
+        problemMap,
+        language,
+      },
+    );
+    return reply.code(202).send({
+      ok: true,
+      data: { jobId: batchId, id: batchId, status: 'importing' },
+    });
+  });
+
+  app.post<{ Params: { id: string } }>(
+    '/api/admin/batch/:id/cancel',
+    { preHandler: guard },
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      const job = getBatchJob(options.db, id);
+      if (!job) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      if (job.contest_id !== null) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'NOT_STANDALONE_BATCH', message: 'contest batches are owned by the contest' },
+        });
+      }
+      if (job.mode === 'async' && !isBatchImportActive(id) && job.status !== 'importing') {
+        const status = resolveAsyncBatchStatus(job, getBatchItemStats(options.db, id), false);
+        if (status === 'finished') {
+          return reply.code(409).send({
+            ok: false,
+            error: { code: 'CANNOT_CANCEL', message: 'batch already finished' },
+          });
+        }
+      }
+      cancelBatchImport(id);
+      setBatchStatus(options.db, id, 'canceled');
+      updateBatchJob(options.db, id, {
+        meta: { ...readMetaForJob(options.db, id), canceledAt: Date.now() },
+      });
+      const submissionIds = listBatchSubmissionIds(options.db, id);
+      let canceled = 0;
+      const actor = {
+        id: request.user?.id ?? 0,
+        role: request.user?.role ?? 'admin',
+      };
+      for (const submissionId of submissionIds) {
+        try {
+          cancelSubmission(options.db, submissionId, actor);
+          canceled += 1;
+        } catch {
+          // Terminal submissions and worker-owned tasks may already be gone;
+          // cancellation is best-effort per item.
+        }
+      }
+      return { ok: true, data: { id, status: 'canceled', canceled } };
     },
   );
 
@@ -517,21 +882,31 @@ export function registerAdminBatchRoutes(
 
   app.get<{
     Params: { id: string };
-    Querystring: { offset?: string; limit?: string };
+    Querystring: { offset?: string; limit?: string; status?: string };
   }>('/api/admin/batch/:id', { preHandler: guard }, async (request, reply) => {
     const id = Number(request.params.id);
     const job = getBatchJob(options.db, id);
     if (!job) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
     const offset = parseOffset(request.query.offset);
     const limit = parseLimit(request.query.limit);
+    const itemStatus = parseImportStatus(request.query.status);
     const stats = getBatchItemStats(options.db, id);
     // Contest batch jobs (contest_id != null) own their lifecycle; never rewrite
     // draft/ready/published statuses from the standalone batch progress route.
-    const status = job.contest_id !== null ? job.status : resolveBatchStatus(stats);
-    if (job.contest_id === null && job.status !== status) {
-      setBatchStatus(options.db, id, status);
+    let status: string;
+    if (job.contest_id !== null) {
+      status = job.status;
+    } else if (job.mode === 'async') {
+      status = resolveAsyncBatchStatus(job, stats, isBatchImportActive(id));
+      // Do not clobber `importing` while the background job still owns it.
+      if ((job.status !== 'importing' || !isBatchImportActive(id)) && job.status !== status) {
+        setBatchStatus(options.db, id, status);
+      }
+    } else {
+      status = resolveBatchStatus(stats);
+      if (job.status !== status) setBatchStatus(options.db, id, status);
     }
-    const items = listBatchItemsPage(options.db, id, offset, limit).map((item) => {
+    const items = listBatchItemsPage(options.db, id, offset, limit, itemStatus).map((item) => {
       const submission = item.submission_id
         ? getSubmission(options.db, item.submission_id)
         : null;
@@ -570,7 +945,10 @@ export function registerAdminBatchRoutes(
         id,
         problemId: job.problem_id,
         multiProblem: job.problem_id === 0,
+        mode: job.mode,
+        uploadId: job.upload_id,
         status,
+        jobStatus: job.status,
         studentLevel: job.student_level,
         offset,
         limit,
@@ -584,6 +962,7 @@ export function registerAdminBatchRoutes(
         averageScore: stats.imported > 0 ? stats.scoreSum / stats.imported : 0,
         distinctStudentCount: stats.distinctStudents,
         distinctProblemCount: stats.distinctProblems,
+        progress: buildProgress(stats, status, job),
         items,
         skipped: listBatchItemFailures(options.db, id, 'skipped', REPORT_LIMIT).map(
           toFailureDto,
