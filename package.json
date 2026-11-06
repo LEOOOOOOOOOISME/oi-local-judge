@@ -2,6 +2,8 @@
   "name": "oi-local-judge",
   "private": true,
   "type": "module",
+  "description": "OiJudge — 本地 OI 评测系统（Electron 桌面端与局域网网页服务）",
+  "author": "OiJudge Team",
   "workspaces": [
     "apps/*",
     "packages/*"
@@ -9,6 +11,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e:browser": "playwright test tests/e2e/browser.spec.ts tests/e2e/business-flow.spec.ts",
     "typecheck": "tsc -b",
     "build:help": "node tools/build-help-docs.mjs",
     "build:runner": "node tools/build-runner.mjs",
@@ -24,10 +27,13 @@
     "build": "node tools/build-help-docs.mjs && tsc -p packages/shared/tsconfig.json && tsc -p apps/server/tsconfig.json && tsc -p apps/desktop/tsconfig.json && npm run build --workspace @oij/web",
     "build:portable": "node tools/build-portable.mjs",
     "build:release": "node tools/release/build-release.mjs",
+    "build:installer": "node tools/release/build-installer.mjs",
     "release:bump": "node tools/release/bump-version.mjs",
     "start": "node apps/server/dist/cli.js",
     "electron:smoke": "electron tools/electron-smoke.cjs",
     "electron:smoke:flags": "electron --no-sandbox --disable-gpu tools/electron-smoke.cjs",
+    "smoke:desktop": "node tools/electron-smoke.mjs",
+    "smoke:desktop:dev": "node tools/electron-smoke.mjs --dev",
     "electron:start": "electron apps/desktop/dist/main.js",
     "web:dev": "npm run dev --workspace @oij/web",
     "web:build": "npm run build --workspace @oij/web",
@@ -36,6 +42,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/sanitize-html": "^2.16.2",
+    "electron-builder": "^26.18.0",
     "tsx": "^4.19.0",
     "typescript": "^5.7.0",
     "vitest": "^3.0.0"
@@ -49,5 +56,5 @@
     "markdown-it-texmath": "^1.0.0",
     "sanitize-html": "^2.18.1"
   },
-  "version": "1.1.0-rc.6"
+  "version": "1.1.0-rc.8"
 }

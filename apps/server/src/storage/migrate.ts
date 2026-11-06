@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { migrateProblemNumbers } from './repos/problems.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users(
@@ -6,6 +7,10 @@ CREATE TABLE IF NOT EXISTS users(
   real_name TEXT, class_name TEXT, role TEXT NOT NULL DEFAULT 'contestant',
   status TEXT NOT NULL DEFAULT 'active', session_version INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS problem_categories(
+  id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+  next_seq INTEGER NOT NULL, seq_start INTEGER NOT NULL, created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS problems(
   id INTEGER PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL,
@@ -21,6 +26,9 @@ CREATE TABLE IF NOT EXISTS problems(
   visibility TEXT NOT NULL DEFAULT 'public',
   owner_type TEXT NOT NULL DEFAULT 'system',
   owner_id INTEGER,
+  category_id INTEGER,
+  seq INTEGER,
+  display_id TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
@@ -55,6 +63,20 @@ CREATE TABLE IF NOT EXISTS problem_assets(
   UNIQUE(problem_id, kind),
   FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS problem_attachments(
+  id INTEGER PRIMARY KEY,
+  problem_id INTEGER NOT NULL,
+  filename TEXT NOT NULL,
+  storage_path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  mime TEXT NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'problem',
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_problem_attachments_problem
+  ON problem_attachments(problem_id, id);
 CREATE TABLE IF NOT EXISTS submissions(
   id INTEGER PRIMARY KEY, contest_id INTEGER, problem_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL, team_id INTEGER, language TEXT NOT NULL, source_path TEXT NOT NULL,
@@ -95,6 +117,7 @@ CREATE TABLE IF NOT EXISTS contest_participants(
   contest_id INTEGER NOT NULL, user_id INTEGER NOT NULL,
   status TEXT NOT NULL DEFAULT 'accepted', extra_time INTEGER NOT NULL DEFAULT 0,
   registered_at INTEGER, checked_in_at INTEGER, reviewed_at INTEGER, reviewed_by INTEGER,
+  source TEXT NOT NULL DEFAULT 'manual',
   PRIMARY KEY(contest_id, user_id)
 );
 CREATE TABLE IF NOT EXISTS contest_official_scores(
@@ -135,6 +158,7 @@ CREATE TABLE IF NOT EXISTS contest_hacks(
   problem_id INTEGER NOT NULL,
   hacker_id INTEGER NOT NULL,
   target_submission_id INTEGER NOT NULL,
+  team_id INTEGER,
   input_path TEXT NOT NULL,
   status TEXT NOT NULL DEFAULT 'queued',
   verdict TEXT,
@@ -145,15 +169,30 @@ CREATE TABLE IF NOT EXISTS contest_hacks(
 CREATE INDEX IF NOT EXISTS idx_hacks_contest ON contest_hacks(contest_id, problem_id, id DESC);
 CREATE TABLE IF NOT EXISTS batch_jobs(
   id INTEGER PRIMARY KEY, problem_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'running',
-  student_level INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
+  student_level INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL,
+  upload_id TEXT
 );
 CREATE TABLE IF NOT EXISTS batch_items(
   id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, student TEXT NOT NULL,
   source_path TEXT NOT NULL, submission_id INTEGER, problem_id INTEGER,
-  user_id INTEGER,
+  user_id INTEGER, status TEXT, error_code TEXT, error_message TEXT,
   FOREIGN KEY(batch_id) REFERENCES batch_jobs(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_batch_items_batch ON batch_items(batch_id);
+CREATE TABLE IF NOT EXISTS batch_uploads(
+  id INTEGER PRIMARY KEY,
+  upload_id TEXT NOT NULL UNIQUE,
+  original_name TEXT,
+  zip_path TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  sha256 TEXT,
+  entry_count INTEGER NOT NULL DEFAULT 0,
+  total_uncompressed_bytes INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_batch_uploads_created ON batch_uploads(created_at DESC);
 CREATE TABLE IF NOT EXISTS posts(
   id INTEGER PRIMARY KEY, category TEXT NOT NULL, title TEXT NOT NULL,
   body_md TEXT NOT NULL, problem_id INTEGER, contest_id INTEGER,
@@ -194,6 +233,8 @@ CREATE TABLE IF NOT EXISTS teams(
   id INTEGER PRIMARY KEY,
   name TEXT NOT NULL UNIQUE,
   owner_id INTEGER NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'team',
+  allow_contest INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS team_members(
@@ -246,6 +287,64 @@ CREATE TABLE IF NOT EXISTS problem_set_shares(
 );
 CREATE INDEX IF NOT EXISTS idx_problem_set_shares_grantee
   ON problem_set_shares(grantee_type, grantee_id);
+CREATE TABLE IF NOT EXISTS training_plans(
+  id INTEGER PRIMARY KEY,
+  group_id INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  starts_at INTEGER,
+  ends_at INTEGER,
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_training_plans_group
+  ON training_plans(group_id, id);
+CREATE TABLE IF NOT EXISTS training_plan_items(
+  id INTEGER PRIMARY KEY,
+  plan_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  ordinal INTEGER NOT NULL,
+  target_score INTEGER NOT NULL,
+  due_at INTEGER,
+  created_at INTEGER NOT NULL,
+  UNIQUE(plan_id, problem_id),
+  FOREIGN KEY(plan_id) REFERENCES training_plans(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_training_plan_items_plan
+  ON training_plan_items(plan_id, ordinal);
+CREATE TABLE IF NOT EXISTS student_problem_stats(
+  user_id INTEGER NOT NULL,
+  problem_id INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  best_score INTEGER NOT NULL DEFAULT 0,
+  best_verdict TEXT,
+  first_ac_at INTEGER,
+  last_submit_at INTEGER NOT NULL,
+  wrong_attempts INTEGER NOT NULL DEFAULT 0,
+  tags_json TEXT NOT NULL DEFAULT '[]',
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY(user_id, problem_id)
+);
+CREATE INDEX IF NOT EXISTS idx_student_problem_stats_problem
+  ON student_problem_stats(problem_id);
+CREATE TABLE IF NOT EXISTS student_tag_stats(
+  user_id INTEGER NOT NULL,
+  tag TEXT NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0,
+  solved INTEGER NOT NULL DEFAULT 0,
+  last_attempt_at INTEGER,
+  PRIMARY KEY(user_id, tag)
+);
+CREATE TABLE IF NOT EXISTS student_daily_stats(
+  user_id INTEGER NOT NULL,
+  date TEXT NOT NULL,
+  submissions INTEGER NOT NULL DEFAULT 0,
+  ac_count INTEGER NOT NULL DEFAULT 0,
+  points INTEGER NOT NULL DEFAULT 0,
+  active_seconds INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY(user_id, date)
+);
 `;
 
 export function migrate(db: DatabaseSync): void {
@@ -259,23 +358,43 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'problems', 'objective_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'problems', 'owner_type', "TEXT NOT NULL DEFAULT 'system'");
   ensureColumn(db, 'problems', 'owner_id', 'INTEGER');
+  ensureColumn(db, 'problems', 'category_id', 'INTEGER');
+  ensureColumn(db, 'problems', 'seq', 'INTEGER');
+  ensureColumn(db, 'problems', 'display_id', 'TEXT');
+  // Numbering columns are added above before their indexes, so legacy databases
+  // (which lack the columns) migrate cleanly as well.
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_problems_display_id ON problems(display_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_problems_category_seq ON problems(category_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_problems_category ON problems(category_id);
+  `);
   ensureColumn(db, 'batch_items', 'problem_id', 'INTEGER');
   ensureColumn(db, 'batch_items', 'score', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'batch_items', 'verdict', 'TEXT');
   ensureColumn(db, 'batch_items', 'time_ms', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'batch_items', 'memory_kb', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'batch_items', 'user_id', 'INTEGER');
+  ensureColumn(db, 'batch_items', 'status', 'TEXT');
+  ensureColumn(db, 'batch_items', 'error_code', 'TEXT');
+  ensureColumn(db, 'batch_items', 'error_message', 'TEXT');
+  // Must run after ensureColumn: legacy rc.6 databases have batch_items
+  // without the status column, and SCHEMA is executed before ensureColumn.
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_batch_items_batch_status ON batch_items(batch_id, status)',
+  );
   ensureColumn(db, 'batch_jobs', 'contest_id', 'INTEGER');
   ensureColumn(db, 'batch_jobs', 'mode', 'TEXT');
   ensureColumn(db, 'batch_jobs', 'problem_level', 'INTEGER');
   ensureColumn(db, 'batch_jobs', 'problem_map_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'batch_jobs', 'meta_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'batch_jobs', 'created_by', 'INTEGER');
+  ensureColumn(db, 'batch_jobs', 'upload_id', 'TEXT');
   ensureColumn(db, 'contest_participants', 'hidden_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'registered_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'checked_in_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'reviewed_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'reviewed_by', 'INTEGER');
+  ensureColumn(db, 'contest_participants', 'source', "TEXT NOT NULL DEFAULT 'manual'");
   ensureColumn(db, 'contests', 'registration_mode', "TEXT NOT NULL DEFAULT 'manual'");
   ensureColumn(db, 'contests', 'registration_open_at', 'INTEGER');
   ensureColumn(db, 'contests', 'registration_close_at', 'INTEGER');
@@ -294,6 +413,10 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'submissions', 'message', "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, 'contests', 'team_mode', "TEXT NOT NULL DEFAULT 'individual'");
   ensureColumn(db, 'submissions', 'team_id', 'INTEGER');
+  ensureColumn(db, 'contest_hacks', 'team_id', 'INTEGER');
+  ensureColumn(db, 'teams', 'kind', "TEXT NOT NULL DEFAULT 'team'");
+  ensureColumn(db, 'teams', 'allow_contest', 'INTEGER NOT NULL DEFAULT 1');
+  migrateProblemNumbers(db);
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
     db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)').run(Date.now());

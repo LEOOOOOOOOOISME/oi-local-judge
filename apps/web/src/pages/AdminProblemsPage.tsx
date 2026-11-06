@@ -9,6 +9,7 @@ import {
   Form,
   Input,
   InputNumber,
+  Modal,
   Radio,
   Row,
   Select,
@@ -20,11 +21,12 @@ import type { TableColumnsType } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiGet, apiPost, apiUpload } from '../api/client';
+import { apiGet, apiPatch, apiPost, apiUpload } from '../api/client';
 import type {
   AdminProblemSummary,
   CreateProblemRequest,
   CreateProblemResult,
+  ProblemCategory,
   ProblemOwnerType,
   ProblemType,
   TeamSummary,
@@ -54,6 +56,10 @@ interface CreateProblemFormValues {
   statement?: string;
   ownerType: ProblemOwnerType;
   teamId?: number;
+  /** 题号分类；默认 P。 */
+  categoryId?: number;
+  /** 手动指定题号；留空自动分配。 */
+  displayId?: string;
 }
 
 const TYPE_OPTIONS = (Object.keys(PROBLEM_TYPE_LABEL) as ProblemType[]).map((value) => ({
@@ -82,6 +88,10 @@ export function AdminProblemsPage() {
   const [form] = Form.useForm<CreateProblemFormValues>();
   const ioMode = Form.useWatch('ioMode', form);
   const ownerType = (Form.useWatch('ownerType', form) ?? 'user') as ProblemOwnerType;
+  const [categoryOpen, setCategoryOpen] = useState(false);
+  const [categoryForm] = Form.useForm<{ code: string; name?: string; seqStart?: number }>();
+  const [renameTarget, setRenameTarget] = useState<ProblemCategory | null>(null);
+  const [renameName, setRenameName] = useState('');
 
   const problemsQuery = useQuery({
     queryKey: ['admin-problems'],
@@ -92,6 +102,42 @@ export function AdminProblemsPage() {
     queryKey: ['teams'],
     queryFn: () => apiGet<TeamSummary[]>('/api/teams'),
     staleTime: 60_000,
+  });
+  const categoriesQuery = useQuery({
+    queryKey: ['admin-problem-categories'],
+    queryFn: () => apiGet<ProblemCategory[]>('/api/admin/problem-categories'),
+    staleTime: 60_000,
+  });
+  const categories = categoriesQuery.data ?? [];
+  const createCategoryMutation = useMutation({
+    mutationFn: (values: { code: string; name?: string; seqStart?: number }) =>
+      apiPost<ProblemCategory>('/api/admin/problem-categories', {
+        code: values.code.trim(),
+        name: values.name?.trim() || undefined,
+        seqStart: values.seqStart ?? undefined,
+      }),
+    onSuccess: (category) => {
+      message.success(`分类 ${category.code} 已创建`);
+      void queryClient.invalidateQueries({ queryKey: ['admin-problem-categories'] });
+      categoryForm.resetFields();
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '创建分类失败');
+    },
+  });
+  const renameCategoryMutation = useMutation({
+    mutationFn: (values: { id: number; name: string }) =>
+      apiPatch<ProblemCategory>(`/api/admin/problem-categories/${values.id}`, {
+        name: values.name,
+      }),
+    onSuccess: () => {
+      message.success('分类已重命名');
+      void queryClient.invalidateQueries({ queryKey: ['admin-problem-categories'] });
+      setRenameTarget(null);
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '重命名失败');
+    },
   });
   const teams = teamsQuery.data ?? [];
   const teamNames = useMemo(
@@ -129,13 +175,16 @@ export function AdminProblemsPage() {
         ...(values.ownerType === 'team' ? { ownerId: values.teamId ?? null } : {}),
         ...(values.ownerType === 'system' ? { ownerId: null } : {}),
         ...(values.type === 'objective' ? { objective: { questions: [] } } : {}),
+        categoryId: values.categoryId,
+        displayId: values.displayId?.trim() || undefined,
       };
       return apiPost<CreateProblemResult>('/api/admin/problems', payload);
     },
     onSuccess: (data) => {
-      message.success(`题目 #${data.id} 已创建`);
+      message.success(`题目 ${data.displayId || `#${data.id}`} 已创建`);
       void queryClient.invalidateQueries({ queryKey: ['problems'] });
       void queryClient.invalidateQueries({ queryKey: ['admin-problems'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-problem-categories'] });
       setDrawerOpen(false);
       form.resetFields();
       navigate(`/admin/problems/${data.id}`);
@@ -147,10 +196,21 @@ export function AdminProblemsPage() {
 
   const openCreate = () => {
     form.resetFields();
+    const defaultCategory =
+      categories.find((category) => category.code === 'P') ?? categories[0];
+    form.setFieldsValue({ categoryId: defaultCategory?.id });
     setDrawerOpen(true);
   };
 
   const columns: TableColumnsType<AdminProblemSummary> = [
+    {
+      title: '题号',
+      dataIndex: 'displayId',
+      width: 96,
+      render: (_value, record) => (
+        <span className="problem-no mono">{record.displayId || `#${record.id}`}</span>
+      ),
+    },
     {
       title: 'ID',
       dataIndex: 'id',
@@ -235,7 +295,7 @@ export function AdminProblemsPage() {
         <Space size={12}>
           <Link to={`/admin/problems/${record.id}`}>编辑</Link>
           {record.visibility === 'public' ? (
-            <Link to={`/problem/${record.id}`}>前台</Link>
+            <Link to={`/problem/${record.displayId || record.id}`}>前台</Link>
           ) : (
             <span className="muted">前台不可见</span>
           )}
@@ -265,6 +325,16 @@ export function AdminProblemsPage() {
             >
               导入题包
             </Button>
+            {user?.role === 'admin' ? (
+              <Button
+                onClick={() => {
+                  categoryForm.resetFields();
+                  setCategoryOpen(true);
+                }}
+              >
+                题号分类
+              </Button>
+            ) : null}
             <input
               ref={importInputRef}
               type="file"
@@ -347,6 +417,35 @@ export function AdminProblemsPage() {
           >
             <Input placeholder="例如：A+B Problem" maxLength={120} showCount />
           </Form.Item>
+
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item
+                label="题号分类"
+                name="categoryId"
+                rules={[{ required: true, message: '请选择题号分类' }]}
+                extra="自动分配该分类的下一个题号"
+              >
+                <Select
+                  placeholder="选择分类"
+                  loading={categoriesQuery.isPending}
+                  options={categories.map((category) => ({
+                    value: category.id,
+                    label: `${category.code} · ${category.name}`,
+                  }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item
+                label="手动题号（可选）"
+                name="displayId"
+                extra="留空自动分配；格式如 P1001"
+              >
+                <Input placeholder="例如 P1001" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           <Row gutter={12}>
             <Col span={12}>
@@ -465,6 +564,111 @@ export function AdminProblemsPage() {
           </Form.Item>
         </Form>
       </Drawer>
+
+      <Modal
+        title="题号分类"
+        open={categoryOpen}
+        onCancel={() => setCategoryOpen(false)}
+        footer={<Button onClick={() => setCategoryOpen(false)}>关闭</Button>}
+        width={720}
+      >
+        <div className="stack">
+          <Table<ProblemCategory>
+            className="oij-table"
+            rowKey="id"
+            size="small"
+            pagination={false}
+            dataSource={categories}
+            loading={categoriesQuery.isPending}
+            locale={{ emptyText: '还没有分类' }}
+            columns={[
+              {
+                title: '代码',
+                dataIndex: 'code',
+                width: 90,
+                render: (code: string) => <span className="mono">{code}</span>,
+              },
+              { title: '名称', dataIndex: 'name' },
+              {
+                title: '下一个题号',
+                width: 130,
+                render: (_value, record) => (
+                  <span className="mono">
+                    {record.code}
+                    {record.nextSeq}
+                  </span>
+                ),
+              },
+              {
+                title: '',
+                width: 90,
+                render: (_value, record) => (
+                  <Button
+                    size="small"
+                    onClick={() => {
+                      setRenameTarget(record);
+                      setRenameName(record.name);
+                    }}
+                  >
+                    重命名
+                  </Button>
+                ),
+              },
+            ]}
+          />
+          <Card size="small" title="新建分类">
+            <Form<{ code: string; name?: string; seqStart?: number }>
+              form={categoryForm}
+              layout="inline"
+              onFinish={(values) => createCategoryMutation.mutate(values)}
+            >
+              <Form.Item
+                label="代码"
+                name="code"
+                rules={[
+                  { required: true, message: '请输入前缀代码' },
+                  { pattern: /^[A-Za-z]{1,8}$/, message: '1-8 个字母，如 B、UVA' },
+                ]}
+              >
+                <Input placeholder="例如 B" style={{ width: 120 }} />
+              </Form.Item>
+              <Form.Item label="名称" name="name">
+                <Input placeholder="例如 B 题库" style={{ width: 160 }} />
+              </Form.Item>
+              <Form.Item label="起始序号" name="seqStart">
+                <InputNumber min={1} precision={0} placeholder="默认 1" style={{ width: 110 }} />
+              </Form.Item>
+              <Form.Item>
+                <Button type="primary" htmlType="submit" loading={createCategoryMutation.isPending}>
+                  新增
+                </Button>
+              </Form.Item>
+            </Form>
+            <div className="muted">
+              分类前缀按题号独立递增；已有题目重新分配题号请在题目编辑页操作。移除分类不会删除题目。
+            </div>
+          </Card>
+        </div>
+      </Modal>
+
+      <Modal
+        title={`重命名分类 ${renameTarget?.code ?? ''}`}
+        open={renameTarget !== null}
+        onCancel={() => setRenameTarget(null)}
+        onOk={() =>
+          renameTarget &&
+          renameCategoryMutation.mutate({ id: renameTarget.id, name: renameName.trim() })
+        }
+        okText="保存"
+        cancelText="取消"
+        confirmLoading={renameCategoryMutation.isPending}
+      >
+        <Input
+          value={renameName}
+          onChange={(event) => setRenameName(event.target.value)}
+          maxLength={60}
+        />
+      </Modal>
     </div>
   );
 }

@@ -135,7 +135,12 @@ describe('session tokens', () => {
     const forgedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
     expect(verifySession(`${forgedPayload}.${signature}`, config.sessionSecret)).toBeNull();
 
-    const forgedSignature = `${signature.slice(0, -1)}${signature.endsWith('A') ? 'B' : 'A'}`;
+    // Flip a byte in the decoded signature. Changing the last base64url
+    // character is not reliable: its low padding bits can decode to the same
+    // bytes, making this test fail about 1/64 of the time.
+    const forgedSignatureBytes = Buffer.from(signature, 'base64url');
+    forgedSignatureBytes[0] ^= 0x01;
+    const forgedSignature = forgedSignatureBytes.toString('base64url');
     expect(verifySession(`${encodedPayload}.${forgedSignature}`, config.sessionSecret)).toBeNull();
   });
 

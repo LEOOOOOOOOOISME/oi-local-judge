@@ -144,23 +144,13 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Install electron-builder
-        run: npm install --no-save --package-lock=false electron-builder@24.13.3
-
       - name: Build NSIS installer
         shell: pwsh
         run: |
-          # electron-builder 24.13.3 treats --prepackaged as the *app output
-          # directory* (the win-unpacked layout) and archives it as-is, so point
-          # it at the portable root, which already contains OiJudge.exe and
-          # resources/app/. Pointing it at resources/app would produce an
-          # installer whose install root has no executable.
-          #
-          # --publish never: GitHub Actions sets CI=true, which makes
-          # electron-builder try to publish a release afterwards; without
-          # GH_TOKEN that step fails the job even though the installer was
-          # built. The installer is uploaded as an artifact instead.
-          npx electron-builder --win nsis --prepackaged "${{ steps.artifacts.outputs.portable }}" --config electron-builder.yml --publish never
+          # Use the project's electron-builder version and the same installer
+          # builder as local releases. It archives the already-built portable
+          # root and normalizes the output integrity level.
+          npm run build:installer -- --prepackaged "${{ steps.artifacts.outputs.portable }}"
 
       - name: Verify installer
         shell: pwsh

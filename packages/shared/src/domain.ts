@@ -26,6 +26,8 @@ export interface ProblemSummaryDto {
   /** 归属类型；system 题目没有 ownerId。 */
   ownerType: ProblemOwnerType;
   ownerId: number | null;
+  /** 洛谷式题号，如 P1001；旧数据迁移前可能为空。 */
+  displayId: string;
 }
 
 export interface ProblemDetailDto extends ProblemSummaryDto {
@@ -91,6 +93,11 @@ export interface SubmissionDto {
   hackedAt?: string | null;
   hackedBy?: number | null;
   hackId?: number | null;
+  /**
+   * 1-based position in the judging queue (same order as the scheduler claims
+   * tasks); `null` unless the submission is currently queued.
+   */
+  queuePosition?: number | null;
   code?: string;
   results?: TestResultDto[];
 }

@@ -12,6 +12,8 @@ import {
 import { ContestAccessError } from '../services/contest-access.js';
 import { ContestTeamError } from '../services/contest-teams.js';
 import { ProblemAclError } from '../services/problem-acl.js';
+import { canViewStudentSource } from '../services/teams.js';
+import { recordAudit } from '../storage/repos/audit.js';
 import { listSubmissions, getSubmission } from '../storage/repos/submissions.js';
 
 export interface SubmissionRouteOptions {
@@ -111,15 +113,35 @@ export function registerSubmissionRoutes(
       if (!detail) {
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       }
-      const canViewAll = ['admin', 'setter', 'contestmanager'].includes(request.user!.role);
-      if (!canViewAll && detail.userId !== request.user!.id) {
+      if (
+        !canViewStudentSource(
+          options.db,
+          { userId: request.user!.id, role: request.user!.role },
+          detail.userId,
+        )
+      ) {
         return reply.code(403).send({ ok: false, error: { code: 'FORBIDDEN' } });
       }
       const row = getSubmission(options.db, id)!;
+      let sourceReturned = false;
       try {
         detail.code = readFileSync(join(options.config.dataDir, row.source_path), 'utf8');
+        sourceReturned = true;
       } catch {
         detail.code = '';
+      }
+      // Reading another user's source is a privacy-sensitive action: record it
+      // for coaches and staff, but not for students reading their own code.
+      // Denied requests and unreadable source files are not audited.
+      if (sourceReturned && detail.userId !== request.user!.id) {
+        recordAudit(options.db, {
+          actorId: request.user!.id,
+          action: 'submission.source_view',
+          targetType: 'submission',
+          targetId: id,
+          detail: { targetUserId: detail.userId, viewerId: request.user!.id },
+          ip: request.ip,
+        });
       }
       return { ok: true, data: detail };
     },

@@ -144,14 +144,16 @@ describe('createBackup', () => {
     firstBackup = createBackup(db, config, NOW);
 
     expect(firstBackup.createdAt).toBe(NOW);
+    expect(firstBackup.kind).toBe('manual');
     expect(firstBackup.id).toMatch(/^[0-9]{4}-[0-9]{2}-[0-9]{2}T/);
     expect(firstBackup.sizeBytes).toBeGreaterThan(0);
     expect(existsSync(join(firstBackup.path, 'manifest.json'))).toBe(true);
 
     const manifest = JSON.parse(
       readFileSync(join(firstBackup.path, 'manifest.json'), 'utf8'),
-    ) as { createdAt: number; version: string; entries: Array<{ path: string }> };
+    ) as { createdAt: number; kind: string; version: string; entries: Array<{ path: string }> };
     expect(manifest.createdAt).toBe(NOW);
+    expect(manifest.kind).toBe('manual');
     expect(typeof manifest.version).toBe('string');
     expect(manifest.entries.map((entry) => entry.path)).toEqual(
       expect.arrayContaining(['db/oijudge.db', 'problems', 'submissions']),

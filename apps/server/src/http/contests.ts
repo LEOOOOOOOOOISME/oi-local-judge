@@ -1,7 +1,12 @@
-import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fastify';
+import type {
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+  preHandlerHookHandler,
+} from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
-import { requireAuth } from '../security/auth.js';
+import { authenticateRequest, requireAuth } from '../security/auth.js';
 import { createContest, isRegistrationMode, isTeamMode } from '../storage/repos/contests.js';
 import {
   addParticipant,
@@ -25,7 +30,15 @@ import {
   startContest,
   unfreezeContest,
 } from '../services/contests.js';
-import { getOfficialRanking, invalidateOfficialRanking } from '../services/official-ranking.js';
+import {
+  computeOfficialRanking,
+  getOfficialRanking,
+  getOfficialRankingVersion,
+  invalidateOfficialRanking,
+  pageOfficialRanking,
+} from '../services/official-ranking.js';
+import { getContestStatistics } from '../services/contest-statistics.js';
+import { buildContestReport, contestReportToCsv } from '../services/contest-report.js';
 import { getCorrectionRanking } from '../services/correction-ranking.js';
 import { getTeamRanking } from '../services/team-ranking.js';
 import {
@@ -78,6 +91,52 @@ function sendContestRegistrationError(reply: FastifyReply, err: unknown): Fastif
 
 function parseTeamId(raw: unknown): number | null {
   return typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : null;
+}
+
+type IncludeHiddenParse = { ok: true; value: boolean } | { ok: false };
+
+/**
+ * `includeHidden=1|true` opts a manager into statistics/rankings that contain
+ * hidden participants. `0|false` and omission mean public-only data.
+ */
+function readIncludeHidden(raw: unknown): IncludeHiddenParse {
+  if (raw === undefined || raw === '0' || raw === 'false') return { ok: true, value: false };
+  if (raw === '1' || raw === 'true') return { ok: true, value: true };
+  return { ok: false };
+}
+
+/**
+ * Public contest routes are anonymous, so optional authentication is resolved
+ * from the session cookie only when hidden rows are requested.
+ */
+function canIncludeHidden(request: FastifyRequest, options: ContestRouteOptions): boolean {
+  if (!options.config) return false;
+  const authenticated = authenticateRequest(request, {
+    db: options.db,
+    config: options.config,
+  });
+  const role = authenticated?.user.role;
+  return role === 'admin' || role === 'contestmanager';
+}
+
+function forbiddenIncludedHidden(reply: FastifyReply): FastifyReply {
+  return reply.code(403).send({
+    ok: false,
+    error: {
+      code: 'FORBIDDEN',
+      message: 'only admins and contest managers can include hidden participants',
+    },
+  });
+}
+
+function invalidIncludeHidden(reply: FastifyReply): FastifyReply {
+  return reply.code(400).send({
+    ok: false,
+    error: {
+      code: 'INVALID_INCLUDE_HIDDEN',
+      message: 'includeHidden must be 1, true, 0 or false',
+    },
+  });
 }
 
 type WindowTimestamp = { ok: true; value: number | null | undefined } | { ok: false };
@@ -155,6 +214,56 @@ function sendAwardScopeError(reply: FastifyReply, err: unknown): FastifyReply {
 }
 
 export function registerContestRoutes(app: FastifyInstance, options: ContestRouteOptions): void {
+  type OfficialRankingQuery = {
+    includeHidden?: string;
+    offset?: string;
+    limit?: string;
+    query?: string;
+    complete?: string;
+  };
+
+  /**
+   * The official-ranking endpoint keeps returning the complete ranking when no
+   * paging/search parameter is present. `offset`/`limit`/`query` switch it (and
+   * the dedicated `/page` alias) to a paged envelope whose rows never include
+   * the full `rows` array. `complete=1` forces the old complete response.
+   */
+  async function handleOfficialRanking(
+    request: FastifyRequest<{ Params: { id: string }; Querystring: OfficialRankingQuery }>,
+    reply: FastifyReply,
+    forcePage: boolean,
+  ) {
+    const parsed = readIncludeHidden(request.query?.includeHidden);
+    if (!parsed.ok) return invalidIncludeHidden(reply);
+    if (parsed.value && !canIncludeHidden(request, options)) {
+      return forbiddenIncludedHidden(reply);
+    }
+    const contestId = Number(request.params.id);
+    const dataDir = options.config?.dataDir ?? process.cwd();
+    const ranking = parsed.value
+      ? await computeOfficialRanking(
+          options.db,
+          contestId,
+          dataDir,
+          getOfficialRankingVersion(options.db, contestId),
+          { includeHidden: true },
+        )
+      : await getOfficialRanking(options.db, contestId, dataDir);
+    if (!ranking) {
+      return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    }
+    const wantsPage =
+      forcePage ||
+      (request.query.complete !== '1' &&
+        (request.query.offset !== undefined ||
+          request.query.limit !== undefined ||
+          request.query.query !== undefined));
+    if (!wantsPage) return { ok: true, data: ranking };
+    const { rows, ...meta } = ranking;
+    void rows;
+    return { ok: true, data: { ...meta, ...pageOfficialRanking(ranking.rows, request.query) } };
+  }
+
   app.get('/api/contests', async () => ({
     ok: true,
     data: listContestDtos(options.db),
@@ -176,18 +285,55 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     return { ok: true, data: ranking.rows };
   });
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{
+    Params: { id: string };
+    Querystring: {
+      includeHidden?: string;
+      offset?: string;
+      limit?: string;
+      query?: string;
+      complete?: string;
+    };
+  }>(
     '/api/contests/:id/official-ranking',
+    async (request, reply) => handleOfficialRanking(request, reply, false),
+  );
+
+  app.get<{
+    Params: { id: string };
+    Querystring: {
+      includeHidden?: string;
+      offset?: string;
+      limit?: string;
+      query?: string;
+      complete?: string;
+    };
+  }>(
+    '/api/contests/:id/official-ranking/page',
+    async (request, reply) => handleOfficialRanking(request, reply, true),
+  );
+
+  app.get<{
+    Params: { id: string };
+    Querystring: { includeHidden?: string };
+  }>(
+    '/api/contests/:id/statistics',
     async (request, reply) => {
-      const ranking = await getOfficialRanking(
+      const parsed = readIncludeHidden(request.query?.includeHidden);
+      if (!parsed.ok) return invalidIncludeHidden(reply);
+      if (parsed.value && !canIncludeHidden(request, options)) {
+        return forbiddenIncludedHidden(reply);
+      }
+      const stats = await getContestStatistics(
         options.db,
         Number(request.params.id),
         options.config?.dataDir ?? process.cwd(),
+        { includeHidden: parsed.value },
       );
-      if (!ranking) {
+      if (!stats) {
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       }
-      return { ok: true, data: ranking };
+      return { ok: true, data: stats };
     },
   );
 
@@ -602,6 +748,54 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     async (request, reply) => {
       unfreezeContest(options.db, Number(request.params.id));
       return { ok: true, data: null };
+    },
+  );
+
+  app.get<{
+    Params: { id: string };
+    Querystring: { format?: string; top?: string };
+  }>(
+    '/api/admin/contests/:id/report',
+    { preHandler: guards },
+    async (request, reply) => {
+      const contestId = Number(request.params.id);
+      const format = request.query?.format ?? 'json';
+      if (format !== 'json' && format !== 'csv') {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'INVALID_FORMAT', message: 'format must be json or csv' },
+        });
+      }
+      let top: number | undefined;
+      const rawTop = request.query?.top;
+      if (rawTop !== undefined) {
+        const parsed = Number(rawTop);
+        if (!Number.isInteger(parsed) || parsed <= 0) {
+          return reply.code(400).send({
+            ok: false,
+            error: { code: 'INVALID_TOP', message: 'top must be a positive integer' },
+          });
+        }
+        top = parsed;
+      }
+      const report = await buildContestReport(
+        options.db,
+        contestId,
+        options.config?.dataDir ?? process.cwd(),
+        { top },
+      );
+      if (!report) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      if (format === 'csv') {
+        reply.header('content-type', 'text/csv; charset=utf-8');
+        reply.header(
+          'content-disposition',
+          `attachment; filename="contest-${contestId}-report.csv"`,
+        );
+        return reply.send(contestReportToCsv(report));
+      }
+      return { ok: true, data: report };
     },
   );
 

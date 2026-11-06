@@ -1,4 +1,4 @@
-import type { RegistrationMode, RegistrationStatus } from '../api/types';
+import type { RegistrationMode, RegistrationStatus, TeamMode } from '../api/types';
 import { ApiError } from '../api/client';
 import { formatDateTime } from './format';
 
@@ -41,6 +41,20 @@ export function registrationModeLabel(mode: RegistrationMode | string | null | u
 /** 该比赛是否允许选手自助报名（open / approval）。 */
 export function allowsSelfRegistration(mode: RegistrationMode): boolean {
   return mode !== 'manual';
+}
+
+/**
+ * 是否显示个人自助报名入口。
+ *
+ * `manual` 由管理员导入名单；纯团队赛（`team_mode = 'team'`）只能由队长完成
+ * 团队报名，个人自助报名会被后端以 `TEAM_REGISTRATION_REQUIRED` 拒绝。
+ * `both` 仍保留个人自助报名。
+ */
+export function allowsIndividualSelfRegistration(
+  registrationMode: RegistrationMode,
+  teamMode: TeamMode,
+): boolean {
+  return allowsSelfRegistration(registrationMode) && teamMode !== 'team';
 }
 
 /** 报名窗口状态：未配置 / 未开始 / 开放中 / 已截止。 */
@@ -149,6 +163,8 @@ export function describeRegistrationError(error: unknown): string {
     switch (error.code) {
       case 'REGISTRATION_DISABLED':
         return '本场比赛未开放自助报名';
+      case 'TEAM_REGISTRATION_REQUIRED':
+        return '本场比赛仅限团队报名，请由队长完成团队报名';
       case 'REGISTRATION_NOT_OPEN':
         return '报名尚未开始';
       case 'REGISTRATION_CLOSED':

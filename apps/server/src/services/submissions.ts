@@ -19,6 +19,7 @@ import {
   createJudgeTask,
   enqueueRejudge,
   getJudgeTaskBySubmission,
+  getQueuePosition,
 } from '../storage/repos/judge.js';
 import { transaction } from '../storage/db.js';
 import { abortSubmission } from '../judge/cancellation.js';
@@ -27,11 +28,19 @@ import { resolveSubmissionTeam } from './contest-teams.js';
 import { canViewProblem, ProblemAclError } from './problem-acl.js';
 
 export const ALLOWED_LANGUAGES = new Set(['cpp17', 'c11', 'objective', 'answer']);
+/**
+ * Students can submit up to 256 KiB source code. Admins / setters may submit
+ * larger files so they can upload generated or bulk programs.
+ */
 export const MAX_SOURCE_BYTES = 256 * 1024;
+/** Admins / setters may submit larger source files for rejudge/batch purposes. */
+export const MAX_SOURCE_BYTES_ADMIN = 512 * 1024 * 1024;
 /** Minimum interval between two submissions with the same user/problem/contest key. */
 export const SUBMIT_COOLDOWN_MS = 10_000;
 /** Priority used for admin rejudges so they jump ahead of regular submissions. */
 export const REJUDGE_PRIORITY = 100;
+/** Batch submissions are background work: online submissions (50) come first. */
+export const BATCH_JUDGE_PRIORITY = 10;
 
 /** Thrown when a submission arrives inside the per-key cooldown window. */
 export class SubmissionRateLimitError extends Error {
@@ -114,6 +123,12 @@ export interface SubmitInput {
   /** Bypass the cooldown check (admin rejudge/batch internal submissions). */
   skipCooldown?: boolean;
   /**
+   * Explicit judge task priority. Batch imports use BATCH_JUDGE_PRIORITY so
+   * online submissions always win the queue; other callers keep the historical
+   * 50/100 split.
+   */
+  judgePriority?: number;
+  /**
    * Bypass the practice read ACL. Only internal admin batch pipelines set this;
    * user-facing submissions (contest or practice) must pass the ACL checks.
    */
@@ -153,9 +168,15 @@ export function submitSource(
   if (problem.type !== 'output-only' && input.language === 'answer') {
     throw new Error('output files are only accepted for output-only problems');
   }
+
+  // Admins / setters can submit larger source files (skipAccessCheck/skipCooldown).
+  const maxBytes = input.skipAccessCheck || input.skipCooldown
+    ? MAX_SOURCE_BYTES_ADMIN
+    : MAX_SOURCE_BYTES;
+
   const bytes = Buffer.byteLength(input.code, 'utf8');
   if (bytes === 0) throw new Error('source is empty');
-  if (bytes > MAX_SOURCE_BYTES) throw new Error('source is too large');
+  if (bytes > maxBytes) throw new Error('source is too large');
 
   let phase = input.phase ?? 'contest';
   let teamId: number | null = null;
@@ -229,7 +250,16 @@ export function submitSource(
     teamId,
     createdAt: nowMs,
   });
-  createJudgeTask(deps.db, id, input.contestId ? 100 : 50);
+  createJudgeTask(
+    deps.db,
+    id,
+    input.judgePriority ??
+      (input.batchId !== undefined && input.batchId !== null
+        ? BATCH_JUDGE_PRIORITY
+        : input.contestId
+          ? 100
+          : 50),
+  );
   return { id };
 }
 
@@ -373,6 +403,9 @@ export function getSubmissionDetail(
   if (!row) return null;
   return {
     ...toSubmissionDto(db, row),
+    // Only a queued submission has a queue position; a claimed/terminal task
+    // (or a submission whose worker already moved on) exposes null.
+    queuePosition: row.status === 'queued' ? getQueuePosition(db, id) : null,
     results: getTestResults(db, id).map(toResultDto),
   };
 }

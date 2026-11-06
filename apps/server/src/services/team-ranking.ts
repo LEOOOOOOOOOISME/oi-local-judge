@@ -6,8 +6,10 @@ import {
   type ContestRow,
 } from '../storage/repos/contests.js';
 import { listContestTeamRegistrations } from '../storage/repos/contest-teams.js';
+import { listHacks } from '../storage/repos/hacks.js';
 import { getProblem } from '../storage/repos/problems.js';
 import { listContestSubmissions } from '../storage/repos/submissions.js';
+import { parseRankingConfig } from './official-ranking.js';
 
 export interface TeamRankingProblem {
   id: number;
@@ -30,7 +32,10 @@ export interface TeamRankingRow {
   teamName: string;
   memberCount: number;
   totalScore: number;
+  /** CF-like only: successful/failed hack points already included in totalScore. */
+  hackScore: number;
   solved: number;
+  penalty: number;
   lastAcAt: number | null;
   cells: TeamRankingCell[];
 }
@@ -41,20 +46,37 @@ export interface TeamRankingResult {
   rows: TeamRankingRow[];
 }
 
+function presetForMode(mode: string): RankingPreset {
+  if (mode === 'acm') return 'acm';
+  if (mode === 'ioi') return 'ioi';
+  if (mode === 'cf-like') return 'cf-like';
+  return 'oi';
+}
+
 /**
  * Team ranking for a contest.
  *
- * Only teams registered for the contest appear. For each registered team, every
- * contest problem takes the best finished, unhacked contest-phase submission
- * among the team's attributed submissions; those per-problem bests are summed.
+ * Only teams registered for the contest appear. Submissions are still keyed by
+ * `team_id`, so the shared ranking engine sees the whole team as one
+ * competitor:
  *
- * The current implementation uses OI/IOI scoring (sum of per-problem best
- * scores) for every contest mode. ACM/CF-like team scoring (team solve union /
- * penalties) is intentionally left for a follow-up; this still provides the
- * documented "aggregate by the same total score" fallback.
+ * - OI/IOI: each problem takes the best member score, and those bests are
+ *   summed.
+ * - ACM: each problem is solved once when any member first gets AC, and the
+ *   team penalty is the first-AC minute plus 20 minutes per wrong attempt
+ *   before that first AC.
+ * - CF-like: shared CF-like scoring (time decay + penalty), using the
+ *   `cfLike` settings from `ranking_rule_json`. Hacks attributed to a team via
+ *   `contest_hacks.team_id` add/subtract points exactly like the individual
+ *   CF-like board; OI/IOI/ACM ignore hacks.
  *
- * `freeze_at` is applied the same way as the existing contest ranking: when it
- * is set, submissions created after it are hidden from the ranking.
+ * The preset comes from the contest ranking config (the same one the official
+ * ranking uses), falling back to `contest.mode`; a `plugin:` preset has no
+ * team equivalent, so it falls back to the mode's builtin preset.
+ *
+ * `freeze_at` is applied whenever it is set, matching the previous team
+ * ranking behaviour: submissions and team-attributed hacks created after it are
+ * hidden from the board. The individual board keeps its own freeze semantics.
  */
 export function getTeamRanking(
   db: DatabaseSync,
@@ -100,22 +122,50 @@ export function getTeamRanking(
       createdAt: submission.created_at,
     }));
 
-  // The OI and IOI presets share the same per-problem best-score aggregation and
-  // score-based ranking; keeping the contest's own OI/IOI flavour matters for
-  // callers that inspect the preset later.
-  const preset: RankingPreset = contest.mode === 'ioi' ? 'ioi' : 'oi';
+  const parsed = parseRankingConfig(contest);
+  const preset: RankingPreset = parsed.pluginName
+    ? presetForMode(contest.mode)
+    : parsed.config.preset;
+  const freezeAt = contest.freeze_at ?? null;
   const config: RankingConfig = {
+    ...parsed.config,
     preset,
-    tie: 'same-rank',
-    freezeAt: contest.freeze_at,
+    // Team boards always honour freeze_at when it is configured, regardless of
+    // the contest status the official ranking keys its freeze off.
+    freezeAt,
   };
+
+  // Hack points belong to the team the hacker represented at creation time.
+  // `team_id` is null for individual hacks and for legacy rows written before
+  // team attribution existed, so those never reach the team board. `promoted`
+  // is the administrator-confirmed form of a successful hack, while `reverted`
+  // and unjudgeable states contribute nothing. Hacks created after freeze_at
+  // are hidden exactly like the team submissions the shared engine drops.
+  const hacks = listHacks(db, contestId)
+    .filter(
+      (hack) =>
+        hack.team_id !== null &&
+        teamIdSet.has(hack.team_id) &&
+        (hack.status === 'success' || hack.status === 'failed' || hack.status === 'promoted') &&
+        (freezeAt === null || hack.created_at <= freezeAt),
+    )
+    .map((hack) => ({
+      hackerId: hack.team_id as number,
+      targetUserId: 0,
+      problemId: hack.problem_id,
+      status: (hack.status === 'failed' ? 'failed' : 'success') as 'success' | 'failed',
+      createdAt: hack.created_at,
+    }));
 
   const computed = computeRanking({
     config,
     problemIds,
     userIds: teamIds,
     submissions,
+    hacks,
     problemPoints: Object.fromEntries(problems.map((problem) => [problem.id, problem.points])),
+    contestStartAt: contest.start_at,
+    contestEndAt: contest.end_at,
   });
 
   const rows: TeamRankingRow[] = computed.map((row) => {
@@ -124,9 +174,13 @@ export function getTeamRanking(
       rank: row.rank,
       teamId: row.userId,
       teamName: registration.name,
+      // `members` is the contest roster: a team's whole roster, but only the
+      // students of a class. Coaches and assistants never inflate the count.
       memberCount: registration.members.length,
       totalScore: row.totalScore,
+      hackScore: row.hackScore ?? 0,
       solved: row.solved,
+      penalty: row.penalty,
       lastAcAt: row.lastAcAt,
       cells: row.cells.map((cell) => ({
         problemId: cell.problemId,

@@ -9,6 +9,7 @@ import { ensureChecker } from '../judge/checker-cache.js';
 import { ensureCompiledProgram } from '../judge/compile-cache.js';
 import { judgeTestcase } from '../judge/pipeline.js';
 import { runValidator } from '../judge/validator.js';
+import { requireRole } from '../security/auth.js';
 import {
   ASSET_KINDS,
   deleteAsset,
@@ -22,8 +23,19 @@ import {
   listAllProblems,
   listAllTestcases,
   replaceTestcases,
+  setProblemDisplayId,
   updateTestcasePoints,
 } from '../storage/repos/problems.js';
+import { ProblemNumberingError } from '../storage/repos/problem-categories.js';
+import {
+  ATTACHMENT_BODY_LIMIT,
+  AttachmentError,
+  deleteProblemAttachmentRecord,
+  getProblemAttachmentRow,
+  listProblemAttachmentDtos,
+  saveProblemAttachment,
+} from '../services/attachments.js';
+import { canEditProblem } from '../services/problem-acl.js';
 import {
   createProblemWithOwner,
   getProblemDetail,
@@ -35,7 +47,9 @@ import {
 import { importCenaProblem } from '../services/cena.js';
 import { buildCdf, importLemonProblem } from '../services/lemon.js';
 
-const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
+// Admin upload limit set to 10 GB so that administrators are never blocked by
+// the body-size parser when uploading problems, zips, assets, etc.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
 const ALLOWED_SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx', '.c', '.py', '.exe', '.txt']);
 
 function isAssetKind(value: string): value is AssetKind {
@@ -53,11 +67,61 @@ export interface AdminProblemRouteOptions {
   db: DatabaseSync;
   config: Config;
   adminGuard: preHandlerHookHandler;
+  /**
+   * Guard for the batch problem picker. Defaults to admin/contestmanager/setter
+   * because the batch mapping page is also used by contest managers.
+   */
+  pickerGuard?: preHandlerHookHandler;
 }
 
-/** Maps ownership validation failures to a 400 with code `PROBLEM_OWNER_INVALID`. */
+/** Ownership scope exposed by the batch problem picker. */
+export type ProblemPickerScope = 'all' | 'personal' | 'team' | 'public';
+
+const PICKER_DEFAULT_LIMIT = 200;
+const PICKER_MAX_LIMIT = 500;
+const PICKER_OWNER_TYPE: Record<
+  Exclude<ProblemPickerScope, 'all'>,
+  'user' | 'team' | 'system'
+> = {
+  personal: 'user',
+  team: 'team',
+  public: 'system',
+};
+
+function pickerScopeOf(ownerType: string): 'personal' | 'team' | 'public' {
+  if (ownerType === 'team') return 'team';
+  if (ownerType === 'user') return 'personal';
+  return 'public';
+}
+
+function parsePickerLimit(value: string | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return PICKER_DEFAULT_LIMIT;
+  return Math.min(PICKER_MAX_LIMIT, Math.max(1, Math.floor(parsed)));
+}
+
+/** Escape LIKE metacharacters so a search for "50%" stays a literal search. */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
+/** Maps ownership/numbering validation failures to their HTTP error codes. */
 function sendOwnerError(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof ProblemOwnerError) {
+    return reply
+      .code(err.status)
+      .send({ ok: false, error: { code: err.code, message: err.message } });
+  }
+  if (err instanceof ProblemNumberingError) {
+    return reply
+      .code(err.status)
+      .send({ ok: false, error: { code: err.code, message: err.message } });
+  }
+  throw err;
+}
+
+function sendAttachmentError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof AttachmentError) {
     return reply
       .code(err.status)
       .send({ ok: false, error: { code: err.code, message: err.message } });
@@ -70,6 +134,100 @@ export function registerAdminProblemRoutes(
   options: AdminProblemRouteOptions,
 ): void {
   const guard = options.adminGuard;
+  const pickerGuard =
+    options.pickerGuard ??
+    requireRole(['admin', 'contestmanager', 'setter'], {
+      db: options.db,
+      config: options.config,
+    });
+
+  app.get<{
+    Querystring: { scope?: string; query?: string; limit?: string };
+  }>('/api/admin/problems/picker', { preHandler: pickerGuard }, async (request, reply) => {
+    const rawScope = (request.query.scope ?? '').trim().toLowerCase();
+    const scope = rawScope || 'all';
+    if (
+      scope !== 'all' &&
+      scope !== 'personal' &&
+      scope !== 'team' &&
+      scope !== 'public'
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: { code: 'INVALID_SCOPE', message: 'scope must be personal, team, public or all' },
+      });
+    }
+    const limit = parsePickerLimit(request.query.limit);
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+    if (scope !== 'all') {
+      clauses.push('owner_type = ?');
+      params.push(PICKER_OWNER_TYPE[scope]);
+    }
+    const query = (request.query.query ?? '').trim().toLowerCase();
+    if (query) {
+      const like = `%${escapeLike(query)}%`;
+      const displayQuery = query.startsWith('#') ? query.slice(1) : query;
+      const displayLike = `%${escapeLike(displayQuery || query)}%`;
+      // Search mirrors the batch mapping UI: display id, title, tags, numeric id
+      // and the "#<id>" form users type in the selector.
+      clauses.push(
+        `(LOWER(title) LIKE ? ESCAPE '\\'
+          OR LOWER(COALESCE(display_id, '')) LIKE ? ESCAPE '\\'
+          OR LOWER(tags_json) LIKE ? ESCAPE '\\'
+          OR CAST(id AS TEXT) LIKE ? ESCAPE '\\'
+          OR ('#' || CAST(id AS TEXT)) LIKE ? ESCAPE '\\')`,
+      );
+      params.push(like, displayLike, like, like, like);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = options.db
+      .prepare(`SELECT * FROM problems ${where} ORDER BY id DESC LIMIT ?`)
+      .all(...params, limit) as unknown as Array<{
+      id: number;
+      title: string;
+      type: string;
+      difficulty: number | null;
+      tags_json: string;
+      owner_type: string;
+      owner_id: number | null;
+      display_id: string | null;
+      visibility: string;
+      time_ms: number;
+      memory_mb: number;
+    }>;
+    return {
+      ok: true,
+      data: rows.map((row) => {
+        let tags: string[] = [];
+        try {
+          const parsed = JSON.parse(row.tags_json) as unknown;
+          if (Array.isArray(parsed)) {
+            tags = parsed.filter((tag): tag is string => typeof tag === 'string');
+          }
+        } catch {
+          tags = [];
+        }
+        return {
+          id: row.id,
+          displayId: row.display_id ?? '',
+          title: row.title,
+          type: row.type,
+          kind: row.type,
+          tags,
+          difficulty: row.difficulty,
+          visibility: row.visibility,
+          owner: { type: row.owner_type, id: row.owner_id },
+          ownerType: row.owner_type,
+          ownerId: row.owner_id,
+          ownerKind: pickerScopeOf(row.owner_type),
+          scope: pickerScopeOf(row.owner_type),
+          timeMs: row.time_ms,
+          memoryMb: row.memory_mb,
+        };
+      }),
+    };
+  });
 
   app.get<{ Params: { id: string } }>(
     '/api/admin/problems/:id/export',
@@ -241,7 +399,7 @@ export function registerAdminProblemRoutes(
 
   app.post(
     '/api/admin/problems/import-zip',
-    { preHandler: guard, bodyLimit: 100 * 1024 * 1024 },
+    { preHandler: guard, bodyLimit: MAX_UPLOAD_BYTES },
     async (request, reply) => {
       const body = request.body;
       if (!Buffer.isBuffer(body) || body.length === 0) {
@@ -332,7 +490,14 @@ export function registerAdminProblemRoutes(
       if (!detail || !row) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       return {
         ok: true,
-        data: { ...detail, ownerType: row.owner_type, ownerId: row.owner_id },
+        data: {
+          ...detail,
+          ownerType: row.owner_type,
+          ownerId: row.owner_id,
+          categoryId: row.category_id,
+          seq: row.seq,
+          displayId: row.display_id ?? '',
+        },
       };
     },
   );
@@ -352,6 +517,8 @@ export function registerAdminProblemRoutes(
       objective?: unknown;
       ownerType?: string;
       ownerId?: number | null;
+      categoryId?: number;
+      displayId?: string;
     };
   }>('/api/admin/problems', { preHandler: guard }, async (request, reply) => {
     const body = request.body ?? {};
@@ -381,13 +548,41 @@ export function registerAdminProblemRoutes(
         objective: body.objective,
         ownerType,
         ownerId,
+        categoryId:
+          typeof body.categoryId === 'number' && Number.isInteger(body.categoryId)
+            ? body.categoryId
+            : undefined,
+        displayId:
+          typeof body.displayId === 'string' && body.displayId.trim().length > 0
+            ? body.displayId.trim()
+            : undefined,
         testcases: [],
       });
-      return reply.code(201).send({ ok: true, data: { id } });
+      const created = getProblem(options.db, id);
+      return reply
+        .code(201)
+        .send({ ok: true, data: { id, displayId: created?.display_id ?? '' } });
     } catch (err) {
       return sendOwnerError(reply, err);
     }
   });
+
+  app.post<{ Params: { id: string }; Body: { displayId?: string } }>(
+    '/api/admin/problems/:id/display-id',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      if (!Number.isInteger(problemId) || problemId <= 0) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      try {
+        const result = setProblemDisplayId(options.db, problemId, request.body?.displayId);
+        return { ok: true, data: result };
+      } catch (err) {
+        return sendOwnerError(reply, err);
+      }
+    },
+  );
 
   app.get<{ Params: { id: string } }>(
     '/api/admin/problems/:id/assets',
@@ -396,6 +591,127 @@ export function registerAdminProblemRoutes(
       ok: true,
       data: listAssets(options.db, Number(request.params.id)),
     }),
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/problems/:id/attachments',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      if (!Number.isInteger(problemId) || problemId <= 0) {
+        return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
+      }
+      const problem = getProblem(options.db, problemId);
+      if (!problem) {
+        return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
+      }
+      const user = request.user!;
+      const includeAdmin = canEditProblem(options.db, problem, {
+        userId: user.id,
+        isAdmin: user.role === 'admin',
+      });
+      return {
+        ok: true,
+        data: listProblemAttachmentDtos(options.db, problemId, { includeAdmin }),
+      };
+    },
+  );
+
+  app.post<{
+    Params: { id: string };
+    Querystring: { name?: string; visibility?: string; replace?: string };
+  }>(
+    '/api/admin/problems/:id/attachments',
+    { preHandler: guard, bodyLimit: ATTACHMENT_BODY_LIMIT },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      if (!Number.isInteger(problemId) || problemId <= 0) {
+        return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
+      }
+      const problem = getProblem(options.db, problemId);
+      if (!problem) {
+        return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
+      }
+      const user = request.user!;
+      const canEdit = canEditProblem(options.db, problem, {
+        userId: user.id,
+        isAdmin: user.role === 'admin',
+      });
+      if (!canEdit) {
+        return reply.code(403).send({
+          ok: false,
+          error: {
+            code: 'FORBIDDEN',
+            message: 'only the owner, team captain or an admin can manage attachments',
+          },
+        });
+      }
+
+      let replaceId: number | undefined;
+      if (request.query.replace !== undefined && request.query.replace !== '') {
+        replaceId = Number(request.query.replace);
+        if (!Number.isInteger(replaceId) || replaceId <= 0) {
+          return reply.code(400).send({
+            ok: false,
+            error: { code: 'BAD_REQUEST', message: 'replace must be an attachment id' },
+          });
+        }
+      }
+
+      const body = request.body;
+      if (!Buffer.isBuffer(body)) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'EMPTY_BODY', message: 'expected a raw file body' },
+        });
+      }
+      try {
+        const dto = saveProblemAttachment(options.db, options.config, {
+          problemId,
+          filename: request.query.name,
+          visibility: request.query.visibility,
+          data: body,
+          createdBy: user.id,
+          replaceId,
+        });
+        return reply.code(replaceId === undefined ? 201 : 200).send({ ok: true, data: dto });
+      } catch (err) {
+        return sendAttachmentError(reply, err);
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string; attachmentId: string } }>(
+    '/api/admin/problems/:id/attachments/:attachmentId',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      const attachmentId = Number(request.params.attachmentId);
+      const problem = Number.isInteger(problemId) ? getProblem(options.db, problemId) : null;
+      if (!problem || !Number.isInteger(attachmentId)) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      const user = request.user!;
+      const canEdit = canEditProblem(options.db, problem, {
+        userId: user.id,
+        isAdmin: user.role === 'admin',
+      });
+      if (!canEdit) {
+        return reply.code(403).send({
+          ok: false,
+          error: {
+            code: 'FORBIDDEN',
+            message: 'only the owner, team captain or an admin can manage attachments',
+          },
+        });
+      }
+      const row = getProblemAttachmentRow(options.db, attachmentId);
+      if (!row || row.problem_id !== problemId) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      deleteProblemAttachmentRecord(options.db, options.config, row);
+      return { ok: true, data: null };
+    },
   );
 
   app.put<{

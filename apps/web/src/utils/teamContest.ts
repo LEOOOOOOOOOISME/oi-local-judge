@@ -68,29 +68,48 @@ export function findTeamByIdOrName(
   return teams.find((team) => team.name === raw) ?? null;
 }
 
+/** 管理端手动 ID 兜底：纯数字（且为正整数）才解析为团队 ID，否则返回 null。 */
+export function parseTeamIdInput(input: string): number | null {
+  const raw = input.trim();
+  if (!/^\d+$/.test(raw)) return null;
+  const id = Number(raw);
+  return Number.isSafeInteger(id) && id > 0 ? id : null;
+}
+
 function csvCell(value: string): string {
   return /[",\r\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
 }
 
-/** 团队榜 CSV：名次/团队/成员数/总分/AC 数/各题得分。 */
+/**
+ * 团队榜 CSV：名次/团队/成员数/总分（ACM/CF-like 为 AC 数/罚时）/AC 数/各题得分。
+ *
+ * `hackScore` 列始终存在以保持导出列稳定；只有 CF-like 团队榜真正计 Hack 分，
+ * OI/IOI/ACM 导出为 0。
+ */
 export function buildTeamRankingCsv(
   problems: Array<Pick<TeamRankingProblem, 'id'>>,
   rows: TeamRankingRow[],
+  acmStyle = false,
+  cfLike = false,
 ): string {
+  const hackCell = (row: TeamRankingRow): string =>
+    String(cfLike ? (row.hackScore ?? 0) : 0);
   const header = [
     '排名',
     '团队',
     '成员数',
-    '总分',
-    'AC 数',
+    ...(acmStyle ? ['AC 数', '罚时'] : ['总分', 'AC 数']),
+    'Hack 分',
     ...problems.map((_problem, index) => rankingProblemLetter(index)),
   ];
   const lines = rows.map((row) => [
     String(row.rank),
     row.teamName,
     String(row.memberCount),
-    String(row.totalScore),
-    String(row.solved),
+    ...(acmStyle
+      ? [String(row.solved), String(row.penalty)]
+      : [String(row.totalScore), String(row.solved)]),
+    hackCell(row),
     ...problems.map(
       (problem) => String(row.cells.find((cell) => cell.problemId === problem.id)?.score ?? 0),
     ),

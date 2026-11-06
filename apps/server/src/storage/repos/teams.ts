@@ -1,11 +1,22 @@
 import type { DatabaseSync } from 'node:sqlite';
 
-export type TeamRole = 'captain' | 'member';
+export type TeamRole = 'captain' | 'coach' | 'assistant' | 'member';
+
+/**
+ * Kind discriminator stored on the shared `teams` table.
+ *
+ * - `team`: self-service contest team, owner is its captain.
+ * - `class`: teaching group, owner is its first coach; may have several coaches
+ *   and assistants and can be switched out of contest participation.
+ */
+export type TeamKind = 'team' | 'class';
 
 export interface TeamRow {
   id: number;
   name: string;
   owner_id: number;
+  kind: TeamKind;
+  allow_contest: number;
   created_at: number;
 }
 
@@ -20,6 +31,8 @@ export interface TeamDto {
   id: number;
   name: string;
   ownerId: number;
+  kind: TeamKind;
+  allowContest: boolean;
   createdAt: number;
   memberCount: number;
   role: TeamRole;
@@ -38,8 +51,59 @@ export interface TeamDetail {
   id: number;
   name: string;
   ownerId: number;
+  kind: TeamKind;
+  allowContest: boolean;
   createdAt: number;
   members: TeamMemberDto[];
+}
+
+/** 管理员全量团队搜索行（不含 viewerRole，与成员身份无关）。 */
+export interface AdminTeamRow {
+  id: number;
+  name: string;
+  owner_id: number;
+  kind: TeamKind;
+  allow_contest: number;
+  created_at: number;
+  member_count: number;
+}
+
+/** 转义 LIKE 通配符，避免用户输入的 % / _ 被当成模式匹配。 */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
+}
+
+/**
+ * 管理员全量组搜索：按名称模糊匹配（大小写不敏感），按名称排序。
+ * `kind` 可选过滤班级/团队；`limit` 会被夹在 1–100 之间，默认 20。
+ */
+export function searchTeams(
+  db: DatabaseSync,
+  filter: { query?: string; limit?: number; kind?: TeamKind } = {},
+): AdminTeamRow[] {
+  const clauses: string[] = [];
+  const params: Array<string | number> = [];
+  const query = filter.query?.trim() ?? '';
+  if (query !== '') {
+    clauses.push("t.name LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLike(query)}%`);
+  }
+  if (filter.kind !== undefined) {
+    clauses.push('t.kind = ?');
+    params.push(filter.kind);
+  }
+  const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+  const limit = Math.min(Math.max(Math.floor(filter.limit ?? 20), 1), 100);
+  return db
+    .prepare(
+      `SELECT t.id, t.name, t.owner_id, t.kind, t.allow_contest, t.created_at,
+              (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS member_count
+       FROM teams t
+       ${where}
+       ORDER BY t.name COLLATE NOCASE, t.id
+       LIMIT ?`,
+    )
+    .all(...params, limit) as unknown as AdminTeamRow[];
 }
 
 export function getTeamRow(db: DatabaseSync, teamId: number): TeamRow | null {
@@ -52,28 +116,54 @@ export function getTeamByName(db: DatabaseSync, name: string): TeamRow | null {
 
 export function insertTeam(
   db: DatabaseSync,
-  input: { name: string; ownerId: number; createdAt: number },
+  input: {
+    name: string;
+    ownerId: number;
+    createdAt: number;
+    kind?: TeamKind;
+    allowContest?: boolean;
+  },
 ): number {
   const result = db
-    .prepare('INSERT INTO teams(name, owner_id, created_at) VALUES (?, ?, ?)')
-    .run(input.name, input.ownerId, input.createdAt);
+    .prepare(
+      `INSERT INTO teams(name, owner_id, kind, allow_contest, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(
+      input.name,
+      input.ownerId,
+      input.kind ?? 'team',
+      input.allowContest === false ? 0 : 1,
+      input.createdAt,
+    );
   return Number(result.lastInsertRowid);
 }
 
-export function listTeamsForUser(db: DatabaseSync, userId: number): TeamDto[] {
+/**
+ * Lists the groups of one kind the user belongs to. Classes and teams share a
+ * table but are deliberately separated in API responses so a class never leaks
+ * into the self-service team UI.
+ */
+export function listTeamsForUser(
+  db: DatabaseSync,
+  userId: number,
+  kind: TeamKind = 'team',
+): TeamDto[] {
   const rows = db
     .prepare(
-      `SELECT t.id, t.name, t.owner_id, t.created_at, m.role,
+      `SELECT t.id, t.name, t.owner_id, t.kind, t.allow_contest, t.created_at, m.role,
               (SELECT COUNT(*) FROM team_members c WHERE c.team_id = t.id) AS member_count
        FROM team_members m
        JOIN teams t ON t.id = m.team_id
-       WHERE m.user_id = ?
+       WHERE m.user_id = ? AND t.kind = ?
        ORDER BY t.id`,
     )
-    .all(userId) as unknown as Array<{
+    .all(userId, kind) as unknown as Array<{
     id: number;
     name: string;
     owner_id: number;
+    kind: TeamKind;
+    allow_contest: number;
     created_at: number;
     role: TeamRole;
     member_count: number;
@@ -82,6 +172,8 @@ export function listTeamsForUser(db: DatabaseSync, userId: number): TeamDto[] {
     id: row.id,
     name: row.name,
     ownerId: row.owner_id,
+    kind: row.kind,
+    allowContest: row.allow_contest === 1,
     createdAt: row.created_at,
     memberCount: Number(row.member_count),
     role: row.role,
@@ -95,7 +187,12 @@ export function listTeamMembers(db: DatabaseSync, teamId: number): TeamMemberDto
        FROM team_members m
        JOIN users u ON u.id = m.user_id
        WHERE m.team_id = ?
-       ORDER BY CASE m.role WHEN 'captain' THEN 0 ELSE 1 END, u.username`,
+       ORDER BY CASE m.role
+                  WHEN 'captain' THEN 0
+                  WHEN 'coach' THEN 1
+                  WHEN 'assistant' THEN 2
+                  ELSE 3
+                END, u.username`,
     )
     .all(teamId) as unknown as Array<{
     user_id: number;
@@ -158,6 +255,27 @@ export function updateTeamMemberRole(
 
 export function updateTeamOwner(db: DatabaseSync, teamId: number, ownerId: number): void {
   db.prepare('UPDATE teams SET owner_id = ? WHERE id = ?').run(ownerId, teamId);
+}
+
+/** Updates the mutable settings of a group (name and/or the contest switch). */
+export function updateTeamSettings(
+  db: DatabaseSync,
+  teamId: number,
+  input: { name?: string; allowContest?: boolean },
+): void {
+  const assignments: string[] = [];
+  const params: Array<string | number> = [];
+  if (input.name !== undefined) {
+    assignments.push('name = ?');
+    params.push(input.name);
+  }
+  if (input.allowContest !== undefined) {
+    assignments.push('allow_contest = ?');
+    params.push(input.allowContest ? 1 : 0);
+  }
+  if (assignments.length === 0) return;
+  params.push(teamId);
+  db.prepare(`UPDATE teams SET ${assignments.join(', ')} WHERE id = ?`).run(...params);
 }
 
 export function deleteTeamWithMembers(db: DatabaseSync, teamId: number): void {

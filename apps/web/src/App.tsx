@@ -33,6 +33,11 @@ const ContestAwardsPage = lazy(() =>
     default: module.ContestAwardsPage,
   })),
 );
+const ContestStatisticsPage = lazy(() =>
+  import('./pages/ContestStatisticsPage').then((module) => ({
+    default: module.ContestStatisticsPage,
+  })),
+);
 const SubmissionDetailPage = lazy(() =>
   import('./pages/SubmissionDetailPage').then((module) => ({
     default: module.SubmissionDetailPage,
@@ -74,12 +79,33 @@ const TeamsPage = lazy(() =>
 const TeamDetailPage = lazy(() =>
   import('./pages/TeamDetailPage').then((module) => ({ default: module.TeamDetailPage })),
 );
+const ClassesPage = lazy(() =>
+  import('./pages/ClassesPage').then((module) => ({ default: module.ClassesPage })),
+);
+const ClassDetailPage = lazy(() =>
+  import('./pages/ClassDetailPage').then((module) => ({ default: module.ClassDetailPage })),
+);
+const StudentLearningPage = lazy(() =>
+  import('./pages/StudentLearningPage').then((module) => ({
+    default: module.StudentLearningPage,
+  })),
+);
 const ProblemSetsPage = lazy(() =>
   import('./pages/ProblemSetsPage').then((module) => ({ default: module.ProblemSetsPage })),
 );
 const ProblemSetDetailPage = lazy(() =>
   import('./pages/ProblemSetDetailPage').then((module) => ({
     default: module.ProblemSetDetailPage,
+  })),
+);
+const TrainingPlansPage = lazy(() =>
+  import('./pages/TrainingPlansPage').then((module) => ({
+    default: module.TrainingPlansPage,
+  })),
+);
+const TrainingPlanDetailPage = lazy(() =>
+  import('./pages/TrainingPlanDetailPage').then((module) => ({
+    default: module.TrainingPlanDetailPage,
   })),
 );
 const DiscussPage = lazy(() =>
@@ -132,6 +158,7 @@ export function AppRoutes() {
         <Route path="/problem/:problemId" element={<ProblemPage />} />
         <Route path="/contest/:contestId" element={<ContestOverviewPage />} />
         <Route path="/contest/:contestId/ranking" element={<ContestRankingPage />} />
+        <Route path="/contest/:contestId/statistics" element={<ContestStatisticsPage />} />
         <Route path="/contest/:contestId/awards" element={<ContestAwardsPage />} />
         <Route path="/contest/:contestId/correction" element={<ContestCorrectionPage />} />
         <Route path="/help" element={<HelpPage />} />
@@ -250,6 +277,30 @@ export function AppRoutes() {
           }
         />
         <Route
+          path="/classes"
+          element={
+            <ProtectedRoute>
+              <ClassesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/classes/:id"
+          element={
+            <ProtectedRoute>
+              <ClassDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/students/:id/learning"
+          element={
+            <ProtectedRoute>
+              <StudentLearningPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="/problem-sets"
           element={
             <ProtectedRoute>
@@ -262,6 +313,22 @@ export function AppRoutes() {
           element={
             <ProtectedRoute>
               <ProblemSetDetailPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/training-plans"
+          element={
+            <ProtectedRoute>
+              <TrainingPlansPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/training-plans/:id"
+          element={
+            <ProtectedRoute>
+              <TrainingPlanDetailPage />
             </ProtectedRoute>
           }
         />

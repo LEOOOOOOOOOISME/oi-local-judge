@@ -1,0 +1,4 @@
+# Keep Node ESM scripts LF on every checkout. Vite's SSR transform imports
+# these files directly, and a CRLF shebang makes the module fail to parse.
+*.mjs text eol=lf
+*.cjs text eol=lf
