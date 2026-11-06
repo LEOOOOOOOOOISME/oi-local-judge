@@ -179,7 +179,6 @@ CREATE TABLE IF NOT EXISTS batch_items(
   FOREIGN KEY(batch_id) REFERENCES batch_jobs(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_batch_items_batch ON batch_items(batch_id);
-CREATE INDEX IF NOT EXISTS idx_batch_items_batch_status ON batch_items(batch_id, status);
 CREATE TABLE IF NOT EXISTS batch_uploads(
   id INTEGER PRIMARY KEY,
   upload_id TEXT NOT NULL UNIQUE,
@@ -378,6 +377,11 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'batch_items', 'status', 'TEXT');
   ensureColumn(db, 'batch_items', 'error_code', 'TEXT');
   ensureColumn(db, 'batch_items', 'error_message', 'TEXT');
+  // Must run after ensureColumn: legacy rc.6 databases have batch_items
+  // without the status column, and SCHEMA is executed before ensureColumn.
+  db.exec(
+    'CREATE INDEX IF NOT EXISTS idx_batch_items_batch_status ON batch_items(batch_id, status)',
+  );
   ensureColumn(db, 'batch_jobs', 'contest_id', 'INTEGER');
   ensureColumn(db, 'batch_jobs', 'mode', 'TEXT');
   ensureColumn(db, 'batch_jobs', 'problem_level', 'INTEGER');
