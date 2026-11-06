@@ -1,0 +1,249 @@
+/* 比赛统计仪表盘：屏幕布局 + 浏览器打印（分析报告 / 个人成绩）。 */
+
+.statistics-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.statistics-kpi-row {
+  margin-bottom: 0;
+}
+
+.statistics-kpi-card .ant-statistic-title {
+  font-size: 12px;
+  color: var(--oij-muted, #8a8f99);
+  margin-bottom: 2px;
+}
+
+.statistics-kpi-card .ant-statistic-content {
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.statistics-kpi-unit {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--oij-muted, #8a8f99);
+  margin-left: 2px;
+}
+
+.statistics-analysis {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.statistics-chart-card .ant-card-body {
+  min-height: 0;
+}
+
+.statistics-problem-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 12px;
+}
+
+.statistics-problem-card {
+  border: 1px solid var(--oij-border, #e5e7eb);
+  border-radius: 8px;
+  padding: 8px 10px 2px;
+  background: var(--oij-surface, #fff);
+}
+
+.statistics-problem-head {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 2px;
+  font-size: 12px;
+}
+
+.statistics-problem-head strong {
+  font-size: 13px;
+}
+
+.statistics-results-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.statistics-paging-alert {
+  margin-bottom: 12px;
+}
+
+.statistics-results-card .ant-table-tbody > tr > td {
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.statistics-insights {
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.9;
+}
+
+.statistics-cell {
+  display: inline-block;
+  min-width: 44px;
+  padding: 0 6px;
+  border-radius: 4px;
+  font-variant-numeric: tabular-nums;
+}
+
+.statistics-cell-ac {
+  color: var(--oij-success, #16a34a);
+  background: color-mix(in srgb, var(--oij-success, #16a34a) 12%, transparent);
+  font-weight: 600;
+}
+
+/* 打印模式：屏幕预览时也隐藏应用框架，避免误点导航。 */
+.statistics-print-mode .oij-header,
+.statistics-print-mode .oij-footer {
+  display: none !important;
+}
+
+.statistics-print-mode .oij-main {
+  padding: 0 !important;
+  max-width: none !important;
+}
+
+.statistics-print-mode .oij-card {
+  box-shadow: none;
+}
+
+.statistics-print-page {
+  padding: 0;
+}
+
+.statistics-print-header {
+  margin-bottom: 12px;
+  border-bottom: 2px solid #111;
+  padding-bottom: 8px;
+}
+
+.statistics-print-header h1 {
+  margin: 0 0 6px;
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.statistics-print-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12px;
+  color: #555;
+}
+
+.statistics-print-footer {
+  margin-top: 10px;
+  font-size: 11px;
+  color: #666;
+}
+
+.print-results-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.print-results-table th,
+.print-results-table td {
+  border: 1px solid #9ca3af;
+  padding: 3px 5px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.print-results-table thead {
+  display: table-header-group;
+}
+
+.print-results-table tr {
+  break-inside: avoid;
+}
+
+.print-results-table tbody tr:nth-child(even) {
+  background: #f5f6f8;
+}
+
+.print-cell-ac {
+  color: #15803d;
+  font-weight: 600;
+}
+
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 10mm;
+  }
+
+  html,
+  body {
+    background: #fff !important;
+  }
+
+  .oij-header,
+  .oij-footer,
+  .oij-nav,
+  .print-hide,
+  .statistics-results-toolbar,
+  .statistics-paging-alert {
+    display: none !important;
+  }
+
+  .app-shell {
+    min-height: 0;
+  }
+
+  .oij-main {
+    padding: 0 !important;
+    max-width: none !important;
+  }
+
+  .statistics-page {
+    gap: 10px;
+  }
+
+  .statistics-print-page {
+    display: block;
+  }
+
+  .ant-card,
+  .statistics-chart-card,
+  .statistics-problem-card {
+    box-shadow: none !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .ant-card {
+    border-color: #b7bcc4 !important;
+  }
+
+  .ant-card-head {
+    min-height: 34px;
+  }
+
+  .statistics-problem-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .statistics-kpi-card {
+    break-inside: avoid;
+  }
+
+  /* 屏幕表格不在打印稿里出现；打印稿使用原生 table 重复表头。 */
+  .statistics-results-card {
+    display: none !important;
+  }
+
+  .print-results-table {
+    font-size: 10px;
+  }
+}

@@ -416,6 +416,9 @@ export function ContestOverviewPage() {
                 <Button>团队榜</Button>
               </Link>
             ) : null}
+            <Link to={`${contestPath}/statistics`}>
+              <Button>统计</Button>
+            </Link>
             <Link to={`${contestPath}/screen`} target="_blank" rel="noreferrer">
               <Button>大屏</Button>
             </Link>

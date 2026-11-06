@@ -719,6 +719,85 @@ export interface OfficialRanking {
   officialFrozenUntil?: number | null;
 }
 
+/** 比赛统计仪表盘：总体口径（OI/IOI 为分数，ACM/CF 为通过题数）。 */
+export type ContestStatisticsMode = 'score' | 'solved';
+
+/** 统计直方图分桶；`from`/`to` 均为闭区间端点。 */
+export interface ContestStatisticsDistributionBin {
+  from: number;
+  to: number;
+  count: number;
+}
+
+/** 累计分布点：分数阈值、达到人数与占比（0-1）。 */
+export interface ContestStatisticsCumulativePoint {
+  score: number;
+  count: number;
+  ratio: number;
+}
+
+export interface ContestStatisticsSummary {
+  participants: number;
+  submissions: number;
+  /** `solved` 模式下为平均通过题数。 */
+  avgScore: number | null;
+  medianScore: number | null;
+  stddev: number | null;
+  maxScore: number | null;
+  minScore: number | null;
+  fullScoreCount: number;
+  zeroScoreCount: number;
+  /** 仅 `solved` 模式返回；否则为 null。 */
+  avgPenalty: number | null;
+  medianPenalty: number | null;
+}
+
+export interface ContestStatisticsProblem {
+  problemId: number;
+  ordinal: number;
+  title: string;
+  fullScore: number;
+  avgScore: number | null;
+  medianScore: number | null;
+  stddev: number | null;
+  acRate: number | null;
+  fullRate: number | null;
+  zeroRate: number | null;
+  /** OI/IOI：平均分/满分；ACM/CF：1 - AC 率。 */
+  difficulty: number | null;
+  discrimination: number | null;
+  distribution: ContestStatisticsDistributionBin[];
+}
+
+export interface ContestStatisticsGroup {
+  name: string;
+  kind: 'class' | 'team';
+  participants: number;
+  avgScore: number | null;
+  fullRate: number | null;
+}
+
+/** GET /api/contests/:id/statistics 返回结构（仅聚合，不含成绩行）。 */
+export interface ContestStatistics {
+  contest: {
+    id: number;
+    title: string;
+    /** 原始赛制（oi/ioi/acm/...）。 */
+    mode: string;
+    preset: string;
+    frozen: boolean;
+    generatedAt: number;
+  };
+  mode: ContestStatisticsMode;
+  summary: ContestStatisticsSummary;
+  distribution: ContestStatisticsDistributionBin[];
+  cumulative: ContestStatisticsCumulativePoint[];
+  problems: ContestStatisticsProblem[];
+  groups: ContestStatisticsGroup[];
+  insights: string[];
+  includeHidden: boolean;
+}
+
 /** 比赛成绩报告：参与者统计。 */
 export interface ContestReportParticipantStats {
   total: number;
