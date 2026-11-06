@@ -93,9 +93,11 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
       ip: request.ip,
     });
   });
+  // Global body-limit for admin routes – extremely large so that admin uploads
+  // (problems, zip imports, batch uploads, etc.) are never rejected by the proxy.
   app.addContentTypeParser(
     ['application/octet-stream', 'application/zip'],
-    { parseAs: 'buffer', bodyLimit: 80 * 1024 * 1024 },
+    { parseAs: 'buffer', bodyLimit: 10 * 1024 * 1024 * 1024 }, // 10 GB
     (_request, body, done) => done(null, body),
   );
   await app.register(websocket);
