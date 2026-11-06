@@ -1481,6 +1481,9 @@ export function AdminContestConsolePage() {
             <Link to={`/contest/${contest.id}/ranking`}>
               <Button>榜单</Button>
             </Link>
+            <Link to={`/contest/${contest.id}/statistics`}>
+              <Button>统计</Button>
+            </Link>
             {canExportReport ? (
               <Button onClick={() => void openReport()}>导出成绩报告</Button>
             ) : null}
