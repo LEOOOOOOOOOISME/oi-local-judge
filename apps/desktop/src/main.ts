@@ -8,9 +8,9 @@ import {
   Tray,
   utilityProcess,
 } from 'electron';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { networkInterfaces } from 'node:os';
-import { join } from 'node:path';
+import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { homedir, networkInterfaces } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 
 /**
  * Embedded 16x16 PNG for the tray icon: a blue rounded square with a white
@@ -31,6 +31,17 @@ const DEFAULT_SETTINGS: DesktopSettings = { openAtLogin: false };
 
 /** Parsed once: the flag only ever comes from the command line. */
 const hiddenStart = process.argv.includes(HIDDEN_START_FLAG);
+
+/**
+ * Optional userData override. The smoke test (and a portable install on a
+ * locked-down machine) needs a data directory that is known to be writable
+ * before Electron creates `Local State` and the single-instance lock there.
+ */
+const USER_DATA_ENV = 'OIJ_DESKTOP_USER_DATA';
+const userDataOverride = process.env[USER_DATA_ENV];
+if (userDataOverride) {
+  app.setPath('userData', resolve(userDataOverride));
+}
 
 let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
@@ -81,6 +92,64 @@ function lanUrl(): string | null {
 
 function settingsFile(): string {
   return join(app.getPath('userData'), 'desktop-settings.json');
+}
+
+/**
+ * Path of the desktop startup log, or null when no candidate directory is
+ * writable. `userData` is preferred; a Low integrity build (or an ACL problem)
+ * can make it read-only, in which case `%LOCALAPPDATA%\..\LocalLow` is the
+ * documented writable location and still leaves a diagnosable trace.
+ */
+function chooseStartupLog(): string | null {
+  const candidates = [
+    join(app.getPath('userData'), 'logs', 'desktop.log'),
+    join(homedir(), 'AppData', 'LocalLow', 'OiJudge', 'desktop.log'),
+    join(homedir(), '.oijudge', 'desktop.log'),
+  ];
+  for (const candidate of candidates) {
+    try {
+      mkdirSync(dirname(candidate), { recursive: true });
+      appendFileSync(candidate, '');
+      return candidate;
+    } catch {
+      // Try the next candidate; logging must never block startup.
+    }
+  }
+  return null;
+}
+
+let startupLogPath: string | null = null;
+
+/** Writes to the console and the startup log; never throws. */
+function log(message: string): void {
+  const line = `${new Date().toISOString()} ${message}`;
+  console.log(line);
+  if (!startupLogPath) return;
+  try {
+    appendFileSync(startupLogPath, `${line}\n`);
+  } catch {
+    // A full disk or a revoked permission must not take the app down.
+  }
+}
+
+/**
+ * Verifies that Electron can actually create its `Local State`, cache and
+ * single-instance lock in userData. Without this probe a Low integrity build
+ * crashes inside `requestSingleInstanceLock()`, which the app used to treat as
+ * "another instance is running" and quit silently. Returns an error message
+ * when the directory is not writable.
+ */
+function userDataWriteError(): string | null {
+  const directory = app.getPath('userData');
+  const probe = join(directory, `.write-probe-${process.pid}`);
+  try {
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(probe, 'ok', 'utf8');
+    unlinkSync(probe);
+    return null;
+  } catch (error) {
+    return `无法写入用户数据目录 ${directory}：${error instanceof Error ? error.message : String(error)}`;
+  }
 }
 
 /**
@@ -140,7 +209,11 @@ async function startServer(root: string): Promise<number> {
   // working directory, so pin it to the application root for both layouts.
   const dataDir = join(app.getPath('userData'), 'runtime');
   const child = utilityProcess.fork(serverEntry(root), [], {
-    stdio: 'inherit',
+    // `pipe` instead of `inherit`: a packaged GUI app has no reliable inherited
+    // stdout, and a blocked inherited handle used to make the child hang
+    // before it could report the port. Capturing the output also makes server
+    // failures visible in desktop.log and in the error dialog.
+    stdio: 'pipe',
     cwd: root,
     env: {
       ...process.env,
@@ -152,18 +225,42 @@ async function startServer(root: string): Promise<number> {
     },
   });
   serverProcess = child;
-  return await new Promise<number>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('server start timeout')), 15000);
+
+  const output: string[] = [];
+  const capture = (chunk: Buffer, stream: 'stdout' | 'stderr'): void => {
+    const text = chunk.toString();
+    output.push(text);
+    while (output.length > 200) output.shift();
+    for (const line of text.split(/\r?\n/)) {
+      if (line.trim()) log(`[server:${stream}] ${line.trim()}`);
+    }
+  };
+  const tail = (): string => output.join('').trim().slice(-4000);
+  child.stdout?.on('data', (chunk: Buffer) => capture(chunk, 'stdout'));
+  child.stderr?.on('data', (chunk: Buffer) => capture(chunk, 'stderr'));
+  child.on('spawn', () => log(`server process spawned pid=${child.pid ?? 'unknown'}`));
+  child.on('error', (type: string, location: string, report: string) => {
+    log(`server process error type=${type} location=${location}\n${report}`);
+  });
+
+  // First launch may be slowed down by antivirus scanning the packaged files;
+  // 60 s is deliberately generous, and the failure path reports child output.
+  const timeoutMs = Number(process.env.OIJ_SERVER_START_TIMEOUT_MS ?? 60_000);
+  return await new Promise<number>((resolvePort, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`server start timeout after ${timeoutMs}ms\n${tail()}`)),
+      timeoutMs,
+    );
     child.on('message', (msg: { type?: string; port?: number }) => {
       if (msg?.type === 'ready' && typeof msg.port === 'number') {
         clearTimeout(timer);
-        resolve(msg.port);
+        resolvePort(msg.port);
       }
     });
     child.on('exit', (code) => {
       if (serverProcess === child) serverProcess = null;
       clearTimeout(timer);
-      reject(new Error(`server exited with code ${code}`));
+      reject(new Error(`server exited with code ${code}\n${tail()}`));
     });
   });
 }
@@ -285,6 +382,7 @@ async function createWindow(port: number): Promise<BrowserWindow> {
 async function bootstrap(): Promise<void> {
   const root = appRoot();
   process.chdir(root);
+  log(`bootstrap root=${root} userData=${app.getPath('userData')}`);
 
   settings = readSettings();
   // Re-apply on every launch so an install path change (or a stale registry
@@ -293,28 +391,62 @@ async function bootstrap(): Promise<void> {
 
   const port = await startServer(root);
   serverPort = port;
+  log(`server ready on port ${port}`);
   const lan = lanAddress();
-  if (lan) console.log(`LAN: http://${lan}:${port}/`);
+  if (lan) {
+    const url = `http://${lan}:${port}/`;
+    log(`LAN: ${url}`);
+  }
 
   createTray();
+  log(tray ? 'tray ready' : 'tray unavailable; running window-only');
   win = await createWindow(port);
+  log('main window loaded');
   // `--hidden` (login item) keeps the window on the tray only; a second
   // instance or a failed tray creation still brings it up.
   if (!hiddenStart || pendingShow || !tray) showMainWindow();
+  log('startup complete');
 }
 
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+startupLogPath = chooseStartupLog();
+log(
+  `starting OiJudge packaged=${app.isPackaged} electron=${process.versions.electron} ` +
+    `exec=${process.execPath} userData=${app.getPath('userData')} log=${startupLogPath ?? 'unavailable'}`,
+);
 
-if (!hasSingleInstanceLock) {
-  // The running instance receives `second-instance` and focuses its window.
+// Electron's single-instance lock lives inside userData. A Low integrity build
+// cannot create it, and `requestSingleInstanceLock()` then returns false exactly
+// like a real second instance. Probe writability first so a permission problem
+// is reported instead of silently quitting (the previous P0 symptom).
+const dataError = userDataWriteError();
+if (dataError) {
+  log(`startup aborted: ${dataError}`);
+  dialog.showErrorBox(
+    'OiJudge 启动失败',
+    `${dataError}\n\n` +
+      '这通常表示程序或用户数据目录的权限异常（例如以低完整性级别运行）。\n' +
+      `日志：${startupLogPath ?? '无法写入日志'}`,
+  );
+  app.quit();
+} else if (!app.requestSingleInstanceLock()) {
+  // With a writable userData directory a false result means another instance
+  // already owns the lock; that instance receives `second-instance` and shows
+  // its window.
+  log('single-instance lock is held by another instance; exiting');
   app.quit();
 } else {
-  app.on('second-instance', () => showMainWindow());
+  log('single-instance lock acquired');
+
+  app.on('second-instance', () => {
+    log('second-instance received');
+    showMainWindow();
+  });
   app.on('activate', () => showMainWindow());
 
   app.on('before-quit', () => {
     // Must run before windows close so their `close` handlers let the quit
     // through, and so the utility process is not left behind.
+    log('quitting');
     quitting = true;
     stopServer();
   });
@@ -335,7 +467,7 @@ if (!hasSingleInstanceLock) {
     .then(bootstrap)
     .catch((error: unknown) => {
       const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
-      console.error(message);
+      log(`startup failed: ${message}`);
       dialog.showErrorBox('OiJudge 启动失败', message);
       quitting = true;
       app.quit();
