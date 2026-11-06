@@ -12,6 +12,8 @@ export interface BatchJobRow {
   problem_map_json: string;
   meta_json: string;
   created_by: number | null;
+  /** Upload this job was created from (streaming async imports); NULL for legacy runs. */
+  upload_id: string | null;
 }
 
 export type BatchItemImportStatus = 'imported' | 'skipped' | 'error';
@@ -55,14 +57,15 @@ export function createBatchJob(
     meta?: unknown;
     createdBy?: number | null;
     status?: string;
+    uploadId?: string | null;
   },
 ): number {
   const result = db
     .prepare(
       `INSERT INTO batch_jobs
          (problem_id, student_level, created_at, contest_id, mode, problem_level,
-          problem_map_json, meta_json, created_by, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          problem_map_json, meta_json, created_by, status, upload_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.problemId,
@@ -75,6 +78,7 @@ export function createBatchJob(
       JSON.stringify(input.meta ?? {}),
       input.createdBy ?? null,
       input.status ?? 'running',
+      input.uploadId ?? null,
     );
   return Number(result.lastInsertRowid);
 }
@@ -152,10 +156,55 @@ export function listBatchItemsPage(
   batchId: number,
   offset: number,
   limit: number,
+  status?: BatchItemImportStatus | null,
 ): BatchItemRow[] {
+  if (status) {
+    return db
+      .prepare(
+        'SELECT * FROM batch_items WHERE batch_id = ? AND status = ? ORDER BY id LIMIT ? OFFSET ?',
+      )
+      .all(batchId, status, limit, offset) as unknown as BatchItemRow[];
+  }
   return db
     .prepare('SELECT * FROM batch_items WHERE batch_id = ? ORDER BY id LIMIT ? OFFSET ?')
     .all(batchId, limit, offset) as unknown as BatchItemRow[];
+}
+
+/** Submission ids of a batch that a cancel request may still interrupt. */
+export function listBatchSubmissionIds(db: DatabaseSync, batchId: number): number[] {
+  return (
+    db
+      .prepare(
+        `SELECT id FROM submissions
+         WHERE batch_id = ? AND status IN ('queued', 'compiling', 'running')
+         ORDER BY id`,
+      )
+      .all(batchId) as unknown as Array<{ id: number }>
+  ).map((row) => row.id);
+}
+
+/** Whether a streaming upload already has an unfinished async import job. */
+export function findUnfinishedBatchJobForUpload(
+  db: DatabaseSync,
+  uploadId: string,
+): BatchJobRow | null {
+  return (
+    (db
+      .prepare(
+        `SELECT * FROM batch_jobs
+         WHERE upload_id = ? AND mode = 'async'
+           AND status IN ('importing', 'queued', 'judging')
+         ORDER BY id DESC LIMIT 1`,
+      )
+      .get(uploadId) as unknown as BatchJobRow) ?? null
+  );
+}
+
+/** Async import jobs interrupted by a process restart (status stuck at importing). */
+export function listImportingBatchJobs(db: DatabaseSync): BatchJobRow[] {
+  return db
+    .prepare("SELECT * FROM batch_jobs WHERE mode = 'async' AND status = 'importing'")
+    .all() as unknown as BatchJobRow[];
 }
 
 /** Aggregate counters for a batch without loading every item into memory. */

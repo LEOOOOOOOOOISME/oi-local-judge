@@ -5,6 +5,7 @@ import { createHub } from './realtime/hub.js';
 import { ensureAdmin } from './services/bootstrap.js';
 import { applyPendingRestore } from './services/system-ops.js';
 import { recoverInterruptedJudgeTasks } from './storage/repos/judge.js';
+import { recoverInterruptedBatchImports } from './services/batch-import.js';
 import { startScheduler } from './judge/scheduler.js';
 import { startBackupScheduler } from './services/backup-scheduler.js';
 import { startLearningStatsScheduler } from './services/learning-stats-scheduler.js';
@@ -42,6 +43,13 @@ const app = await buildApp({ db, config, hub, logger: true });
 const recoveredTasks = recoverInterruptedJudgeTasks(db);
 if (recoveredTasks > 0) {
   app.log.info({ recoveredTasks }, 'requeued interrupted judge tasks');
+}
+// Async batch imports are not resumed after a restart: an import stuck in
+// `importing` is marked failed with BATCH_IMPORT_INTERRUPTED. Items imported
+// before the restart stay queued and are judged normally.
+const recoveredImports = recoverInterruptedBatchImports(db);
+if (recoveredImports > 0) {
+  app.log.warn({ recoveredImports }, 'marked interrupted batch imports as failed');
 }
 const scheduler = startScheduler({ db, config, events: hub });
 // Automatic backups run on their own timer (initial delay + hourly check), so
