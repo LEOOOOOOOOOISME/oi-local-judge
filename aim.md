@@ -2,7 +2,7 @@
 
 最后更新：2026-11-06  
 当前分支：`feat/1.1-stability-authoring`  
-当前 HEAD：`25b0699 merge: Windows one-click deploy`  
+当前 HEAD：`e0c18e7 chore: force LF for Node ESM and regenerate help docs`  
 当前 Release：`v1.1.0-rc.6`
 
 ---
@@ -304,10 +304,22 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - run 202 + 1s 轮询 + 分页 + 取消 + CSV
 - 单题目模式保留
 
+### 已完成导出
+
+- `GET /api/admin/batch/:id/export?format=csv|xlsx|html`
+- 长表 10 列
+- CSV RFC4180 + BOM
+- 学生×题目矩阵：
+  - `matrix=1` CSV
+  - XLSX 第二 sheet
+  - HTML 表格
+- HTML 自包含、可打印、自动分析摘要
+- XLSX 流式 WorkbookWriter
+- 5000 行 keyset 500/页、逐行 chunk
+- 前端 4 个按钮：CSV / 矩阵 CSV / Excel / HTML
+
 ### 未完成 P1
 
-- Excel/HTML 批量导出
-- 学生×题目矩阵
 - 5000×4 压力验收
 - 导入恢复（resume）
 - 题目搜索的真正后端 scope 接口（当前前端过滤/limit 500）
@@ -405,12 +417,13 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 当前验证：
 
-- `npm test`：**106 文件 / 969 用例通过**
+- `npm test`：**107 文件 / 977 用例通过**
 - `npm run build`：通过
 - `npm run web:build`：通过
 - 浏览器 E2E：2 passed（主流程 + 建班/学生访问）
 - 子代理统计页烟测：图表/分析/虚拟表/搜索通过
 - Windows deploy：PowerShell 语法解析通过；`install.ps1 -DryRun` 退出码 0
+- Electron packaged smoke：PASS（window/server/health/LAN/web）
 
 ---
 
@@ -512,18 +525,53 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 ### 状态
 
-**未修复。** 当前只有开发态构建/测试通过，未完成打包态运行时验证。
+**已修复。** 根因与实际验证如下。
 
-### 需要优先排查
+### 根因
 
-1. 打包后 `apps/server/dist/cli.js` 是否在 `app.asar` / `resources/app` 中
-2. `utilityProcess` 启动路径、`cwd`、`appRoot` 是否正确
-3. `apps/web/dist/index.html` 是否随包
-4. `native/runner/out/ojrunner.exe`、`native/interact/out/ojinteract.exe` 是否存在
-5. 端口 8787 是否被占用；服务是否异常退出
-6. 是否被单实例锁/`--hidden`/托盘逻辑隐藏
-7. 是否因 `window-all-closed` / `before-quit` 静默退出
-8. 安装包/便携包日志、进程树、`/api/health` 实际状态
+release 产物继承了构建缓存的 Low integrity 标签：
+
+```text
+icacls: Mandatory Label\Low Mandatory Level
+```
+
+Low IL 进程无法写 `%APPDATA%\OiJudge` → Electron 单实例锁/缓存 Access Denied → `requestSingleInstanceLock()` 返回 false → 旧 `main.ts` 把它当成“已有实例”静默 `app.quit()`，所以无窗口、无托盘、无 server、无报错。
+
+同一 release 目录 robocopy 到普通目录（Medium 标签）后完整启动，证明 server/web/native/utilityProcess 本身正常。
+
+### 修复
+
+- `tools/build-portable.mjs`：
+  - 校验 Electron runtime 必需文件
+  - 输出树 `icacls /setintegritylevel Medium /T`
+  - 校验关键文件不再 Low
+  - ZIP 必需项补 electron.exe/resources.pak/icudtl.dat/default_app.asar
+- `apps/desktop/src/main.ts`：
+  - `desktop.log` 启动日志（不可写回退 LocalLow）
+  - 启动前 userData 可写性探测，权限失败弹窗明确报错
+  - 单实例锁失败写日志
+  - server `stdio: 'inherit'` → `'pipe'`，输出进日志，失败带子进程输出，超时 60s
+  - `OIJ_DESKTOP_USER_DATA` 隔离覆盖
+- 新增 `tools/electron-smoke.mjs` + `npm run smoke:desktop` / `smoke:desktop:dev`
+
+### 验证
+
+- `npm run smoke:desktop`：PASS
+- `npm run smoke:desktop:dev`：PASS
+- 打包态实跑：
+  - 窗口 `OiJudge · 本地 OI 评测`
+  - tray ready
+  - server 随机端口
+  - `/api/health` 200
+  - LAN 访问 200
+  - Web UI 200
+- 主工作树打包烟测：PASS
+
+### 需要注意
+
+- 本沙箱开发态 Electron 仍是 Low IL；正常机器不受影响。
+- NSIS 安装包未实际构建；其 `--prepackaged` 输入为已规范化的 portable 目录。
+- Windows `mjs` 曾因 CRLF shebang 导致 release 测试失败，已加 `.gitattributes` 强制 LF。
 
 ### 复现与验收
 
@@ -614,23 +662,15 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 ## 6. 下一阶段建议
 
-### 第一优先：Electron 包启动（P0）
+### 第一优先：批量/Electron 验收
 
-1. 复现安装包/portable 启动无窗口、无网页
-2. 检查 asar 内 server/web/native 资源
-3. 修 utilityProcess/cwd/appRoot
-4. 确认 8787 健康检查
-5. 验收：窗口/托盘 + `/api/health` + LAN 访问
+1. 5000×4 实测
+2. 导入 resume
+3. 题目搜索后端 scope
+4. NSIS 安装包实际构建
+5. 4C/8G 验收
 
-### 第二优先：批量收尾
-
-1. Excel/HTML 导出
-2. 学生×题目矩阵
-3. 5000×4 实测
-4. 导入 resume
-5. 题目搜索后端 scope
-
-### 第三优先：统计收尾
+### 第二优先：统计收尾
 
 1. 5000+ 服务端分页
 2. 班级/训练复用
