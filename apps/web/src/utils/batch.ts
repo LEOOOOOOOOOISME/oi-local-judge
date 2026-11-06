@@ -310,6 +310,7 @@ const BATCH_ERROR_MESSAGES: Record<string, string> = {
   UNMAPPED_PROBLEMS: '存在未映射的题目文件夹',
   BATCH_IMPORT_FAILED: '批量导入失败',
   BATCH_IMPORT_INTERRUPTED: '服务重启导致导入中断，请重新上传并运行',
+  BATCH_RESUME_UPLOAD_MISSING: '服务重启后无法恢复导入（上传文件已丢失），请重新上传并运行',
   BATCH_CANCELED: '批量任务已取消',
 };
 

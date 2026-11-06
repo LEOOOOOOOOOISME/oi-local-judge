@@ -359,7 +359,7 @@ describe('P1 async import', () => {
 });
 
 describe('P1 startup recovery', () => {
-  it('marks an import interrupted by a restart as failed', () => {
+  it('marks an import failed when its upload archive is unavailable', () => {
     const batchId = createBatchJob(db, {
       problemId,
       studentLevel: 1,
@@ -367,10 +367,10 @@ describe('P1 startup recovery', () => {
       status: 'importing',
       uploadId: 'interrupted-upload',
     });
-    const recovered = recoverInterruptedBatchImports(db);
+    const recovered = recoverInterruptedBatchImports(db, { config });
     expect(recovered).toBeGreaterThanOrEqual(1);
     const job = getBatchJob(db, batchId)!;
     expect(job.status).toBe('failed');
-    expect(job.meta_json).toContain('BATCH_IMPORT_INTERRUPTED');
+    expect(job.meta_json).toContain('BATCH_RESUME_UPLOAD_MISSING');
   });
 });

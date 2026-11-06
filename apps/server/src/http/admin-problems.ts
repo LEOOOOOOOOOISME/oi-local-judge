@@ -9,6 +9,7 @@ import { ensureChecker } from '../judge/checker-cache.js';
 import { ensureCompiledProgram } from '../judge/compile-cache.js';
 import { judgeTestcase } from '../judge/pipeline.js';
 import { runValidator } from '../judge/validator.js';
+import { requireRole } from '../security/auth.js';
 import {
   ASSET_KINDS,
   deleteAsset,
@@ -66,6 +67,42 @@ export interface AdminProblemRouteOptions {
   db: DatabaseSync;
   config: Config;
   adminGuard: preHandlerHookHandler;
+  /**
+   * Guard for the batch problem picker. Defaults to admin/contestmanager/setter
+   * because the batch mapping page is also used by contest managers.
+   */
+  pickerGuard?: preHandlerHookHandler;
+}
+
+/** Ownership scope exposed by the batch problem picker. */
+export type ProblemPickerScope = 'all' | 'personal' | 'team' | 'public';
+
+const PICKER_DEFAULT_LIMIT = 200;
+const PICKER_MAX_LIMIT = 500;
+const PICKER_OWNER_TYPE: Record<
+  Exclude<ProblemPickerScope, 'all'>,
+  'user' | 'team' | 'system'
+> = {
+  personal: 'user',
+  team: 'team',
+  public: 'system',
+};
+
+function pickerScopeOf(ownerType: string): 'personal' | 'team' | 'public' {
+  if (ownerType === 'team') return 'team';
+  if (ownerType === 'user') return 'personal';
+  return 'public';
+}
+
+function parsePickerLimit(value: string | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return PICKER_DEFAULT_LIMIT;
+  return Math.min(PICKER_MAX_LIMIT, Math.max(1, Math.floor(parsed)));
+}
+
+/** Escape LIKE metacharacters so a search for "50%" stays a literal search. */
+function escapeLike(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&');
 }
 
 /** Maps ownership/numbering validation failures to their HTTP error codes. */
@@ -97,6 +134,100 @@ export function registerAdminProblemRoutes(
   options: AdminProblemRouteOptions,
 ): void {
   const guard = options.adminGuard;
+  const pickerGuard =
+    options.pickerGuard ??
+    requireRole(['admin', 'contestmanager', 'setter'], {
+      db: options.db,
+      config: options.config,
+    });
+
+  app.get<{
+    Querystring: { scope?: string; query?: string; limit?: string };
+  }>('/api/admin/problems/picker', { preHandler: pickerGuard }, async (request, reply) => {
+    const rawScope = (request.query.scope ?? '').trim().toLowerCase();
+    const scope = rawScope || 'all';
+    if (
+      scope !== 'all' &&
+      scope !== 'personal' &&
+      scope !== 'team' &&
+      scope !== 'public'
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: { code: 'INVALID_SCOPE', message: 'scope must be personal, team, public or all' },
+      });
+    }
+    const limit = parsePickerLimit(request.query.limit);
+    const clauses: string[] = [];
+    const params: Array<string | number> = [];
+    if (scope !== 'all') {
+      clauses.push('owner_type = ?');
+      params.push(PICKER_OWNER_TYPE[scope]);
+    }
+    const query = (request.query.query ?? '').trim().toLowerCase();
+    if (query) {
+      const like = `%${escapeLike(query)}%`;
+      const displayQuery = query.startsWith('#') ? query.slice(1) : query;
+      const displayLike = `%${escapeLike(displayQuery || query)}%`;
+      // Search mirrors the batch mapping UI: display id, title, tags, numeric id
+      // and the "#<id>" form users type in the selector.
+      clauses.push(
+        `(LOWER(title) LIKE ? ESCAPE '\\'
+          OR LOWER(COALESCE(display_id, '')) LIKE ? ESCAPE '\\'
+          OR LOWER(tags_json) LIKE ? ESCAPE '\\'
+          OR CAST(id AS TEXT) LIKE ? ESCAPE '\\'
+          OR ('#' || CAST(id AS TEXT)) LIKE ? ESCAPE '\\')`,
+      );
+      params.push(like, displayLike, like, like, like);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(' AND ')}` : '';
+    const rows = options.db
+      .prepare(`SELECT * FROM problems ${where} ORDER BY id DESC LIMIT ?`)
+      .all(...params, limit) as unknown as Array<{
+      id: number;
+      title: string;
+      type: string;
+      difficulty: number | null;
+      tags_json: string;
+      owner_type: string;
+      owner_id: number | null;
+      display_id: string | null;
+      visibility: string;
+      time_ms: number;
+      memory_mb: number;
+    }>;
+    return {
+      ok: true,
+      data: rows.map((row) => {
+        let tags: string[] = [];
+        try {
+          const parsed = JSON.parse(row.tags_json) as unknown;
+          if (Array.isArray(parsed)) {
+            tags = parsed.filter((tag): tag is string => typeof tag === 'string');
+          }
+        } catch {
+          tags = [];
+        }
+        return {
+          id: row.id,
+          displayId: row.display_id ?? '',
+          title: row.title,
+          type: row.type,
+          kind: row.type,
+          tags,
+          difficulty: row.difficulty,
+          visibility: row.visibility,
+          owner: { type: row.owner_type, id: row.owner_id },
+          ownerType: row.owner_type,
+          ownerId: row.owner_id,
+          ownerKind: pickerScopeOf(row.owner_type),
+          scope: pickerScopeOf(row.owner_type),
+          timeMs: row.time_ms,
+          memoryMb: row.memory_mb,
+        };
+      }),
+    };
+  });
 
   app.get<{ Params: { id: string } }>(
     '/api/admin/problems/:id/export',
