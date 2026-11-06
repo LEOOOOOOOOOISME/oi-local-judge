@@ -12,7 +12,7 @@ import {
   getContestStatistics,
 } from '../src/services/contest-statistics.js';
 import { invalidateOfficialRanking } from '../src/services/official-ranking.js';
-import { openDatabase } from '../src/storage/db.js';
+import { openDatabase, transaction } from '../src/storage/db.js';
 import { migrate } from '../src/storage/migrate.js';
 import {
   addParticipant,
@@ -533,4 +533,258 @@ describe('GET /api/contests/:id/statistics', () => {
     });
     expect(contestantResponse.statusCode).toBe(403);
   });
+});
+
+interface PagedRankingData {
+  items: Array<{
+    userId: number;
+    username: string;
+    realName: string | null;
+    className: string | null;
+    totalScore: number;
+  }>;
+  total: number;
+  allTotal: number;
+  offset: number;
+  limit: number;
+  query: string;
+  rows?: unknown;
+}
+
+async function getRankingPage(
+  app: FastifyInstance,
+  contestId: number,
+  query: string,
+  cookie?: string,
+) {
+  return app.inject({
+    method: 'GET',
+    url: `/api/contests/${contestId}/official-ranking/page${query ? `?${query}` : ''}`,
+    ...(cookie ? { headers: { cookie } } : {}),
+  });
+}
+
+function pagedBody(response: {
+  statusCode: number;
+  body: string;
+  json: () => unknown;
+}): PagedRankingData {
+  expect(response.statusCode, response.body).toBe(200);
+  return (response.json() as { data: PagedRankingData }).data;
+}
+
+describe('official ranking server paging', () => {
+  it('pages in rank order and keeps the complete endpoint compatible', async () => {
+    const ctx = setup();
+    const contestId = seedOiContest(ctx);
+    const app = await buildTestApp(ctx);
+    const complete = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/official-ranking`,
+    });
+    const all = (complete.json() as { data: { rows: Array<{ userId: number }> } }).data.rows;
+    expect(all).toHaveLength(3);
+
+    const first = pagedBody(await getRankingPage(app, contestId, 'offset=0&limit=2'));
+    expect(first).toMatchObject({ total: 3, allTotal: 3, offset: 0, limit: 2 });
+    expect(first.items.map((item) => item.userId)).toEqual(
+      all.slice(0, 2).map((row) => row.userId),
+    );
+    expect(first.rows).toBeUndefined();
+
+    const second = pagedBody(await getRankingPage(app, contestId, 'offset=2&limit=2'));
+    expect(second.items).toHaveLength(1);
+    expect(second.items[0]!.userId).toBe(all[2]!.userId);
+
+    const beyond = pagedBody(await getRankingPage(app, contestId, 'offset=99&limit=2'));
+    expect(beyond.items).toEqual([]);
+    expect(beyond.total).toBe(3);
+
+    const defaults = pagedBody(await getRankingPage(app, contestId, ''));
+    expect(defaults.limit).toBe(100);
+    expect(defaults.items).toHaveLength(3);
+
+    // The original endpoint switches to the paged envelope when paging params
+    // are present, and `complete=1` still returns the full ranking.
+    const extended = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/official-ranking?offset=0&limit=1`,
+    });
+    const extendedBody = pagedBody(extended);
+    expect(extendedBody.items).toHaveLength(1);
+    expect(extendedBody.total).toBe(3);
+    const completeOverride = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/official-ranking?complete=1&offset=0&limit=1`,
+    });
+    expect(
+      (completeOverride.json() as { data: { rows: unknown[] } }).data.rows,
+    ).toHaveLength(3);
+  });
+
+  it('normalizes offset/limit boundaries and caps the page size', async () => {
+    const ctx = setup();
+    const contestId = seedOiContest(ctx);
+    const app = await buildTestApp(ctx);
+    const capped = pagedBody(await getRankingPage(app, contestId, 'limit=1000'));
+    expect(capped.limit).toBe(500);
+    const badLimit = pagedBody(await getRankingPage(app, contestId, 'limit=0'));
+    expect(badLimit.limit).toBe(100);
+    const badOffset = pagedBody(await getRankingPage(app, contestId, 'offset=-5'));
+    expect(badOffset.offset).toBe(0);
+    const fractional = pagedBody(
+      await getRankingPage(app, contestId, 'offset=1.9&limit=1.9'),
+    );
+    expect(fractional.offset).toBe(1);
+    expect(fractional.limit).toBe(1);
+    expect(fractional.items).toHaveLength(1);
+  });
+
+  it('searches username, real name and class within the visible ranking', async () => {
+    const ctx = setup();
+    const contestId = seedOiContest(ctx);
+    const app = await buildTestApp(ctx);
+    expect(
+      pagedBody(await getRankingPage(app, contestId, 'query=ali')).items.map(
+        (item) => item.username,
+      ),
+    ).toEqual(['alice']);
+    expect(
+      pagedBody(await getRankingPage(app, contestId, 'query=ALICE')).items.map(
+        (item) => item.username,
+      ),
+    ).toEqual(['alice']);
+    expect(
+      pagedBody(await getRankingPage(app, contestId, 'query=carol')).items.map(
+        (item) => item.username,
+      ),
+    ).toEqual(['carol']);
+    const class1 = pagedBody(await getRankingPage(app, contestId, 'query=1班'));
+    expect(class1.items.map((item) => item.username).sort()).toEqual(['alice', 'bob']);
+    const hidden = pagedBody(await getRankingPage(app, contestId, 'query=dave'));
+    expect(hidden.total).toBe(0);
+    expect(hidden.items).toEqual([]);
+    const missing = pagedBody(await getRankingPage(app, contestId, 'query=zzz'));
+    expect(missing.total).toBe(0);
+    const searchedPage = pagedBody(
+      await getRankingPage(app, contestId, 'query=1班&offset=1&limit=1'),
+    );
+    expect(searchedPage.total).toBe(2);
+    expect(searchedPage.items).toHaveLength(1);
+  });
+
+  it('keeps includeHidden permissions on the paged endpoint', async () => {
+    const ctx = setup();
+    const contestId = seedOiContest(ctx);
+    const app = await buildTestApp(ctx);
+    expect(pagedBody(await getRankingPage(app, contestId, '')).total).toBe(3);
+    expect(
+      pagedBody(
+        await getRankingPage(
+          app,
+          contestId,
+          'includeHidden=1',
+          cookieFor(ctx, ctx.users.admin),
+        ),
+      ).total,
+    ).toBe(4);
+    const forbidden = await getRankingPage(
+      app,
+      contestId,
+      'includeHidden=1',
+      cookieFor(ctx, ctx.users.contestant),
+    );
+    expect(forbidden.statusCode).toBe(403);
+    const invalid = await getRankingPage(app, contestId, 'includeHidden=yes');
+    expect(invalid.statusCode).toBe(400);
+  });
+
+  it('uses the same frozen-board semantics as the complete endpoint', async () => {
+    const ctx = setup();
+    const contestId = seedOiContest(ctx);
+    ctx.db
+      .prepare("UPDATE contests SET status = 'frozen', freeze_at = ? WHERE id = ?")
+      .run(1250, contestId);
+    const app = await buildTestApp(ctx);
+    const complete = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/official-ranking`,
+    });
+    const all = (
+      complete.json() as { data: { rows: Array<{ userId: number; totalScore: number }> } }
+    ).data.rows;
+    const page = pagedBody(await getRankingPage(app, contestId, 'offset=0&limit=100'));
+    expect(page.total).toBe(all.length);
+    expect(page.items.map((item) => item.userId)).toEqual(all.map((row) => row.userId));
+    expect(page.items.map((item) => item.totalScore)).toEqual(
+      all.map((row) => row.totalScore),
+    );
+  });
+
+  it('returns an empty page for a contest without participants', async () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, {
+      name: 'Empty',
+      mode: 'oi',
+      startAt: 0,
+      endAt: 1000,
+      problemIds: [ctx.p1],
+    });
+    const app = await buildTestApp(ctx);
+    const page = pagedBody(await getRankingPage(app, contestId, ''));
+    expect(page.items).toEqual([]);
+    expect(page.total).toBe(0);
+    expect(page.allTotal).toBe(0);
+    expect(page.offset).toBe(0);
+    expect(page.limit).toBe(100);
+  });
+
+  it('pages and searches a 5000-participant board without returning every row', async () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, {
+      name: 'Big',
+      mode: 'oi',
+      startAt: 0,
+      endAt: 10_000_000,
+      problemIds: [ctx.p1],
+    });
+    transaction(ctx.db, () => {
+      const insertUser = ctx.db.prepare(
+        `INSERT INTO users(username, password_hash, real_name, class_name, role, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      );
+      const insertParticipant = ctx.db.prepare(
+        "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",
+      );
+      for (let index = 0; index < 5000; index += 1) {
+        const result = insertUser.run(
+          `bulk${index}`,
+          'x',
+          `Bulk ${index}`,
+          `${index % 20}班`,
+          'contestant',
+          0,
+        );
+        insertParticipant.run(contestId, Number(result.lastInsertRowid));
+      }
+    });
+    const app = await buildTestApp(ctx);
+    const page = pagedBody(
+      await getRankingPage(app, contestId, 'offset=4900&limit=100'),
+    );
+    expect(page.total).toBe(5000);
+    expect(page.allTotal).toBe(5000);
+    expect(page.items).toHaveLength(100);
+    expect((page as { rows?: unknown }).rows).toBeUndefined();
+
+    const searched = pagedBody(await getRankingPage(app, contestId, 'query=bulk4999'));
+    expect(searched.total).toBe(1);
+    expect(searched.items[0]!.username).toBe('bulk4999');
+
+    const complete = await app.inject({
+      method: 'GET',
+      url: `/api/contests/${contestId}/official-ranking`,
+    });
+    expect((complete.json() as { data: { rows: unknown[] } }).data.rows).toHaveLength(5000);
+  }, 30_000);
 });

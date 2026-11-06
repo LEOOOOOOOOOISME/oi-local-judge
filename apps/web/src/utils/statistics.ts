@@ -6,12 +6,6 @@ import type {
   OfficialRankingRow,
 } from '../api/types';
 
-/** Above this row count the dashboard table stops rendering every row. */
-export const RESULTS_SERVER_PAGING_THRESHOLD = 5000;
-
-/** Prefix rendered when a contest exceeds the virtual-scroll threshold. */
-export const RESULTS_TABLE_PREVIEW_LIMIT = 2000;
-
 export interface StatisticsKpiItem {
   key: string;
   label: string;
@@ -152,31 +146,6 @@ export function searchRankingRows(
       (row.className ?? '').toLowerCase().includes(needle)
     );
   });
-}
-
-export interface ResultsPlan {
-  rows: OfficialRankingRow[];
-  /** Rows matching the current search. */
-  total: number;
-  /** True when the contest is too large for the virtual-scroll table. */
-  serverPaging: boolean;
-  /** True when only a prefix of the rows is rendered. */
-  truncated: boolean;
-}
-
-/**
- * Plans the results table payload: 1505-row contests stay fully virtual, while
- * 5000+ rows render only a bounded prefix with an explicit paging notice.
- */
-export function planResultsRows(rows: OfficialRankingRow[], query: string): ResultsPlan {
-  const filtered = searchRankingRows(rows, query);
-  const serverPaging = filtered.length >= RESULTS_SERVER_PAGING_THRESHOLD;
-  return {
-    rows: serverPaging ? filtered.slice(0, RESULTS_TABLE_PREVIEW_LIMIT) : filtered,
-    total: filtered.length,
-    serverPaging,
-    truncated: serverPaging,
-  };
 }
 
 /** Drops blank auto-analysis lines before they reach the list or the PDF. */
