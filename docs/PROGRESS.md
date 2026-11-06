@@ -2,6 +2,59 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-06 / Round 148（rc.7 迁移热修 → rc.8）
+
+### 人工报告
+
+`npm start` 在旧库上失败：
+
+```text
+Error: no such column: status
+    at migrate (apps/server/dist/storage/migrate.js)
+```
+
+### 根因
+
+- rc.6 的 `batch_items` 没有 `status`
+- `SCHEMA` 在 `ensureColumn` 之前执行
+- `SCHEMA` 内创建 `idx_batch_items_batch_status(batch_id, status)` 失败
+
+### 修复
+
+- 把该索引移出 `SCHEMA`
+- 在 `ensureColumn` 补齐 `status/error_code/error_message` 后创建索引
+- 新增回归测试：构造 rc.6 风格 `batch_items`，`migrate()` 不抛错并补齐列/索引
+- 用真实旧 `runtime/db/oijudge.db` 启动：`/api/health` 200
+- 修正 update-check 测试 fixture：使用 `rc.999`，避免版本 bump 后误判
+
+### 提交
+
+- `ae3e867 fix: migrate legacy batch_items before status index`
+- `5163fbc test: keep update-check fixture newer than rc.7`
+- `f32ad8d release: prepare v1.1.0-rc.8 hotfix`
+
+### rc.8 发布
+
+- Tag：`v1.1.0-rc.8`
+- CI run：`42235882817` — **success**
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.8
+- 资产：
+  - `OiJudge-Setup-1.1.0-rc.8.exe` 252,539,081 B
+  - `oi-local-judge-1.1.0-rc.8-win-x64.zip` 360,004,526 B
+- prerelease：是
+
+### 验证
+
+- 全量 `npx vitest run --maxWorkers=2`：**110 文件 / 1008 用例通过**
+- `npm run build`：通过
+- 真实旧库启动 migration + `/api/health` 200
+- CI 构建/发布全部 success
+
+### 注意
+
+- rc.7 的升级迁移有缺陷，已被 rc.8 取代。
+- 已安装 rc.7 的用户升级 rc.8 前仍应备份数据目录。
+
 ## 2026-11-06 / Round 147（v1.1.0-rc.7 发布）
 
 ### 发布

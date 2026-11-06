@@ -2,9 +2,9 @@
 
 最后更新：2026-11-06  
 当前分支：`feat/1.1-stability-authoring`  
-当前 HEAD：`ac660ce docs: record v1.1.0-rc.7 release`  
-发布 tag：`v1.1.0-rc.7`（tag 指向 `18dd220 release: prepare v1.1.0-rc.7`）  
-当前 Release：`v1.1.0-rc.7`
+当前 HEAD：`f32ad8d release: prepare v1.1.0-rc.8 hotfix`（发布后文档提交在分支上更靠前）  
+发布 tag：`v1.1.0-rc.8`（tag 指向 `f32ad8d`）  
+当前 Release：`v1.1.0-rc.8`（rc.7 因升级迁移缺陷已被取代）
 
 ---
 
@@ -455,7 +455,7 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 当前验证：
 
-- `npx vitest run --maxWorkers=2`：**110 文件 / 1007 用例通过**
+- `npx vitest run --maxWorkers=2`：**110 文件 / 1008 用例通过**
 - `npm run build`：通过
 - `npm run web:build`：通过
 - 浏览器 E2E：2 passed（主流程 + 建班/学生访问）
@@ -464,17 +464,21 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - Electron packaged smoke：PASS（window/server/health/LAN/web）
 - NSIS 安装态 smoke：PASS（安装/启动/health/LAN/卸载）
 
-## 3.8 v1.1.0-rc.7 发布（2026-11-06）
+## 3.8 v1.1.0-rc.8 发布（2026-11-06）
 
-- Tag：`v1.1.0-rc.7`
-- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.7
-- CI run：`42231473055`，success
+- Tag：`v1.1.0-rc.8`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.8
+- CI run：`42235882817`，success
 - 资产：
-  - `OiJudge-Setup-1.1.0-rc.7.exe` 252,538,915 B
-  - `oi-local-judge-1.1.0-rc.7-win-x64.zip` 360,004,479 B
+  - `OiJudge-Setup-1.1.0-rc.8.exe` 252,539,081 B
+  - `oi-local-judge-1.1.0-rc.8-win-x64.zip` 360,004,526 B
 - Release 为 prerelease
 - 发布说明：`docs/releases/RELEASE_NOTES.md`
-- CI 使用统一的 `build:installer`，构建后规范化完整性
+- **rc.8 是升级修复版**：
+  - 修复 rc.7 从 rc.6 旧库启动时报 `no such column: status`
+  - 根因：`batch_items(batch_id,status)` 索引在 `ensureColumn` 之前创建
+  - 回归测试 + 真实旧库 `/api/health` 200
+- rc.7 已发布但升级迁移缺陷，建议使用 rc.8
 
 ---
 
