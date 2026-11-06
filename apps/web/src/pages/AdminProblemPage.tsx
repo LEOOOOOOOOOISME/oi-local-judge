@@ -26,12 +26,14 @@ import {
   CodeOutlined,
   CopyOutlined,
   DeleteOutlined,
+  DownloadOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import { Link, useParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, apiDelete, apiGet, apiPost, apiPut, apiUpload } from '../api/client';
+import { ApiError, apiDelete, apiGet, apiPost, apiPut, apiUpload, downloadApiFile } from '../api/client';
 import type {
   AdminDataImportResult,
   AdminProblemDetail,
@@ -42,6 +44,7 @@ import type {
   ObjectiveQuestion,
   ProblemAsset,
   ProblemAssetSource,
+  ProblemAttachment,
   ProblemOwnerType,
   ProblemType,
   SelfTestResult,
@@ -86,7 +89,9 @@ import '../styles/admin.css';
 import '../styles/objective.css';
 
 const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
+const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const ALLOWED_SOURCE_ACCEPT = '.cpp,.cc,.cxx,.c,.py,.exe,.txt';
+const ALLOWED_ATTACHMENT_ACCEPT = '.pdf,.png,.jpg,.jpeg,.gif,.webp,.bmp,.svg,.zip';
 
 const ASSET_META: Record<AssetKind, { label: string; hint: string }> = {
   std: { label: '标准程序', hint: '标准答案 / std 自测 / 对拍基准，上传后编译为可执行文件。' },
@@ -358,6 +363,11 @@ export function AdminProblemPage() {
   const [savingPoints, setSavingPoints] = useState(false);
   const [displayIdDraft, setDisplayIdDraft] = useState('');
 
+  const [attachmentVisibility, setAttachmentVisibility] = useState<'problem' | 'admin'>('problem');
+  const [attachmentUploading, setAttachmentUploading] = useState(false);
+  const [deletingAttachmentId, setDeletingAttachmentId] = useState<number | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+
   const problemQuery = useQuery({
     queryKey: ['admin-problem', problemId],
     queryFn: () => apiGet<AdminProblemDetail>(`/api/admin/problems/${problemId}`),
@@ -372,6 +382,12 @@ export function AdminProblemPage() {
   const assetsQuery = useQuery({
     queryKey: ['admin-assets', problemId],
     queryFn: () => apiGet<ProblemAsset[]>(`/api/admin/problems/${problemId}/assets`),
+    enabled: validId,
+  });
+  const attachmentsQuery = useQuery({
+    queryKey: ['admin-attachments', problemId],
+    queryFn: () =>
+      apiGet<ProblemAttachment[]>(`/api/admin/problems/${problemId}/attachments`),
     enabled: validId,
   });
   const testcasesQuery = useQuery({
@@ -577,6 +593,131 @@ export function AdminProblemPage() {
       setDeleting((previous) => ({ ...previous, [kind]: false }));
     }
   };
+
+  const invalidateAttachments = () => {
+    void queryClient.invalidateQueries({ queryKey: ['admin-attachments', problemId] });
+  };
+
+  const uploadAttachment = async (file: File) => {
+    if (file.size > MAX_ATTACHMENT_BYTES) {
+      message.error('附件超过 50 MB 限制');
+      return;
+    }
+    setAttachmentUploading(true);
+    try {
+      const search = new URLSearchParams({
+        name: file.name,
+        visibility: attachmentVisibility,
+      });
+      await apiUpload<ProblemAttachment>(
+        `/api/admin/problems/${problemId}/attachments?${search.toString()}`,
+        file,
+        file.type || 'application/octet-stream',
+      );
+      message.success('附件已上传');
+      invalidateAttachments();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '上传附件失败');
+    } finally {
+      setAttachmentUploading(false);
+    }
+  };
+
+  const downloadAttachment = async (attachment: ProblemAttachment) => {
+    try {
+      await downloadApiFile(attachment.downloadUrl, attachment.filename);
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '下载附件失败');
+    }
+  };
+
+  const removeAttachment = async (attachment: ProblemAttachment) => {
+    setDeletingAttachmentId(attachment.id);
+    try {
+      await apiDelete<null>(
+        `/api/admin/problems/${problemId}/attachments/${attachment.id}`,
+      );
+      message.success('附件已删除');
+      invalidateAttachments();
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '删除附件失败');
+    } finally {
+      setDeletingAttachmentId(null);
+    }
+  };
+
+  const attachmentColumns: TableColumnsType<ProblemAttachment> = [
+    {
+      title: '文件',
+      dataIndex: 'filename',
+      render: (name: string) => (
+        <span className="mono" title={name}>
+          {name}
+        </span>
+      ),
+    },
+    {
+      title: '类型',
+      dataIndex: 'mime',
+      width: 170,
+      render: (mime: string) => <Tag>{mime}</Tag>,
+    },
+    {
+      title: '大小',
+      dataIndex: 'size',
+      width: 110,
+      render: (size: number) => formatBytes(size),
+    },
+    {
+      title: '可见性',
+      dataIndex: 'visibility',
+      width: 120,
+      render: (visibility: ProblemAttachment['visibility']) =>
+        visibility === 'admin' ? (
+          <Tag color="orange">仅管理员</Tag>
+        ) : (
+          <Tag color="green">题目可见</Tag>
+        ),
+    },
+    {
+      title: '上传时间',
+      dataIndex: 'createdAt',
+      width: 180,
+      render: (createdAt: number) => formatDateTime(createdAt),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 180,
+      render: (_value: unknown, attachment: ProblemAttachment) => (
+        <Space size={8}>
+          <Button
+            size="small"
+            icon={<DownloadOutlined />}
+            onClick={() => void downloadAttachment(attachment)}
+          >
+            下载
+          </Button>
+          <Popconfirm
+            title="删除附件？"
+            description="会同时删除已上传的文件，且不可恢复。"
+            okText="删除"
+            cancelText="取消"
+            onConfirm={() => void removeAttachment(attachment)}
+          >
+            <Button
+              size="small"
+              danger
+              icon={<DeleteOutlined />}
+              loading={deletingAttachmentId === attachment.id}
+            >
+              删除
+            </Button>
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ];
 
   const handleAssetDrop = (event: DragEvent<HTMLDivElement>, kind: AssetKind) => {
     event.preventDefault();
@@ -1477,6 +1618,68 @@ export function AdminProblemPage() {
     </Card>
   );
 
+  const attachmentsPanel = (
+    <Card
+      className="oij-card"
+      title="附件"
+      extra={
+        <span className="muted">PDF / 图片 / ZIP，单文件 ≤ 50 MB；题目可见即可下载</span>
+      }
+    >
+      <Space wrap style={{ marginBottom: 12 }}>
+        <Select
+          value={attachmentVisibility}
+          onChange={(value: 'problem' | 'admin') => setAttachmentVisibility(value)}
+          options={[
+            { value: 'problem', label: '题目可见' },
+            { value: 'admin', label: '仅管理员' },
+          ]}
+          style={{ width: 140 }}
+          disabled={attachmentUploading}
+        />
+        <Button
+          type="primary"
+          icon={<UploadOutlined />}
+          loading={attachmentUploading}
+          onClick={() => attachmentInputRef.current?.click()}
+        >
+          上传附件
+        </Button>
+        <input
+          ref={attachmentInputRef}
+          className="admin-file-input"
+          type="file"
+          accept={ALLOWED_ATTACHMENT_ACCEPT}
+          data-testid="attachment-input"
+          onChange={(event) => {
+            const file = event.target.files?.[0];
+            if (file) void uploadAttachment(file);
+            event.target.value = '';
+          }}
+        />
+      </Space>
+      {attachmentsQuery.isPending ? (
+        <div className="inline-loading">
+          <Spin />
+        </div>
+      ) : attachmentsQuery.isError ? (
+        <ErrorResult
+          error={attachmentsQuery.error}
+          onRetry={() => void attachmentsQuery.refetch()}
+        />
+      ) : (
+        <Table<ProblemAttachment>
+          rowKey="id"
+          size="small"
+          columns={attachmentColumns}
+          dataSource={attachmentsQuery.data ?? []}
+          pagination={false}
+          locale={{ emptyText: <Empty description="暂无附件" /> }}
+        />
+      )}
+    </Card>
+  );
+
   const testcaseColumns: TableColumnsType<AdminTestcase> = [
     {
       title: '#',
@@ -2242,6 +2445,7 @@ export function AdminProblemPage() {
                   label: `客观题 (${objectiveDraft.length})`,
                   children: objectivePanel,
                 },
+                { key: 'attachments', label: '附件', children: attachmentsPanel },
               ]
             : [
                 { key: 'basic', label: '基本信息', children: basicPanel },
@@ -2251,6 +2455,7 @@ export function AdminProblemPage() {
                   children: ownershipPanel,
                 },
                 { key: 'assets', label: '程序资产', children: assetsPanel },
+                { key: 'attachments', label: '附件', children: attachmentsPanel },
                 { key: 'plan', label: '数据计划', children: dataPlanPanel },
                 { key: 'data', label: '测试数据', children: dataPanel },
                 { key: 'tools', label: '生成与对拍', children: toolsPanel },
