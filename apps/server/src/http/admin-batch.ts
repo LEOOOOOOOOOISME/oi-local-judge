@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, normalize } from 'node:path';
+import { PassThrough, Readable } from 'node:stream';
 import { unzipSync } from 'fflate';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
@@ -53,6 +54,11 @@ import {
   SOURCE_LANGUAGE_BY_EXTENSION,
   planBatchSources,
 } from '../services/batch-plan.js';
+import {
+  iterateBatchCsv,
+  iterateBatchHtml,
+  writeBatchXlsx,
+} from '../services/batch-export.js';
 
 export interface AdminBatchRouteOptions {
   db: DatabaseSync;
@@ -878,6 +884,58 @@ export function registerAdminBatchRoutes(
         ),
       },
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // Batch result export (CSV long table, printable HTML, XLSX long + matrix).
+  // -------------------------------------------------------------------------
+  app.get<{
+    Params: { id: string };
+    Querystring: { format?: string; matrix?: string };
+  }>('/api/admin/batch/:id/export', { preHandler: guard }, async (request, reply) => {
+    const id = Number(request.params.id);
+    const format = (request.query.format ?? 'csv').toLowerCase();
+    if (format !== 'csv' && format !== 'xlsx' && format !== 'html') {
+      return reply.code(400).send({
+        ok: false,
+        error: { code: 'INVALID_FORMAT', message: 'format must be csv, xlsx or html' },
+      });
+    }
+    const job = getBatchJob(options.db, id);
+    if (!job) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    const matrixOnly =
+      format === 'csv' &&
+      (request.query.matrix === '1' || request.query.matrix === 'true');
+    const extension = matrixOnly ? 'csv' : format;
+    const filename = matrixOnly
+      ? `batch-${id}-matrix.csv`
+      : `batch-${id}.${extension}`;
+    reply.header('content-disposition', `attachment; filename="${filename}"`);
+    reply.header('cache-control', 'no-store');
+    if (format === 'csv') {
+      reply.header('content-type', 'text/csv; charset=utf-8');
+      return reply.send(
+        Readable.from(iterateBatchCsv(options.db, id, { matrix: matrixOnly }), {
+          objectMode: false,
+        }),
+      );
+    }
+    if (format === 'html') {
+      reply.header('content-type', 'text/html; charset=utf-8');
+      return reply.send(Readable.from(iterateBatchHtml(options.db, id), { objectMode: false }));
+    }
+    reply.header(
+      'content-type',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    const stream = new PassThrough();
+    // The workbook is produced asynchronously after the response starts; any
+    // failure destroys the stream so the client sees a truncated download
+    // instead of a silently incomplete workbook.
+    void writeBatchXlsx(options.db, id, stream).catch((error: unknown) => {
+      stream.destroy(error instanceof Error ? error : new Error(String(error)));
+    });
+    return reply.send(stream);
   });
 
   app.get<{

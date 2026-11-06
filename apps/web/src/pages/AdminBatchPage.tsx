@@ -17,16 +17,20 @@ import {
 import type { TableColumnsType } from 'antd';
 import {
   DownloadOutlined,
+  FileExcelOutlined,
+  Html5Outlined,
   InboxOutlined,
   PlayCircleOutlined,
   ReloadOutlined,
   StopOutlined,
+  TableOutlined,
 } from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { apiGet, apiPost, apiUploadWithProgress } from '../api/client';
+import { apiGet, apiPost, apiUploadWithProgress, downloadApiFile } from '../api/client';
 import type {
   AdminProblemSummary,
   BatchAsyncRunResult,
+  BatchExportFormat,
   BatchFailureItem,
   BatchImportStatus,
   BatchItemStatus,
@@ -114,6 +118,14 @@ function errorCodeLabel(code: string | null | undefined): string {
   return ERROR_CODE_LABEL[code] ?? code;
 }
 
+/** 导出格式 → 服务端查询串后缀 / 下载文件名后缀。 */
+const EXPORT_REQUEST: Record<BatchExportFormat, { query: string; extension: string }> = {
+  csv: { query: 'format=csv', extension: 'csv' },
+  matrix: { query: 'format=csv&matrix=1', extension: 'matrix.csv' },
+  xlsx: { query: 'format=xlsx', extension: 'xlsx' },
+  html: { query: 'format=html', extension: 'html' },
+};
+
 /** 上传时文件名走请求头，必须转义成 ASCII；展示时还原。 */
 function decodeFileName(value: string | null | undefined): string {
   if (!value) return '';
@@ -165,13 +177,6 @@ function FailureList({
   );
 }
 
-function csvCell(value: string): string {
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
-}
-
 export function AdminBatchPage() {
   const { message, modal } = App.useApp();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -197,7 +202,7 @@ export function AdminBatchPage() {
   const [jobId, setJobId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
-  const [exporting, setExporting] = useState(false);
+  const [exportingFormat, setExportingFormat] = useState<BatchExportFormat | null>(null);
   const [canceling, setCanceling] = useState(false);
 
   const problemsQuery = useQuery({
@@ -521,63 +526,24 @@ export function AdminBatchPage() {
     });
   };
 
-  const exportCsv = async () => {
+  const exportBatch = async (format: BatchExportFormat) => {
     if (!job || job.total === 0) return;
-    setExporting(true);
+    setExportingFormat(format);
     try {
-      const allItems: BatchResultItem[] = [];
-      let offset = 0;
-      while (offset < job.total) {
-        const pageData = await apiGet<BatchJob>(
-          `/api/admin/batch/${job.id}?offset=${offset}&limit=1000`,
-        );
-        allItems.push(...pageData.items);
-        if (pageData.items.length === 0) break;
-        offset += pageData.items.length;
-      }
-      const header = [
-        '选手',
-        '题目',
-        '源文件',
-        '导入状态',
-        '错误码',
-        '错误信息',
-        '状态',
-        'Verdict',
-        '得分',
-        '用时(ms)',
-        '内存(KB)',
-      ];
-      const rows = allItems.map((item) => [
-        item.student,
-        item.problemTitle ?? (item.problemId === null ? '' : `#${item.problemId}`),
-        item.sourcePath,
-        importStatusLabel(item.importStatus),
-        item.errorCode ?? '',
-        item.errorMessage ?? '',
-        statusLabel(item.status),
-        item.verdict ?? '',
-        String(item.score),
-        String(item.timeMs),
-        String(item.memoryKb),
-      ]);
-      const csv = [header, ...rows]
-        .map((row) => row.map((cell) => csvCell(cell)).join(','))
-        .join('\r\n');
-      const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = `batch-${job.id}.csv`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-      message.success(`CSV 已导出（${allItems.length} 条）`);
+      const request = EXPORT_REQUEST[format];
+      await downloadApiFile(
+        `/api/admin/batch/${job.id}/export?${request.query}`,
+        `batch-${job.id}.${request.extension}`,
+      );
+      message.success(
+        format === 'matrix'
+          ? '学生×题目矩阵已导出'
+          : `${format.toUpperCase()} 已导出（由服务端流式生成）`,
+      );
     } catch (error) {
       message.error(describeBatchError(error));
     } finally {
-      setExporting(false);
+      setExportingFormat(null);
     }
   };
 
@@ -1358,7 +1324,7 @@ export function AdminBatchPage() {
           </Space>
         }
         extra={
-          <Space>
+          <Space wrap size={[8, 8]}>
             {jobActive ? <Spin size="small" /> : null}
             <Button
               danger
@@ -1371,11 +1337,43 @@ export function AdminBatchPage() {
             </Button>
             <Button
               icon={<DownloadOutlined />}
-              loading={exporting}
-              disabled={!job || jobActive || job.total === 0}
-              onClick={() => void exportCsv()}
+              loading={exportingFormat === 'csv'}
+              disabled={
+                !job || jobActive || job.total === 0 || exportingFormat !== null
+              }
+              onClick={() => void exportBatch('csv')}
             >
               导出 CSV
+            </Button>
+            <Button
+              icon={<TableOutlined />}
+              loading={exportingFormat === 'matrix'}
+              disabled={
+                !job || jobActive || job.total === 0 || exportingFormat !== null
+              }
+              onClick={() => void exportBatch('matrix')}
+            >
+              矩阵 CSV
+            </Button>
+            <Button
+              icon={<FileExcelOutlined />}
+              loading={exportingFormat === 'xlsx'}
+              disabled={
+                !job || jobActive || job.total === 0 || exportingFormat !== null
+              }
+              onClick={() => void exportBatch('xlsx')}
+            >
+              导出 Excel
+            </Button>
+            <Button
+              icon={<Html5Outlined />}
+              loading={exportingFormat === 'html'}
+              disabled={
+                !job || jobActive || job.total === 0 || exportingFormat !== null
+              }
+              onClick={() => void exportBatch('html')}
+            >
+              导出 HTML
             </Button>
           </Space>
         }
