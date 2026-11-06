@@ -3,7 +3,7 @@
 最后更新：2026-11-06  
 当前分支：`feat/1.1-stability-authoring`  
 当前 HEAD：`4737e29 merge: NSIS installer build and install smoke`  
-当前 Release：`v1.1.0-rc.6`
+当前 Release：`v1.1.0-rc.7`
 
 ---
 
@@ -463,6 +463,18 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - Electron packaged smoke：PASS（window/server/health/LAN/web）
 - NSIS 安装态 smoke：PASS（安装/启动/health/LAN/卸载）
 
+## 3.8 v1.1.0-rc.7 发布（2026-11-06）
+
+- Tag：`v1.1.0-rc.7`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.7
+- CI run：`42231473055`，success
+- 资产：
+  - `OiJudge-Setup-1.1.0-rc.7.exe` 252,538,915 B
+  - `oi-local-judge-1.1.0-rc.7-win-x64.zip` 360,004,479 B
+- Release 为 prerelease
+- 发布说明：`docs/releases/RELEASE_NOTES.md`
+- CI 使用统一的 `build:installer`，构建后规范化完整性
+
 ---
 
 ## 4. 没有完成 / 待精进
@@ -643,7 +655,8 @@ Low IL 进程无法写 `%APPDATA%\OiJudge` → Electron 单实例锁/缓存 Acce
 ## 4.7 运维 / 发布
 
 - [x] NSIS 安装包实际构建：
-  - `OiJudge-Setup-1.1.0-rc.6.exe` 241.1 MB
+  - rc.6 本地验证包 241.1 MB
+  - rc.7 CI 发布包 252,538,915 B
   - 静默安装/卸载实测
   - 安装态 smoke PASS
 - [x] 安装包完整性规范化（Medium IL）
@@ -653,7 +666,7 @@ Low IL 进程无法写 `%APPDATA%\OiJudge` → Electron 单实例锁/缓存 Acce
 - [ ] Windows 服务化（当前只托盘/启动项/脚本）
 - [ ] 自动下载/安装升级（当前检查 + 手动安装）
 - [ ] 升级失败回滚
-- [ ] v1.1.0-rc.7 发布
+- [x] v1.1.0-rc.7 发布：GitHub Release + NSIS + ZIP
 - [ ] 4C/8G 目标机验收
 - [ ] 生产环境自动备份异地/SMB
 - [ ] 监控告警（当前只本地指标页）
