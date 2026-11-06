@@ -147,7 +147,8 @@ CREATE TABLE IF NOT EXISTS contest_hacks(
 CREATE INDEX IF NOT EXISTS idx_hacks_contest ON contest_hacks(contest_id, problem_id, id DESC);
 CREATE TABLE IF NOT EXISTS batch_jobs(
   id INTEGER PRIMARY KEY, problem_id INTEGER NOT NULL, status TEXT NOT NULL DEFAULT 'running',
-  student_level INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL
+  student_level INTEGER NOT NULL DEFAULT 1, created_at INTEGER NOT NULL,
+  upload_id TEXT
 );
 CREATE TABLE IF NOT EXISTS batch_items(
   id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, student TEXT NOT NULL,
@@ -157,6 +158,20 @@ CREATE TABLE IF NOT EXISTS batch_items(
 );
 CREATE INDEX IF NOT EXISTS idx_batch_items_batch ON batch_items(batch_id);
 CREATE INDEX IF NOT EXISTS idx_batch_items_batch_status ON batch_items(batch_id, status);
+CREATE TABLE IF NOT EXISTS batch_uploads(
+  id INTEGER PRIMARY KEY,
+  upload_id TEXT NOT NULL UNIQUE,
+  original_name TEXT,
+  zip_path TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  sha256 TEXT,
+  entry_count INTEGER NOT NULL DEFAULT 0,
+  total_uncompressed_bytes INTEGER NOT NULL DEFAULT 0,
+  created_by INTEGER,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_batch_uploads_created ON batch_uploads(created_at DESC);
 CREATE TABLE IF NOT EXISTS posts(
   id INTEGER PRIMARY KEY, category TEXT NOT NULL, title TEXT NOT NULL,
   body_md TEXT NOT NULL, problem_id INTEGER, contest_id INTEGER,
@@ -337,6 +352,7 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'batch_jobs', 'problem_map_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'batch_jobs', 'meta_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'batch_jobs', 'created_by', 'INTEGER');
+  ensureColumn(db, 'batch_jobs', 'upload_id', 'TEXT');
   ensureColumn(db, 'contest_participants', 'hidden_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'registered_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'checked_in_at', 'INTEGER');
