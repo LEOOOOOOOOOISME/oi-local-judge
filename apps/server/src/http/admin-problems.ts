@@ -35,7 +35,9 @@ import {
 import { importCenaProblem } from '../services/cena.js';
 import { buildCdf, importLemonProblem } from '../services/lemon.js';
 
-const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
+// Admin upload limit set to 10 GB so that administrators are never blocked by
+// the body-size parser when uploading problems, zips, assets, etc.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
 const ALLOWED_SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx', '.c', '.py', '.exe', '.txt']);
 
 function isAssetKind(value: string): value is AssetKind {
@@ -241,7 +243,7 @@ export function registerAdminProblemRoutes(
 
   app.post(
     '/api/admin/problems/import-zip',
-    { preHandler: guard, bodyLimit: 100 * 1024 * 1024 },
+    { preHandler: guard, bodyLimit: MAX_UPLOAD_BYTES },
     async (request, reply) => {
       const body = request.body;
       if (!Buffer.isBuffer(body) || body.length === 0) {
