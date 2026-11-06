@@ -152,10 +152,11 @@ CREATE TABLE IF NOT EXISTS batch_jobs(
 CREATE TABLE IF NOT EXISTS batch_items(
   id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, student TEXT NOT NULL,
   source_path TEXT NOT NULL, submission_id INTEGER, problem_id INTEGER,
-  user_id INTEGER,
+  user_id INTEGER, status TEXT, error_code TEXT, error_message TEXT,
   FOREIGN KEY(batch_id) REFERENCES batch_jobs(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_batch_items_batch ON batch_items(batch_id);
+CREATE INDEX IF NOT EXISTS idx_batch_items_batch_status ON batch_items(batch_id, status);
 CREATE TABLE IF NOT EXISTS posts(
   id INTEGER PRIMARY KEY, category TEXT NOT NULL, title TEXT NOT NULL,
   body_md TEXT NOT NULL, problem_id INTEGER, contest_id INTEGER,
@@ -327,6 +328,9 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'batch_items', 'time_ms', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'batch_items', 'memory_kb', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'batch_items', 'user_id', 'INTEGER');
+  ensureColumn(db, 'batch_items', 'status', 'TEXT');
+  ensureColumn(db, 'batch_items', 'error_code', 'TEXT');
+  ensureColumn(db, 'batch_items', 'error_message', 'TEXT');
   ensureColumn(db, 'batch_jobs', 'contest_id', 'INTEGER');
   ensureColumn(db, 'batch_jobs', 'mode', 'TEXT');
   ensureColumn(db, 'batch_jobs', 'problem_level', 'INTEGER');
