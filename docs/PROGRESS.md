@@ -2,6 +2,69 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-06 / Round 139（批量 P0 + 统计 S1）
+
+### 本轮提交
+
+- `cfb5e58 fix(web): remove duplicate batch error case`
+- `eb81fc8 merge: contest statistics dashboard`
+- `1bdccf9 merge: batch import failure isolation`
+- `29032d8 chore(web): add echarts for statistics dashboard`
+
+### 已完成
+
+1. **批量导入 P0 止血**
+   - 逐文件 try/catch，失败写 `batch_items.status/error_code/error_message`，不再整批 500。
+   - 无效学生文件夹标记 `INVALID_STUDENT_FOLDER`。
+   - 超大源码 `SOURCE_TOO_LARGE`、空源码、未映射题、用户/提交失败均逐条记录。
+   - 重复学生-题目保留第一条。
+   - 合成学生密码每批只 hash 一次；长用户名稳定 hash 后缀。
+   - `GET /api/admin/batch/:id` 支持 offset/limit，默认 200，最大 1000。
+   - 前端上传上限 5 GB；结果表服务端分页；跳过/错误列表；CSV 全量导出。
+   - 测试：`admin-batch-p0.test.ts` 6 例。
+
+2. **比赛统计仪表盘 S1 + 打印**
+   - `GET /api/contests/:id/statistics`：
+     - 正式榜/封榜口径。
+     - OI/IOI 分数；ACM/CF 通过题数/罚时。
+     - summary/distribution/cumulative/problems/groups/insights。
+     - 隐藏选手默认排除；管理员 includeHidden。
+     - 2s 缓存。
+   - 前端 `/contest/:contestId/statistics`：
+     - KPI、总分分布+累计、分数段环形、每题分布、难度/区分度、班级/团队对比。
+     - ECharts 按需加载，统计页 chunk ≈536 KB，主 chunk 不含 echarts。
+     - AntD 虚拟成绩表（520px）+ 搜索；≥5000 行提示 + 前 2000 预览。
+     - 公开比赛页 + 管理控制台入口。
+   - 打印：
+     - `?print=analysis` 只输出 KPI/图表/分析。
+     - `?print=results` 输出全部可见个人成绩，表头重复，管理员可含隐藏。
+     - 两个“导出 PDF”按钮，浏览器打印。
+   - 测试：后端 10 例 + 前端 11 例。
+
+### 验证
+
+- 全量 `npm test`：**103 文件 / 912 用例通过**。
+- `npm run build`：通过。
+- `npm run web:build`：通过；ECharts 仅在统计页 chunk。
+- 浏览器烟测（子代理）：统计页图表/分析/虚拟表/搜索正常。
+
+### 已知限制
+
+- 批量 P1 未做：`unzipSync` 整包内存、后台异步导入、流式上传、分批事务仍未实现；5 GB 只是放开限制。
+- 统计 ≥5000 行未做真正服务端分页，只做前 2000 预览。
+- 公开团队聚合中，隐藏个人仍可能影响团队汇总（不泄露身份）。
+- 打印等待使用 1200ms/400ms 启发式。
+- 自动分析样本不足时指标置空，不显示提示。
+- Release 仍为 `v1.1.0-rc.6`。
+
+### 下一步
+
+1. 批量 P1：流式 ZIP、后台导入、分批事务、映射工作区。
+2. 统计 S3：班级/训练复用。
+3. PDF 打印稳定性：ECharts render 完成栅栏。
+4. 浏览器 E2E：统计页 + 打印页。
+5. 4C/8G 与 5000×4 验收。
+
 ## 2026-11-06 / Round 138（统计仪表盘设计）
 
 ### 本轮产出
