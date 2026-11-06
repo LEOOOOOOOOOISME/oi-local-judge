@@ -37,6 +37,19 @@ function canManageAnyGroup(role: Role): boolean {
   return role === 'admin' || role === 'contestmanager';
 }
 
+/**
+ * Parses the optional `scope` list filter.
+ *
+ * Returns `undefined` when the parameter is absent (role-dependent default) and
+ * `null` when it is present but not a recognized scope, so the caller can 400.
+ */
+function parseScope(raw: string | undefined): 'mine' | 'all' | undefined | null {
+  if (raw === undefined || raw.trim() === '') return undefined;
+  const scope = raw.trim();
+  if (scope === 'mine' || scope === 'all') return scope;
+  return null;
+}
+
 function badRequest(reply: FastifyReply, code: string, message: string): FastifyReply {
   return reply.code(400).send({ ok: false, error: { code, message } });
 }
@@ -62,16 +75,38 @@ export function registerTrainingPlanRoutes(
   const auth = options.auth ?? requireAuth({ db, config: options.config });
   const preHandler = [auth];
 
-  app.get('/api/training-plans', { preHandler }, async (request) => {
-    const user = request.user!;
-    return {
-      ok: true,
-      data: listTrainingPlans(db, {
-        userId: user.id,
-        canManageAnyGroup: canManageAnyGroup(user.role),
-      }),
-    };
-  });
+  app.get<{ Querystring: { scope?: string } }>(
+    '/api/training-plans',
+    { preHandler },
+    async (request, reply) => {
+      const user = request.user!;
+      const managesAll = canManageAnyGroup(user.role);
+      const requestedScope = parseScope(request.query?.scope);
+      if (requestedScope === null) {
+        return badRequest(reply, 'TRAINING_PLAN_SCOPE_INVALID', "scope must be 'mine' or 'all'");
+      }
+      // Platform-wide listing is a manager capability; students only ever see
+      // the plans of the groups they belong to.
+      if (requestedScope === 'all' && !managesAll) {
+        return reply.code(403).send({
+          ok: false,
+          error: {
+            code: 'TRAINING_PLAN_SCOPE_FORBIDDEN',
+            message: 'only platform managers may list every training plan',
+          },
+        });
+      }
+      const scope = requestedScope ?? (managesAll ? 'all' : 'mine');
+      return {
+        ok: true,
+        data: listTrainingPlans(db, {
+          userId: user.id,
+          canManageAnyGroup: managesAll,
+          scope,
+        }),
+      };
+    },
+  );
 
   app.get<{ Params: { id: string } }>(
     '/api/training-plans/:id',

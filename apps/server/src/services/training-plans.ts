@@ -12,6 +12,7 @@ import {
   getTrainingPlanRow,
   insertTrainingPlan,
   insertTrainingPlanItem,
+  listAllTrainingPlanRows,
   listTrainingPlanItemIds,
   listTrainingPlanItemRows,
   listTrainingPlanMembers,
@@ -79,6 +80,8 @@ export interface TrainingPlanSummary {
   groupId: number;
   groupName: string;
   groupKind: 'team' | 'class';
+  /** Number of members in the target group. */
+  memberCount: number;
   title: string;
   description: string;
   startsAt: number | null;
@@ -475,6 +478,7 @@ function toSummary(
     groupId: plan.group_id,
     groupName: plan.group_name,
     groupKind: plan.group_kind,
+    memberCount: Number(plan.member_count),
     title: plan.title,
     description: plan.description,
     startsAt: plan.starts_at,
@@ -488,19 +492,41 @@ function toSummary(
   };
 }
 
+/** `mine` limits the list to the caller's groups; `all` is platform-manager only. */
+export type TrainingPlanListScope = 'mine' | 'all';
+
 export function listTrainingPlans(
   db: DatabaseSync,
-  input: { userId: number; canManageAnyGroup?: boolean; now?: number },
+  input: {
+    userId: number;
+    canManageAnyGroup?: boolean;
+    scope?: TrainingPlanListScope;
+    now?: number;
+  },
 ): TrainingPlanSummary[] {
   const now = input.now ?? Date.now();
-  return listTrainingPlanRowsForUser(db, input.userId).map((plan) => {
+  const canManageAnyGroup = input.canManageAnyGroup ?? false;
+  // Managers default to the platform-wide list; everyone else only sees their groups.
+  const scope = input.scope ?? (canManageAnyGroup ? 'all' : 'mine');
+  if (scope === 'all' && !canManageAnyGroup) {
+    throw new TrainingPlanError(
+      'TRAINING_PLAN_SCOPE_FORBIDDEN',
+      403,
+      'only platform managers may list every training plan',
+    );
+  }
+  const rows =
+    scope === 'all'
+      ? listAllTrainingPlanRows(db)
+      : listTrainingPlanRowsForUser(db, input.userId);
+  return rows.map((plan) => {
     const items = listTrainingPlanItemRows(db, plan.id);
     const myItems = progressForUser(db, plan, items, input.userId, now);
     return toSummary(
       db,
       plan,
       input.userId,
-      input.canManageAnyGroup ?? false,
+      canManageAnyGroup,
       items.length,
       summarize(myItems),
     );
