@@ -1,7 +1,12 @@
-import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fastify';
+import type {
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest,
+  preHandlerHookHandler,
+} from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
-import { requireAuth } from '../security/auth.js';
+import { authenticateRequest, requireAuth } from '../security/auth.js';
 import { createContest, isRegistrationMode, isTeamMode } from '../storage/repos/contests.js';
 import {
   addParticipant,
@@ -25,7 +30,13 @@ import {
   startContest,
   unfreezeContest,
 } from '../services/contests.js';
-import { getOfficialRanking, invalidateOfficialRanking } from '../services/official-ranking.js';
+import {
+  computeOfficialRanking,
+  getOfficialRanking,
+  getOfficialRankingVersion,
+  invalidateOfficialRanking,
+} from '../services/official-ranking.js';
+import { getContestStatistics } from '../services/contest-statistics.js';
 import { buildContestReport, contestReportToCsv } from '../services/contest-report.js';
 import { getCorrectionRanking } from '../services/correction-ranking.js';
 import { getTeamRanking } from '../services/team-ranking.js';
@@ -79,6 +90,52 @@ function sendContestRegistrationError(reply: FastifyReply, err: unknown): Fastif
 
 function parseTeamId(raw: unknown): number | null {
   return typeof raw === 'number' && Number.isInteger(raw) && raw > 0 ? raw : null;
+}
+
+type IncludeHiddenParse = { ok: true; value: boolean } | { ok: false };
+
+/**
+ * `includeHidden=1|true` opts a manager into statistics/rankings that contain
+ * hidden participants. `0|false` and omission mean public-only data.
+ */
+function readIncludeHidden(raw: unknown): IncludeHiddenParse {
+  if (raw === undefined || raw === '0' || raw === 'false') return { ok: true, value: false };
+  if (raw === '1' || raw === 'true') return { ok: true, value: true };
+  return { ok: false };
+}
+
+/**
+ * Public contest routes are anonymous, so optional authentication is resolved
+ * from the session cookie only when hidden rows are requested.
+ */
+function canIncludeHidden(request: FastifyRequest, options: ContestRouteOptions): boolean {
+  if (!options.config) return false;
+  const authenticated = authenticateRequest(request, {
+    db: options.db,
+    config: options.config,
+  });
+  const role = authenticated?.user.role;
+  return role === 'admin' || role === 'contestmanager';
+}
+
+function forbiddenIncludedHidden(reply: FastifyReply): FastifyReply {
+  return reply.code(403).send({
+    ok: false,
+    error: {
+      code: 'FORBIDDEN',
+      message: 'only admins and contest managers can include hidden participants',
+    },
+  });
+}
+
+function invalidIncludeHidden(reply: FastifyReply): FastifyReply {
+  return reply.code(400).send({
+    ok: false,
+    error: {
+      code: 'INVALID_INCLUDE_HIDDEN',
+      message: 'includeHidden must be 1, true, 0 or false',
+    },
+  });
 }
 
 type WindowTimestamp = { ok: true; value: number | null | undefined } | { ok: false };
@@ -177,18 +234,56 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
     return { ok: true, data: ranking.rows };
   });
 
-  app.get<{ Params: { id: string } }>(
+  app.get<{
+    Params: { id: string };
+    Querystring: { includeHidden?: string };
+  }>(
     '/api/contests/:id/official-ranking',
     async (request, reply) => {
-      const ranking = await getOfficialRanking(
-        options.db,
-        Number(request.params.id),
-        options.config?.dataDir ?? process.cwd(),
-      );
+      const parsed = readIncludeHidden(request.query?.includeHidden);
+      if (!parsed.ok) return invalidIncludeHidden(reply);
+      if (parsed.value && !canIncludeHidden(request, options)) {
+        return forbiddenIncludedHidden(reply);
+      }
+      const contestId = Number(request.params.id);
+      const dataDir = options.config?.dataDir ?? process.cwd();
+      const ranking = parsed.value
+        ? await computeOfficialRanking(
+            options.db,
+            contestId,
+            dataDir,
+            getOfficialRankingVersion(options.db, contestId),
+            { includeHidden: true },
+          )
+        : await getOfficialRanking(options.db, contestId, dataDir);
       if (!ranking) {
         return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       }
       return { ok: true, data: ranking };
+    },
+  );
+
+  app.get<{
+    Params: { id: string };
+    Querystring: { includeHidden?: string };
+  }>(
+    '/api/contests/:id/statistics',
+    async (request, reply) => {
+      const parsed = readIncludeHidden(request.query?.includeHidden);
+      if (!parsed.ok) return invalidIncludeHidden(reply);
+      if (parsed.value && !canIncludeHidden(request, options)) {
+        return forbiddenIncludedHidden(reply);
+      }
+      const stats = await getContestStatistics(
+        options.db,
+        Number(request.params.id),
+        options.config?.dataDir ?? process.cwd(),
+        { includeHidden: parsed.value },
+      );
+      if (!stats) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      return { ok: true, data: stats };
     },
   );
 
