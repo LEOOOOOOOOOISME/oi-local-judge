@@ -45,6 +45,8 @@ export function TrainingPlansPage() {
   });
 
   const isAdmin = user?.role === 'admin';
+  // 管理员/比赛管理员默认拿到全量训练计划（含自己不在的组）。
+  const isPlatformManager = canSearchAllGroups(user?.role);
   const groups = useMemo(
     () =>
       manageableGroups(classesQuery.data ?? [], teamsQuery.data ?? [], {
@@ -85,6 +87,7 @@ export function TrainingPlansPage() {
             {TRAINING_PLAN_GROUP_KIND_LABEL[row.groupKind]}
           </Tag>
           <span>{row.groupName}</span>
+          <span className="muted">{row.memberCount} 人</span>
         </Space>
       ),
     },
@@ -167,9 +170,11 @@ export function TrainingPlansPage() {
   const emptyText =
     plans.length === 0 ? (
       <div className="training-plan-empty">
-        <div>还没有可见的训练计划。</div>
+        <div>{isPlatformManager ? '还没有任何训练计划。' : '还没有可见的训练计划。'}</div>
         <div className="muted">
-          加入班级或团队后，教练/队长发布的训练计划会显示在这里。
+          {isPlatformManager
+            ? '全平台班级/团队发布的训练计划都会显示在这里。'
+            : '加入班级或团队后，教练/队长发布的训练计划会显示在这里。'}
           {groups.length > 0 ? '你也可以直接创建训练计划。' : ''}
         </div>
       </div>
@@ -207,7 +212,7 @@ export function TrainingPlansPage() {
 
       <Card
         className="oij-card"
-        title="我的训练计划"
+        title={isPlatformManager ? '全部训练计划' : '我的训练计划'}
         extra={
           <Space wrap size={12}>
             <span className="muted">共 {plans.length} 个</span>
