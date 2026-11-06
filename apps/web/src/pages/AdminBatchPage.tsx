@@ -224,8 +224,6 @@ function describeBatchError(error: unknown): string {
         return '创建合成学生失败，请检查用户名冲突。';
       case 'SUBMIT_FAILED':
         return `创建提交失败：${error.message}`;
-      case 'UNSAFE_PATH':
-        return `zip 内含不安全路径：${error.message}`;
       case 'BAD_REQUEST':
         return '请求参数有误';
       default:
