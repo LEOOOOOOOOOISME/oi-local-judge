@@ -2,7 +2,7 @@
 
 最后更新：2026-11-06  
 当前分支：`feat/1.1-stability-authoring`  
-当前 HEAD：`e7c7ee5 merge: batch resume and problem picker`  
+当前 HEAD：`4737e29 merge: NSIS installer build and install smoke`  
 当前 Release：`v1.1.0-rc.6`
 
 ---
@@ -388,15 +388,26 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - 复用 `StatisticsChart` ECharts 组件
 - 尚未做训练统计图表
 
+### 已完成 S2/S3
+
+- 5000+ 服务端分页：
+  - `/official-ranking/page?offset&limit&query`
+  - 默认 100，上限 500
+  - 用户名/姓名/班级搜索
+  - 前端成绩表服务端分页
+  - 打印 results 仍用完整榜
+- 班级统计复用：
+  - 教练工作台“薄弱标签掌握率”图
+- 训练统计复用：
+  - 训练计划成员完成度图
+
 ### 未完成 S2/S3
 
-- 5000+ 真正的服务端分页
-- 班级统计复用
-- 训练统计复用
 - ECharts render 完成栅栏
 - 完整浏览器 E2E（统计页/打印页）
 - 性能实测（1505 首屏 <1s、60fps）
 - 隐藏选手团队聚合严格排除
+- 搜索未覆盖排名/分数/题号
 
 ## 3.6 运维 / 部署 / 发布
 
@@ -443,13 +454,14 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 当前验证：
 
-- `npx vitest run --maxWorkers=2`：**110 文件 / 1001 用例通过**
+- `npx vitest run --maxWorkers=2`：**110 文件 / 1007 用例通过**
 - `npm run build`：通过
 - `npm run web:build`：通过
 - 浏览器 E2E：2 passed（主流程 + 建班/学生访问）
 - 子代理统计页烟测：图表/分析/虚拟表/搜索通过
 - Windows deploy：PowerShell 语法解析通过；`install.ps1 -DryRun` 退出码 0
 - Electron packaged smoke：PASS（window/server/health/LAN/web）
+- NSIS 安装态 smoke：PASS（安装/启动/health/LAN/卸载）
 
 ---
 
@@ -630,11 +642,17 @@ Low IL 进程无法写 `%APPDATA%\OiJudge` → Electron 单实例锁/缓存 Acce
 
 ## 4.7 运维 / 发布
 
-- [ ] Windows 服务化（当前只有托盘/自启）
+- [x] NSIS 安装包实际构建：
+  - `OiJudge-Setup-1.1.0-rc.6.exe` 241.1 MB
+  - 静默安装/卸载实测
+  - 安装态 smoke PASS
+- [x] 安装包完整性规范化（Medium IL）
+- [ ] 安装包签名（当前 NotSigned，SmartScreen 可能提示）
+- [ ] 自定义图标
+- [ ] 首次冷启动超时 60s 偏低，建议 120s
+- [ ] Windows 服务化（当前只托盘/启动项/脚本）
 - [ ] 自动下载/安装升级（当前检查 + 手动安装）
 - [ ] 升级失败回滚
-- [ ] 安装器签名
-- [ ] 自定义图标
 - [ ] v1.1.0-rc.7 发布
 - [ ] 4C/8G 目标机验收
 - [ ] 生产环境自动备份异地/SMB

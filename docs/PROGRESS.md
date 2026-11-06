@@ -2,6 +2,81 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-06 / Round 146（统计分页 + NSIS 安装包 + 训练图表）
+
+### 团队
+
+- `batch-exporter`：task-5 统计 5000+ 服务端分页
+- `electron-fixer`：task-6 NSIS 实际构建/安装态
+- Lead：训练完成度图表、auth 测试修复、集成
+
+### 本轮提交
+
+- `4737e29 merge: NSIS installer build and install smoke`
+- `fe6e3d7 build(release): produce NSIS installer and normalize its integrity`
+- `93a7d01 test: make forged-signature check deterministic`
+- `8b6ace1 merge: contest statistics server paging`
+- `f5e4a15 feat: server-side paging and search for contest statistics results`
+- `4f994e9 feat(web): chart training member completion`
+
+### 已完成
+
+1. **统计 5000+ 服务端分页**
+   - `/api/contests/:id/official-ranking/page`
+   - offset/limit/query
+   - 默认 100，上限 500
+   - 用户名/姓名/班级搜索
+   - 前端成绩表服务端分页、防抖搜索、翻页
+   - 分析 PDF/图表仍用聚合接口
+   - 打印 results 仍用完整榜
+   - 7 个新测试
+
+2. **NSIS 安装包**
+   - `OiJudge-Setup-1.1.0-rc.6.exe` 241.1 MB
+   - electron-builder 26.18.0 / NSIS 3.0.4.1
+   - 修复 `publish: []`
+   - 新增 `tools/release/build-installer.mjs`
+   - 安装包 Low IL -> Medium 规范化
+   - 静默安装 244s（Defender 扫描）
+   - 安装态 smoke PASS
+   - 静默卸载 5.8s
+   - 未签名
+
+3. **训练统计复用**
+   - 训练计划成员完成度横向条形图
+   - 复用 `StatisticsChart`
+
+4. **测试稳定性**
+   - 修复 auth forged-signature 1/64 flake：
+     - 翻转解码后的签名字节，而不是 base64url 最后字符
+   - 连续 10 次通过
+
+### 验证
+
+- `npx vitest run --maxWorkers=2`：**110 文件 / 1007 用例通过**
+- `npm run build`：通过
+- `npm run test:e2e:browser`：2 passed
+- NSIS 安装态 smoke：PASS
+- 工作树：干净
+
+### 已知限制
+
+- 安装包未签名（NotSigned，SmartScreen 提示）
+- 默认 Electron 图标
+- 首次冷启动 60s 可能不够，建议 120s
+- 统计搜索未覆盖排名/分数/题号
+- 打印 results 仍传输完整榜
+- 5000×4 压测按用户要求暂缓
+- rc.7、4C/8G 未做
+
+### 下一轮
+
+1. rc.7 发布准备
+2. 安装包签名/图标/冷启动超时
+3. 统计打印 E2E
+4. Windows 服务化
+5. 4C/8G 验收
+
 ## 2026-11-06 / Round 145（团队：附件 + 批量 resume + 班级图表）
 
 ### 团队
