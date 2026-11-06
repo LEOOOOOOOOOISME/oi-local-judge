@@ -2,6 +2,58 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-06 / Round 147（v1.1.0-rc.7 发布）
+
+### 发布
+
+- 版本：`1.1.0-rc.7`
+- Tag：`v1.1.0-rc.7`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.7
+- CI run：`42231473055` — **success**
+- 资产：
+  - `OiJudge-Setup-1.1.0-rc.7.exe` 252,538,915 B
+  - `oi-local-judge-1.1.0-rc.7-win-x64.zip` 360,004,479 B
+- prerelease：是
+
+### 发布内容
+
+- 批量 P0/P1：流式上传/预览/映射/异步/resume/失败隔离
+- 批量 CSV/矩阵/Excel/HTML 导出
+- 洛谷式 P1001 分类题号
+- 题目附件
+- 比赛统计仪表盘 + 双 PDF + 5000+ 服务端分页
+- 班级/训练统计图表
+- 团队成员/参赛资格同步、解散清理、纯团队赛报名
+- Electron 打包启动修复、NSIS 安装包、安装态 smoke
+- Windows 一键部署脚本
+- auth 测试 flake 修复
+- `.gitattributes` 强制 mjs LF
+
+### 发布说明
+
+- 已重写 `docs/releases/RELEASE_NOTES.md`
+- 包含 rc.7 新增、已有功能、升级说明、已知限制、规划
+
+### 验证
+
+- rc.7 tag 前：
+  - 110 文件 / 1007 用例通过
+  - build 通过
+  - 2 个浏览器 E2E 通过
+  - NSIS 安装态 smoke PASS
+- CI：
+  - portable + ZIP
+  - NSIS installer
+  - 自动创建 Release 并上传资产
+
+### 仍缺
+
+- 安装包签名/自定义图标
+- 冷启动超时 120s
+- 4C/8G / 5000×4 验收（压测暂缓）
+- Windows SCM 服务化
+- 统计打印 E2E
+
 ## 2026-11-06 / Round 146（统计分页 + NSIS 安装包 + 训练图表）
 
 ### 团队
