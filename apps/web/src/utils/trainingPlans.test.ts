@@ -67,6 +67,7 @@ function makePlan(overrides: Partial<TrainingPlanSummary>): TrainingPlanSummary 
     groupId: 1,
     groupName: 'Class A',
     groupKind: 'class',
+    memberCount: 2,
     title: 'Plan',
     description: '',
     startsAt: null,

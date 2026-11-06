@@ -350,6 +350,76 @@ describe('training plans service', () => {
     expect(listTrainingPlans(db, { userId: carol })).toEqual([]);
   });
 
+  it('lists every plan for platform managers and only joined groups otherwise', () => {
+    const { db, admin, manager, coach, alice, carol, classId } = setup();
+    const classPlan = createPlan(db, {
+      groupId: classId,
+      actorId: coach,
+      title: 'Class plan',
+    });
+    // A team that neither the admin nor the contest manager belongs to.
+    const teamId = createTeam(db, { name: 'Team A', ownerId: alice });
+    addTeamMember(db, { teamId, actorId: alice, username: 'bob' });
+    const teamPlan = createPlan(db, { groupId: teamId, actorId: alice, title: 'Team plan' });
+
+    const asAdmin = listTrainingPlans(db, { userId: admin, canManageAnyGroup: true });
+    expect(asAdmin.map((plan) => plan.id).sort()).toEqual([classPlan, teamPlan].sort());
+    expect(asAdmin.every((plan) => plan.canManage)).toBe(true);
+    const adminTeamPlan = asAdmin.find((plan) => plan.id === teamPlan)!;
+    expect(adminTeamPlan).toMatchObject({
+      groupId: teamId,
+      groupName: 'Team A',
+      groupKind: 'team',
+      memberCount: 2,
+      canManage: true,
+    });
+    expect(asAdmin.find((plan) => plan.id === classPlan)).toMatchObject({
+      groupName: 'Class A',
+      groupKind: 'class',
+      memberCount: 4,
+    });
+    // The detail DTO carries the same group metadata.
+    expect(
+      getTrainingPlan(db, { planId: teamPlan, userId: admin, canManageAnyGroup: true }),
+    ).toMatchObject({ groupName: 'Team A', groupKind: 'team', memberCount: 2 });
+
+    const asManager = listTrainingPlans(db, { userId: manager, canManageAnyGroup: true });
+    expect(asManager.map((plan) => plan.id).sort()).toEqual([classPlan, teamPlan].sort());
+    expect(asManager.find((plan) => plan.id === teamPlan)?.canManage).toBe(true);
+
+    // An explicit mine scope restricts a manager to the groups they belong to.
+    expect(
+      listTrainingPlans(db, { userId: manager, canManageAnyGroup: true, scope: 'mine' }).map(
+        (plan) => plan.id,
+      ),
+    ).toEqual([classPlan]);
+    expect(
+      listTrainingPlans(db, { userId: admin, canManageAnyGroup: true, scope: 'mine' }),
+    ).toEqual([]);
+
+    // Ordinary users keep the "groups I joined" list and cannot request all.
+    expect(
+      listTrainingPlans(db, { userId: alice })
+        .map((plan) => plan.id)
+        .sort(),
+    ).toEqual([classPlan, teamPlan].sort());
+    expect(listTrainingPlans(db, { userId: carol })).toEqual([]);
+    expectPlanError(
+      () => listTrainingPlans(db, { userId: alice, scope: 'all' }),
+      'TRAINING_PLAN_SCOPE_FORBIDDEN',
+      403,
+    );
+  });
+
+  it('returns an empty list for managers when no plan exists', () => {
+    const { db, admin, manager } = setup();
+    expect(listTrainingPlans(db, { userId: admin, canManageAnyGroup: true })).toEqual([]);
+    expect(listTrainingPlans(db, { userId: manager, canManageAnyGroup: true })).toEqual([]);
+    expect(
+      listTrainingPlans(db, { userId: admin, canManageAnyGroup: true, scope: 'mine' }),
+    ).toEqual([]);
+  });
+
   it('computes AC progress and ignores unfinished or hacked submissions', () => {
     const { db, coach, alice, bob, classId, problems } = setup();
     const planId = createPlan(db, {

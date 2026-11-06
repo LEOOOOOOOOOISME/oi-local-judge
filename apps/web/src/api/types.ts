@@ -1984,6 +1984,8 @@ export interface TrainingPlanSummary {
   groupId: number;
   groupName: string;
   groupKind: TrainingPlanGroupKind;
+  /** 目标班级/团队的成员数。 */
+  memberCount: number;
   title: string;
   description: string;
   startsAt: number | null;
