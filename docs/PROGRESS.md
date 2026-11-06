@@ -2,6 +2,75 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-06 / Round 144（智能体团队：Electron P0 + 批量导出）
+
+### 团队
+
+- 固定 teammate `electron-fixer`：task-1
+- 固定 teammate `batch-exporter`：task-2
+- Lead：集成、验收、合并
+
+### 本轮提交
+
+- `e0c18e7 chore: force LF for Node ESM and regenerate help docs`
+- `ada7423 merge: fix packaged Electron startup`
+- `7799fc8 merge: batch Excel/HTML export and matrix`
+- `7488e97 fix(desktop): unblock packaged startup and make failures visible`
+- `0b0cb09 feat: stream batch result exports with student-problem matrix`
+
+### Electron P0 根因/修复
+
+根因：
+
+- release 产物继承 Low integrity 标签
+- Low IL 无法写 `%APPDATA%\OiJudge`
+- `requestSingleInstanceLock()` false
+- 旧 main.ts 当作已有实例静默 `app.quit()`
+
+修复：
+
+- build-portable 规范化 Medium 完整性 + 必需文件校验
+- main.ts 启动日志/userData 可写性/单实例失败日志/server stdio pipe/超时 60s
+- `tools/electron-smoke.mjs`
+- `npm run smoke:desktop` / `smoke:desktop:dev`
+
+验证：
+
+- packaged smoke PASS：window/server/health 200/LAN 200/web 200
+- 打包态窗口 `OiJudge · 本地 OI 评测`、tray、server、health 200
+
+### 批量导出
+
+- `GET /api/admin/batch/:id/export?format=csv|xlsx|html`
+- 长表 10 列
+- CSV RFC4180 + BOM
+- 学生×题目矩阵：CSV(matrix=1)/XLSX 第二 sheet/HTML
+- HTML 自包含、可打印、自动分析摘要
+- 5000 行 keyset 500/页、逐行 chunk
+- 前端 4 个按钮
+
+### 额外修复
+
+- `.gitattributes` 强制 `.mjs/.cjs` LF，解决 Windows CRLF shebang 导致 Vite/release 测试失败
+- 重新生成 help docs
+
+### 验证
+
+- `npm test`：**107 文件 / 977 用例通过**
+- `npm run build`：通过
+- `npm run test:e2e:browser`：2 passed
+- packaged Electron smoke：PASS
+- 工作树：干净
+
+### 仍缺
+
+- 5000×4 压力测试
+- 导入 resume
+- 题目搜索后端 scope
+- 统计 5000+ 服务端分页、班级/训练复用
+- 题目附件
+- NSIS 实际构建、rc.7、4C/8G
+
 ## 2026-11-06 / Round 143（人工验收阻塞登记）
 
 ### 人工报告问题（未修复）
