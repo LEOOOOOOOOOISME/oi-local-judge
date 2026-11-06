@@ -35,6 +35,7 @@ import {
   getOfficialRanking,
   getOfficialRankingVersion,
   invalidateOfficialRanking,
+  pageOfficialRanking,
 } from '../services/official-ranking.js';
 import { getContestStatistics } from '../services/contest-statistics.js';
 import { buildContestReport, contestReportToCsv } from '../services/contest-report.js';
@@ -213,6 +214,56 @@ function sendAwardScopeError(reply: FastifyReply, err: unknown): FastifyReply {
 }
 
 export function registerContestRoutes(app: FastifyInstance, options: ContestRouteOptions): void {
+  type OfficialRankingQuery = {
+    includeHidden?: string;
+    offset?: string;
+    limit?: string;
+    query?: string;
+    complete?: string;
+  };
+
+  /**
+   * The official-ranking endpoint keeps returning the complete ranking when no
+   * paging/search parameter is present. `offset`/`limit`/`query` switch it (and
+   * the dedicated `/page` alias) to a paged envelope whose rows never include
+   * the full `rows` array. `complete=1` forces the old complete response.
+   */
+  async function handleOfficialRanking(
+    request: FastifyRequest<{ Params: { id: string }; Querystring: OfficialRankingQuery }>,
+    reply: FastifyReply,
+    forcePage: boolean,
+  ) {
+    const parsed = readIncludeHidden(request.query?.includeHidden);
+    if (!parsed.ok) return invalidIncludeHidden(reply);
+    if (parsed.value && !canIncludeHidden(request, options)) {
+      return forbiddenIncludedHidden(reply);
+    }
+    const contestId = Number(request.params.id);
+    const dataDir = options.config?.dataDir ?? process.cwd();
+    const ranking = parsed.value
+      ? await computeOfficialRanking(
+          options.db,
+          contestId,
+          dataDir,
+          getOfficialRankingVersion(options.db, contestId),
+          { includeHidden: true },
+        )
+      : await getOfficialRanking(options.db, contestId, dataDir);
+    if (!ranking) {
+      return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    }
+    const wantsPage =
+      forcePage ||
+      (request.query.complete !== '1' &&
+        (request.query.offset !== undefined ||
+          request.query.limit !== undefined ||
+          request.query.query !== undefined));
+    if (!wantsPage) return { ok: true, data: ranking };
+    const { rows, ...meta } = ranking;
+    void rows;
+    return { ok: true, data: { ...meta, ...pageOfficialRanking(ranking.rows, request.query) } };
+  }
+
   app.get('/api/contests', async () => ({
     ok: true,
     data: listContestDtos(options.db),
@@ -236,31 +287,30 @@ export function registerContestRoutes(app: FastifyInstance, options: ContestRout
 
   app.get<{
     Params: { id: string };
-    Querystring: { includeHidden?: string };
+    Querystring: {
+      includeHidden?: string;
+      offset?: string;
+      limit?: string;
+      query?: string;
+      complete?: string;
+    };
   }>(
     '/api/contests/:id/official-ranking',
-    async (request, reply) => {
-      const parsed = readIncludeHidden(request.query?.includeHidden);
-      if (!parsed.ok) return invalidIncludeHidden(reply);
-      if (parsed.value && !canIncludeHidden(request, options)) {
-        return forbiddenIncludedHidden(reply);
-      }
-      const contestId = Number(request.params.id);
-      const dataDir = options.config?.dataDir ?? process.cwd();
-      const ranking = parsed.value
-        ? await computeOfficialRanking(
-            options.db,
-            contestId,
-            dataDir,
-            getOfficialRankingVersion(options.db, contestId),
-            { includeHidden: true },
-          )
-        : await getOfficialRanking(options.db, contestId, dataDir);
-      if (!ranking) {
-        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
-      }
-      return { ok: true, data: ranking };
-    },
+    async (request, reply) => handleOfficialRanking(request, reply, false),
+  );
+
+  app.get<{
+    Params: { id: string };
+    Querystring: {
+      includeHidden?: string;
+      offset?: string;
+      limit?: string;
+      query?: string;
+      complete?: string;
+    };
+  }>(
+    '/api/contests/:id/official-ranking/page',
+    async (request, reply) => handleOfficialRanking(request, reply, true),
   );
 
   app.get<{

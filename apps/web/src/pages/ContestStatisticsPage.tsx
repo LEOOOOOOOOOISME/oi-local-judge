@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Alert,
   Button,
@@ -9,7 +9,6 @@ import {
   Input,
   Row,
   Space,
-  Spin,
   Statistic,
   Table,
   Tag,
@@ -17,7 +16,7 @@ import {
 import type { TableColumnsType } from 'antd';
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type { EChartsCoreOption } from 'echarts/core';
 import type {
   ContestStatistics,
@@ -30,17 +29,18 @@ import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { StatisticsChart } from '../components/StatisticsChart';
 import { fetchContestStatistics } from '../utils/contestStatistics';
-import { fetchOfficialRanking, presetLabel } from '../utils/officialRanking';
 import {
-  RESULTS_SERVER_PAGING_THRESHOLD,
-  RESULTS_TABLE_PREVIEW_LIMIT,
+  fetchOfficialRanking,
+  fetchOfficialRankingPage,
+  presetLabel,
+} from '../utils/officialRanking';
+import {
   buildKpiItems,
   buildRingData,
   cleanInsights,
   distributionCumulativeRatios,
   distributionLabel,
   formatMetric,
-  planResultsRows,
   statisticsModeLabel,
 } from '../utils/statistics';
 import { contestModeLabel, problemLetter } from '../utils/status';
@@ -427,29 +427,39 @@ function PrintResultsTable({
 
 function ResultsTable({
   rows,
+  total,
+  page,
+  pageSize,
+  search,
   problems,
   mode,
   loading,
   error,
   onRetry,
+  onPageChange,
+  onSearchChange,
 }: {
   rows: OfficialRankingRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  search: string;
   problems: ContestStatisticsProblem[];
   mode: ContestStatisticsMode;
   loading: boolean;
   error: unknown;
   onRetry: () => void;
+  onPageChange: (page: number, pageSize: number) => void;
+  onSearchChange: (query: string) => void;
 }) {
-  const [searchInput, setSearchInput] = useState('');
-  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState(search);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => setSearch(searchInput), 200);
+    const timer = window.setTimeout(() => onSearchChange(searchInput), 250);
     return () => window.clearTimeout(timer);
-  }, [searchInput]);
+  }, [searchInput, onSearchChange]);
 
-  const plan = useMemo(() => planResultsRows(rows, search), [rows, search]);
-  // AntD 虚拟表格要求 scroll.x / scroll.y 都是数字；按列宽估算总宽度。
+  // AntD 表格要求 scroll.x 是数字；按列宽估算总宽度。
   const scrollX = 70 + 180 + 110 + 96 + problems.length * 100 + (mode === 'solved' ? 84 : 0);
 
   const columns = useMemo<TableColumnsType<OfficialRankingRow>>(() => {
@@ -534,22 +544,8 @@ function ResultsTable({
     return [...base, ...problemColumns, ...trailing];
   }, [problems, mode]);
 
-  if (loading) {
-    return (
-      <div className="inline-loading">
-        <Spin />
-      </div>
-    );
-  }
-  if (error) {
-    return <ErrorResult error={error} onRetry={onRetry} />;
-  }
-  if (rows.length === 0) {
-    return <Empty description="暂无参赛者" />;
-  }
-
   return (
-    <>
+    <div>
       <div className="statistics-results-toolbar">
         <Input.Search
           allowClear
@@ -559,29 +555,33 @@ function ResultsTable({
           style={{ width: 260 }}
         />
         <span className="muted">
-          共 {plan.total} 人{plan.truncated ? `，当前展示前 ${plan.rows.length} 人` : ''}
+          共 {total} 人{search ? `（搜索：${search}）` : ''}
         </span>
       </div>
-      {plan.serverPaging ? (
-        <Alert
-          className="statistics-paging-alert"
-          type="warning"
-          showIcon
-          message={`参赛人数 ${plan.total} 超过 ${RESULTS_SERVER_PAGING_THRESHOLD}，成绩表仅展示前 ${RESULTS_TABLE_PREVIEW_LIMIT} 名。`}
-          description="完整成绩请使用“导出个人成绩 PDF”或正式榜 CSV；服务端分页将在后续版本接入。"
+      {error ? (
+        <ErrorResult error={error} onRetry={onRetry} />
+      ) : (
+        <Table<OfficialRankingRow>
+          className="oij-table rank-table statistics-results-table"
+          rowKey="userId"
+          size="small"
+          loading={loading}
+          columns={columns}
+          dataSource={rows}
+          pagination={{
+            current: page,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            pageSizeOptions: ['50', '100', '200', '500'],
+            showTotal: (count, range) => `${range[0]}-${range[1]} / 共 ${count} 人`,
+            onChange: (nextPage, nextPageSize) => onPageChange(nextPage, nextPageSize),
+          }}
+          scroll={{ x: scrollX }}
+          locale={{ emptyText: search ? '没有匹配的选手' : '暂无参赛者' }}
         />
-      ) : null}
-      <Table<OfficialRankingRow>
-        className="oij-table rank-table statistics-results-table"
-        rowKey="userId"
-        size="small"
-        virtual
-        columns={columns}
-        dataSource={plan.rows}
-        pagination={false}
-        scroll={{ x: scrollX, y: 520 }}
-      />
-    </>
+      )}
+    </div>
   );
 }
 
@@ -596,12 +596,31 @@ export function ContestStatisticsPage() {
   const wantsHidden = searchParams.get('includeHidden') === '1';
   const authResolved = authStatus !== 'loading';
   const includeHidden = canManage && wantsHidden;
+  const [rankingPage, setRankingPage] = useState(1);
+  const [rankingPageSize, setRankingPageSize] = useState(100);
+  const [rankingSearch, setRankingSearch] = useState('');
   const setIncludeHidden = (next: boolean) => {
     const params = new URLSearchParams(searchParams);
     if (next) params.set('includeHidden', '1');
     else params.delete('includeHidden');
     setSearchParams(params, { replace: true });
+    setRankingPage(1);
   };
+  const handleRankingSearch = useCallback((query: string) => {
+    setRankingSearch(query);
+    setRankingPage(1);
+  }, []);
+  const handleRankingPage = useCallback(
+    (nextPage: number, nextPageSize: number) => {
+      if (nextPageSize !== rankingPageSize) {
+        setRankingPageSize(nextPageSize);
+        setRankingPage(1);
+      } else {
+        setRankingPage(nextPage);
+      }
+    },
+    [rankingPageSize],
+  );
 
   const statsQuery = useQuery({
     queryKey: ['contest-statistics', contestId, includeHidden],
@@ -611,20 +630,46 @@ export function ContestStatisticsPage() {
     staleTime: 5_000,
     retry: false,
   });
-  // 分析 PDF 不需要成绩行；屏幕表格与个人成绩 PDF 才加载正式榜。
-  const rankingQuery = useQuery({
+  // 打印个人成绩需要完整正式榜；屏幕成绩表走服务端分页，只取当前页。
+  const completeRankingQuery = useQuery({
     queryKey: ['official-ranking', contestId, includeHidden],
     queryFn: () => fetchOfficialRanking(contestId, includeHidden),
     enabled:
       validId &&
-      printMode !== 'analysis' &&
+      printMode === 'results' &&
       (!wantsHidden || authResolved),
     staleTime: 5_000,
     retry: false,
   });
+  const rankingPageQuery = useQuery({
+    queryKey: [
+      'official-ranking-page',
+      contestId,
+      includeHidden,
+      rankingPage,
+      rankingPageSize,
+      rankingSearch,
+    ],
+    queryFn: () =>
+      fetchOfficialRankingPage(
+        contestId,
+        {
+          offset: (rankingPage - 1) * rankingPageSize,
+          limit: rankingPageSize,
+          query: rankingSearch,
+        },
+        includeHidden,
+      ),
+    enabled: validId && printMode === null && (!wantsHidden || authResolved),
+    staleTime: 5_000,
+    retry: false,
+    placeholderData: keepPreviousData,
+  });
 
   const stats = statsQuery.data;
-  const rows = rankingQuery.data?.rows ?? [];
+  const printRows = completeRankingQuery.data?.rows ?? [];
+  const pageRows = rankingPageQuery.data?.items ?? [];
+  const pageTotal = rankingPageQuery.data?.total ?? 0;
   const problems = stats?.problems ?? [];
 
   useEffect(() => {
@@ -649,12 +694,12 @@ export function ContestStatisticsPage() {
     return () => window.clearTimeout(timer);
   }, [printMode, statsQuery.isSuccess, statsQuery.dataUpdatedAt]);
 
-  // 打印个人成绩：等正式榜（含隐藏选项）加载完成后打印。
+  // 打印个人成绩：等完整正式榜（含隐藏选项）加载完成后打印。
   useEffect(() => {
-    if (printMode !== 'results' || !rankingQuery.isSuccess) return undefined;
+    if (printMode !== 'results' || !completeRankingQuery.isSuccess) return undefined;
     const timer = window.setTimeout(() => window.print(), 400);
     return () => window.clearTimeout(timer);
-  }, [printMode, rankingQuery.isSuccess, rankingQuery.dataUpdatedAt]);
+  }, [printMode, completeRankingQuery.isSuccess, completeRankingQuery.dataUpdatedAt]);
 
   const openPrint = (kind: 'analysis' | 'results') => {
     const params = new URLSearchParams({ print: kind });
@@ -680,20 +725,23 @@ export function ContestStatisticsPage() {
   }
 
   if (printMode === 'results') {
-    if (rankingQuery.isError) {
+    if (completeRankingQuery.isError) {
       return (
-        <ErrorResult error={rankingQuery.error} onRetry={() => void rankingQuery.refetch()} />
+        <ErrorResult
+          error={completeRankingQuery.error}
+          onRetry={() => void completeRankingQuery.refetch()}
+        />
       );
     }
-    if (rankingQuery.isPending) {
+    if (completeRankingQuery.isPending) {
       return <PageLoading tip="正在加载个人成绩…" />;
     }
     return (
       <div className="statistics-page statistics-print-page">
         <PrintHeader stats={stats} />
-        <PrintResultsTable rows={rows} problems={problems} mode={stats.mode} />
+        <PrintResultsTable rows={printRows} problems={problems} mode={stats.mode} />
         <div className="statistics-print-footer">
-          共 {rows.length} 名{stats.includeHidden ? '可见及隐藏' : '可见'}参赛者 · 正式榜口径
+          共 {printRows.length} 名{stats.includeHidden ? '可见及隐藏' : '可见'}参赛者 · 正式榜口径
         </div>
       </div>
     );
@@ -746,10 +794,16 @@ export function ContestStatisticsPage() {
             ) : null}
             <Button
               icon={<ReloadOutlined />}
-              loading={statsQuery.isFetching || rankingQuery.isFetching}
+              loading={
+                statsQuery.isFetching ||
+                (printMode === 'results'
+                  ? completeRankingQuery.isFetching
+                  : rankingPageQuery.isFetching)
+              }
               onClick={() => {
                 void statsQuery.refetch();
-                void rankingQuery.refetch();
+                if (printMode === 'results') void completeRankingQuery.refetch();
+                else if (printMode === null) void rankingPageQuery.refetch();
               }}
             >
               刷新
@@ -781,12 +835,18 @@ export function ContestStatisticsPage() {
 
       <Card className="oij-card statistics-results-card" title="个人成绩">
         <ResultsTable
-          rows={rows}
+          rows={pageRows}
+          total={pageTotal}
+          page={rankingPage}
+          pageSize={rankingPageSize}
+          search={rankingSearch}
           problems={problems}
           mode={stats.mode}
-          loading={rankingQuery.isPending}
-          error={rankingQuery.error}
-          onRetry={() => void rankingQuery.refetch()}
+          loading={rankingPageQuery.isPending || rankingPageQuery.isFetching}
+          error={rankingPageQuery.error}
+          onRetry={() => void rankingPageQuery.refetch()}
+          onPageChange={handleRankingPage}
+          onSearchChange={handleRankingSearch}
         />
       </Card>
     </div>
