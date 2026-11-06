@@ -63,6 +63,20 @@ CREATE TABLE IF NOT EXISTS problem_assets(
   UNIQUE(problem_id, kind),
   FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
 );
+CREATE TABLE IF NOT EXISTS problem_attachments(
+  id INTEGER PRIMARY KEY,
+  problem_id INTEGER NOT NULL,
+  filename TEXT NOT NULL,
+  storage_path TEXT NOT NULL,
+  size INTEGER NOT NULL,
+  mime TEXT NOT NULL,
+  visibility TEXT NOT NULL DEFAULT 'problem',
+  created_by INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  FOREIGN KEY(problem_id) REFERENCES problems(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_problem_attachments_problem
+  ON problem_attachments(problem_id, id);
 CREATE TABLE IF NOT EXISTS submissions(
   id INTEGER PRIMARY KEY, contest_id INTEGER, problem_id INTEGER NOT NULL,
   user_id INTEGER NOT NULL, team_id INTEGER, language TEXT NOT NULL, source_path TEXT NOT NULL,
