@@ -2,6 +2,70 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-06 / Round 145（团队：附件 + 批量 resume + 班级图表）
+
+### 团队
+
+- `electron-fixer`：task-4 题目附件
+- `batch-exporter`：task-3 批量 resume + picker
+- Lead：班级薄弱标签图表、集成
+
+### 本轮提交
+
+- `e7c7ee5 merge: batch resume and problem picker`
+- `26af62e merge: problem attachments`
+- `9b4459a feat(web): chart class weak-tag mastery`
+- `8a296e0 feat: resume interrupted batch imports and add problem picker scope`
+- `f249c71 feat(problems): add problem attachment upload and download`
+
+### 已完成
+
+1. **题目附件**
+   - `problem_attachments` 表 + 索引
+   - PDF/图片/ZIP，50 MiB
+   - UUID 落盘，storage_path 不对外
+   - visibility=problem|admin
+   - POST/GET/DELETE/下载；replace
+   - 管理端附件 Tab、题目页附件 Tab
+   - 12 个测试
+
+2. **批量导入 resume + picker**
+   - 启动时恢复 importing 任务，不再直接 failed
+   - 跳过已导入/已失败项，chunk 事务幂等
+   - upload/zip 丢失 -> `BATCH_RESUME_UPLOAD_MISSING`
+   - `GET /api/admin/problems/picker?scope=personal|team|public|all`
+   - 标题/displayId/标签/数字 id 搜索
+   - 批量映射 UI 接入
+   - 12 个测试
+
+3. **班级统计复用**
+   - 教练工作台新增“薄弱标签掌握率”横向条形图
+   - 复用 ECharts `StatisticsChart`
+
+### 验证
+
+- `npx vitest run --maxWorkers=2`：**110 文件 / 1001 用例通过**
+- `npm run build`：通过
+- `npm run test:e2e:browser`：2 passed
+- 工作树：干净
+
+### 已知限制
+
+- 附件 50 MiB 仍内存缓冲
+- 删除题目不清理附件文件
+- picker 上限 500
+- 批量 resume 不重试已记录失败项
+- 统计 5000+ 服务端分页、训练图表未做
+- 用户明确暂不做压测
+
+### 下一轮
+
+1. 班级/训练统计更多图表
+2. 统计 5000+ 服务端分页
+3. NSIS 实际构建
+4. rc.7
+5. 附件流式/清理
+
 ## 2026-11-06 / Round 144（智能体团队：Electron P0 + 批量导出）
 
 ### 团队

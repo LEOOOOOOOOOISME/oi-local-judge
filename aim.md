@@ -2,7 +2,7 @@
 
 最后更新：2026-11-06  
 当前分支：`feat/1.1-stability-authoring`  
-当前 HEAD：`e0c18e7 chore: force LF for Node ESM and regenerate help docs`  
+当前 HEAD：`e7c7ee5 merge: batch resume and problem picker`  
 当前 Release：`v1.1.0-rc.6`
 
 ---
@@ -318,11 +318,31 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - 5000 行 keyset 500/页、逐行 chunk
 - 前端 4 个按钮：CSV / 矩阵 CSV / Excel / HTML
 
+### 已完成 P1 收尾
+
+- 导入恢复：
+  - `recoverInterruptedBatchImports`
+  - 跳过已导入/已失败项
+  - chunk 事务幂等
+  - upload/zip 丢失 -> `BATCH_RESUME_UPLOAD_MISSING`
+- 题目搜索：
+  - `GET /api/admin/problems/picker?scope=personal|team|public|all`
+  - 标题/displayId/标签/数字 id 搜索
+  - limit 200/500
+  - 批量映射 UI 接入
+- 附件：
+  - 50 MiB
+  - PDF/图片/ZIP
+  - 题目可见即可下载
+  - 管理员/出题人上传/删除/替换
+  - 不暴露 storage_path
+  - 前端管理 Tab + 题目附件 Tab
+
 ### 未完成 P1
 
-- 5000×4 压力验收
-- 导入恢复（resume）
-- 题目搜索的真正后端 scope 接口（当前前端过滤/limit 500）
+- 5000×4 压力验收（用户明确暂不做）
+- 附件 50 MiB 仍内存缓冲
+- 题目 picker 上限 500（超过 500 题时全量匹配受限）
 
 ## 3.5 统计 / UI / PDF
 
@@ -361,6 +381,12 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - `?print=analysis`
   - `?print=results`
 - 不再生成 `statistics.html`
+
+### 已开始复用
+
+- 班级教练工作台新增“薄弱标签掌握率”图
+- 复用 `StatisticsChart` ECharts 组件
+- 尚未做训练统计图表
 
 ### 未完成 S2/S3
 
@@ -417,7 +443,7 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 当前验证：
 
-- `npm test`：**107 文件 / 977 用例通过**
+- `npx vitest run --maxWorkers=2`：**110 文件 / 1001 用例通过**
 - `npm run build`：通过
 - `npm run web:build`：通过
 - 浏览器 E2E：2 passed（主流程 + 建班/学生访问）
@@ -477,16 +503,18 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - [x] 分类独立递增
 - [x] 迁移幂等
 
-## 4.4 题目附件
+## 4.4 题目附件（已完成）
 
-目前只有设计，没有实现：
-
-- [ ] `problem_attachments`
-- [ ] 上传/下载/删除/替换
-- [ ] PDF/图片/ZIP
-- [ ] 50 MB 限制
-- [ ] 题目可见即可下载
-- [ ] 不暴露真实路径
+- [x] `problem_attachments`
+- [x] 上传/下载/删除/替换
+- [x] PDF/图片/ZIP
+- [x] 50 MiB 限制
+- [x] 题目可见即可下载
+- [x] 不暴露真实路径
+- [x] 管理端附件 Tab
+- [x] 题目页附件 Tab
+- [ ] 大文件改流式
+- [ ] 删除题目时清理附件文件
 
 ## 4.5 统计 / UI
 
