@@ -774,6 +774,20 @@ export interface ProblemAsset {
   updated_at: number;
 }
 
+export type AttachmentVisibility = 'problem' | 'admin';
+
+/** 题目附件（题目可见即可下载；admin 仅作者/管理员可见）。 */
+export interface ProblemAttachment {
+  id: number;
+  problemId: number;
+  filename: string;
+  size: number;
+  mime: string;
+  visibility: AttachmentVisibility;
+  createdAt: number;
+  downloadUrl: string;
+}
+
 export interface ProblemAssetSource extends ProblemAsset {
   source: string;
 }

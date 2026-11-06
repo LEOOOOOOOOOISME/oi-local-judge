@@ -27,6 +27,15 @@ import {
 } from '../storage/repos/problems.js';
 import { ProblemNumberingError } from '../storage/repos/problem-categories.js';
 import {
+  ATTACHMENT_BODY_LIMIT,
+  AttachmentError,
+  deleteProblemAttachmentRecord,
+  getProblemAttachmentRow,
+  listProblemAttachmentDtos,
+  saveProblemAttachment,
+} from '../services/attachments.js';
+import { canEditProblem } from '../services/problem-acl.js';
+import {
   createProblemWithOwner,
   getProblemDetail,
   importProblemDirectory,
@@ -67,6 +76,15 @@ function sendOwnerError(reply: FastifyReply, err: unknown): FastifyReply {
       .send({ ok: false, error: { code: err.code, message: err.message } });
   }
   if (err instanceof ProblemNumberingError) {
+    return reply
+      .code(err.status)
+      .send({ ok: false, error: { code: err.code, message: err.message } });
+  }
+  throw err;
+}
+
+function sendAttachmentError(reply: FastifyReply, err: unknown): FastifyReply {
+  if (err instanceof AttachmentError) {
     return reply
       .code(err.status)
       .send({ ok: false, error: { code: err.code, message: err.message } });
@@ -442,6 +460,127 @@ export function registerAdminProblemRoutes(
       ok: true,
       data: listAssets(options.db, Number(request.params.id)),
     }),
+  );
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/problems/:id/attachments',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      if (!Number.isInteger(problemId) || problemId <= 0) {
+        return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
+      }
+      const problem = getProblem(options.db, problemId);
+      if (!problem) {
+        return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
+      }
+      const user = request.user!;
+      const includeAdmin = canEditProblem(options.db, problem, {
+        userId: user.id,
+        isAdmin: user.role === 'admin',
+      });
+      return {
+        ok: true,
+        data: listProblemAttachmentDtos(options.db, problemId, { includeAdmin }),
+      };
+    },
+  );
+
+  app.post<{
+    Params: { id: string };
+    Querystring: { name?: string; visibility?: string; replace?: string };
+  }>(
+    '/api/admin/problems/:id/attachments',
+    { preHandler: guard, bodyLimit: ATTACHMENT_BODY_LIMIT },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      if (!Number.isInteger(problemId) || problemId <= 0) {
+        return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
+      }
+      const problem = getProblem(options.db, problemId);
+      if (!problem) {
+        return reply.code(404).send({ ok: false, error: { code: 'PROBLEM_NOT_FOUND' } });
+      }
+      const user = request.user!;
+      const canEdit = canEditProblem(options.db, problem, {
+        userId: user.id,
+        isAdmin: user.role === 'admin',
+      });
+      if (!canEdit) {
+        return reply.code(403).send({
+          ok: false,
+          error: {
+            code: 'FORBIDDEN',
+            message: 'only the owner, team captain or an admin can manage attachments',
+          },
+        });
+      }
+
+      let replaceId: number | undefined;
+      if (request.query.replace !== undefined && request.query.replace !== '') {
+        replaceId = Number(request.query.replace);
+        if (!Number.isInteger(replaceId) || replaceId <= 0) {
+          return reply.code(400).send({
+            ok: false,
+            error: { code: 'BAD_REQUEST', message: 'replace must be an attachment id' },
+          });
+        }
+      }
+
+      const body = request.body;
+      if (!Buffer.isBuffer(body)) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'EMPTY_BODY', message: 'expected a raw file body' },
+        });
+      }
+      try {
+        const dto = saveProblemAttachment(options.db, options.config, {
+          problemId,
+          filename: request.query.name,
+          visibility: request.query.visibility,
+          data: body,
+          createdBy: user.id,
+          replaceId,
+        });
+        return reply.code(replaceId === undefined ? 201 : 200).send({ ok: true, data: dto });
+      } catch (err) {
+        return sendAttachmentError(reply, err);
+      }
+    },
+  );
+
+  app.delete<{ Params: { id: string; attachmentId: string } }>(
+    '/api/admin/problems/:id/attachments/:attachmentId',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      const attachmentId = Number(request.params.attachmentId);
+      const problem = Number.isInteger(problemId) ? getProblem(options.db, problemId) : null;
+      if (!problem || !Number.isInteger(attachmentId)) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      const user = request.user!;
+      const canEdit = canEditProblem(options.db, problem, {
+        userId: user.id,
+        isAdmin: user.role === 'admin',
+      });
+      if (!canEdit) {
+        return reply.code(403).send({
+          ok: false,
+          error: {
+            code: 'FORBIDDEN',
+            message: 'only the owner, team captain or an admin can manage attachments',
+          },
+        });
+      }
+      const row = getProblemAttachmentRow(options.db, attachmentId);
+      if (!row || row.problem_id !== problemId) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      deleteProblemAttachmentRecord(options.db, options.config, row);
+      return { ok: true, data: null };
+    },
   );
 
   app.put<{
