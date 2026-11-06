@@ -75,6 +75,19 @@ const REQUIRED = [
   'package-lock.json',
 ];
 
+/**
+ * Files the Electron runtime itself needs. A partially extracted or manually
+ * assembled `node_modules/electron/dist` (or a broken download) otherwise
+ * produces a portable app that dies before any app code runs.
+ */
+const ELECTRON_RUNTIME_FILES = [
+  'electron.exe',
+  'resources.pak',
+  'icudtl.dat',
+  'resources/default_app.asar',
+  'locales/en-US.pak',
+];
+
 // Packages the server needs at runtime. Checked after the copy so a broken
 // dependency resolution fails the build instead of the packaged app.
 const RUNTIME_PACKAGES = [
@@ -134,6 +147,10 @@ export function portableRequiredEntries(outName = OUT_NAME) {
   const app = `${outName}/resources/app`;
   return [
     `${outName}/OiJudge.exe`,
+    `${outName}/electron.exe`,
+    `${outName}/resources.pak`,
+    `${outName}/icudtl.dat`,
+    `${outName}/resources/default_app.asar`,
     `${outName}/启动 OiJudge.cmd`,
     `${app}/package.json`,
     `${app}/apps/desktop/dist/main.js`,
@@ -186,8 +203,10 @@ function formatSize(bytes) {
 
 function validateInputs() {
   const missing = REQUIRED.filter((rel) => !existsSync(join(SOURCE_ROOT, rel)));
-  if (!existsSync(join(ELECTRON_DIST, 'electron.exe'))) {
-    missing.push('node_modules/electron/dist/electron.exe');
+  for (const rel of ELECTRON_RUNTIME_FILES) {
+    if (!existsSync(join(ELECTRON_DIST, ...rel.split('/')))) {
+      missing.push(`node_modules/electron/dist/${rel}`);
+    }
   }
   if (missing.length > 0) {
     fail(
@@ -376,6 +395,68 @@ function checkRuntimePackages() {
   }
 }
 
+/** True when a file or directory still carries a Low mandatory integrity label. */
+function isLowIntegrity(path) {
+  try {
+    const output = execFileSync('icacls.exe', [path], { encoding: 'utf8', windowsHide: true });
+    return /Low Mandatory Level|低强制级别/i.test(output);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A build cache produced inside a sandbox (DSH, container, AppContainer) can
+ * carry `Mandatory Label\Low Mandatory Level`. cpSync/copyFile preserve that
+ * label, so the packaged OiJudge.exe would run at Low integrity: Electron then
+ * cannot create its single-instance lock or caches under %APPDATA%, and the app
+ * used to quit with no window, tray or server. Normalize the output tree to
+ * Medium before it is zipped or handed to the installer builder.
+ */
+function normalizeIntegrityLevel() {
+  if (process.platform !== 'win32') return;
+  const launcher = join(OUT_DIR, 'OiJudge.exe');
+  if (!isLowIntegrity(launcher)) {
+    log('integrity level is already Medium; nothing to normalize.');
+    return;
+  }
+
+  log('portable output inherited a Low integrity label; normalizing to Medium ...');
+  try {
+    execFileSync('icacls.exe', [OUT_DIR, '/setintegritylevel', 'Medium', '/T', '/C', '/Q'], {
+      stdio: 'inherit',
+      windowsHide: true,
+    });
+    execFileSync('icacls.exe', [OUT_DIR, '/setintegritylevel', 'Medium', '/C', '/Q'], {
+      stdio: 'inherit',
+      windowsHide: true,
+    });
+  } catch (error) {
+    fail(
+      `could not normalize the integrity level of ${OUT_DIR}: ` +
+        `${error instanceof Error ? error.message : String(error)}\n` +
+        'A Low integrity portable build cannot write its userData directory and will fail to start.',
+    );
+  }
+
+  const critical = [
+    'OiJudge.exe',
+    'electron.exe',
+    'resources/app/package.json',
+    'resources/app/apps/desktop/dist/main.js',
+    'resources/app/apps/server/dist/cli.js',
+    'resources/app/native/runner/out/ojrunner.exe',
+  ];
+  for (const rel of critical) {
+    const path = join(OUT_DIR, ...rel.split('/'));
+    if (!existsSync(path)) fail(`portable output is missing ${rel}`);
+    if (isLowIntegrity(path)) {
+      fail(`portable output ${rel} is still Low integrity after normalization`);
+    }
+  }
+  log('integrity level normalized to Medium for the portable output.');
+}
+
 /**
  * Creates the release ZIP with fflate's streaming writer. Only the central
  * directory is read back for validation, so a ~700 MB tree never has to be
@@ -458,6 +539,9 @@ function main(argv = process.argv.slice(2)) {
   copyProductionDependencies();
   copyMinGwRuntime();
   checkRuntimePackages();
+  // Must run before the directory is measured or zipped: a Low integrity label
+  // copied from a sandboxed build cache makes the packaged app unusable.
+  normalizeIntegrityLevel();
 
   const dirBytes = dirSize(OUT_DIR);
   log(`portable directory ready: ${OUT_DIR} (${formatSize(dirBytes)})`);
