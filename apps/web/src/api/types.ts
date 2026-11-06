@@ -264,6 +264,12 @@ export interface BatchRunItem {
 export type BatchImportStatus = 'imported' | 'skipped' | 'error';
 export type BatchItemStatus = SubmissionStatus | 'missing' | 'skipped' | 'error';
 
+/**
+ * GET /api/admin/batch/:id/export 的格式。
+ * `matrix` 是 CSV + `matrix=1`，导出学生×题目矩阵而不是长表。
+ */
+export type BatchExportFormat = 'csv' | 'matrix' | 'xlsx' | 'html';
+
 /** P0：逐文件导入失败/无效学生文件夹的摘要。 */
 export interface BatchFailureItem {
   id: number;
