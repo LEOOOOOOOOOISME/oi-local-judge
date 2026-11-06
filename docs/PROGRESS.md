@@ -2,6 +2,84 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-06 / Round 142（批量映射 UI + P1001 题号 + Windows 部署）
+
+### 本轮提交
+
+- `25b0699 merge: Windows one-click deploy`
+- `9a11330 merge: category-based problem numbers`
+- `ce55c6d merge: batch mapping workspace UI`
+- `baac8a9 feat(web): add batch mapping workspace`
+- `5017599 feat: add category-based problem numbers`
+- `c75d335 feat: add Windows one-click deploy scripts`
+
+### 已完成
+
+1. **批量映射工作区 UI**
+   - `/admin/batch` 改为异步链路：
+     - XHR 流式上传 + 进度 + 5 GiB 校验
+     - preview 层级/treeSample/students/problemFolders
+     - invalidStudents/duplicates/validCount
+   - 映射工作区：
+     - 每个题目文件夹一行
+     - 个人/团队/公共筛选
+     - 按选中题目顺序批量绑定
+     - 手动改映射
+     - 未映射禁止开始
+     - 学生×题目=提交数上界
+   - run 202 + 1s 轮询 + 服务端分页 + 取消 + CSV
+   - 单题目模式保留
+   - 新增 `utils/batch.ts` 31 例测试
+
+2. **洛谷式分类题号**
+   - `problem_categories`
+   - `problems.category_id/seq/display_id`
+   - 旧题按 id 升序迁 P1001…
+   - 不建 L；编号不复用
+   - 分类独立递增
+   - 管理员新增分类/手动改号
+   - `/api/problems/:idOrDisplayId` 双解析
+   - 前端列表/编辑/创建显示题号
+   - 批量文件夹接受 P1001 或数字 id
+   - 14 例测试
+
+3. **Windows 一键部署**
+   - `tools/deploy/windows/`：
+     - install/uninstall/start/stop/status
+     - 防火墙/快捷方式/HKCU 自启
+     - 数据目录保留
+     - health 等待
+   - dry-run 验证通过
+   - 文档 `docs/help/maintenance/windows-deploy.md`
+
+### 验证
+
+- 全量 `npm test`：**106 文件 / 969 用例通过**
+- `npm run build`：通过
+- `npm run test:e2e:browser`：**2 passed**
+- PowerShell 语法解析：6 个脚本通过
+- `install.ps1 -DryRun`：退出码 0，未修改机器
+- 工作树：干净
+
+### 仍缺
+
+- 批量 Excel/HTML 导出、学生×题目矩阵
+- 批量题目搜索后端 scope 接口（当前前端过滤，limit 500）
+- 5000×4 压力测试
+- 导入 resume
+- 题目附件
+- 统计 5000+ 服务端分页、班级/训练复用
+- Windows SCM 服务（当前为启动项/脚本）
+- rc.7、4C/8G 验收
+
+### 下一轮
+
+1. 题目附件
+2. 批量 Excel/HTML/矩阵导出
+3. 统计 S3
+4. 5000×4 / 4C8G 验收
+5. rc.7
+
 ## 2026-11-06 / Round 141（批量 P1 后端 + 训练列表 + E2E）
 
 ### 本轮提交

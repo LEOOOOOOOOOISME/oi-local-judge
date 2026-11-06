@@ -2,7 +2,7 @@
 
 最后更新：2026-11-06  
 当前分支：`feat/1.1-stability-authoring`  
-当前 HEAD：`db84c2a merge: streaming async batch imports`  
+当前 HEAD：`25b0699 merge: Windows one-click deploy`  
 当前 Release：`v1.1.0-rc.6`
 
 ---
@@ -288,16 +288,29 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - 状态 uploaded/importing/queued/judging/finished/failed/canceled
 - 启动恢复：importing 标记 failed（不 resume）
 
+### 已完成 P1 前端
+
+- `/admin/batch` 改为异步链路：
+  - XHR 流式上传 + 进度
+  - preview 层级/treeSample/students/problemFolders
+  - invalid/duplicates/validCount
+- 映射工作区：
+  - 每个题目文件夹一行
+  - 个人/团队/公共筛选
+  - 顺序批量绑定
+  - 手动改映射
+  - 未映射禁止开始
+  - 学生×题目=提交数上界
+- run 202 + 1s 轮询 + 分页 + 取消 + CSV
+- 单题目模式保留
+
 ### 未完成 P1
 
-- 真正的映射工作区 UI
-- 文件结构可视化
-- 个人/团队/公共题目搜索
-- 按题目顺序批量绑定
 - Excel/HTML 批量导出
 - 学生×题目矩阵
 - 5000×4 压力验收
 - 导入恢复（resume）
+- 题目搜索的真正后端 scope 接口（当前前端过滤/limit 500）
 
 ## 3.5 统计 / UI / PDF
 
@@ -353,6 +366,13 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - NSIS 安装器
 - GitHub Actions Windows Release
 - 自动上传 Release 资产
+- Windows 一键部署脚本：
+  - install/uninstall/start/stop/status
+  - 防火墙、桌面快捷方式、HKCU 自启
+  - 数据目录保留
+  - health 等待
+  - dry-run 验证
+  - 维护文档
 - 每日自动备份：
   - 保留 7 份
   - 校验
@@ -385,11 +405,12 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 当前验证：
 
-- `npm test`：**104 文件 / 924 用例通过**
+- `npm test`：**106 文件 / 969 用例通过**
 - `npm run build`：通过
 - `npm run web:build`：通过
 - 浏览器 E2E：2 passed（主流程 + 建班/学生访问）
 - 子代理统计页烟测：图表/分析/虚拟表/搜索通过
+- Windows deploy：PowerShell 语法解析通过；`install.ps1 -DryRun` 退出码 0
 
 ---
 
@@ -429,19 +450,19 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - [ ] 4C8G 目标机 2 小时/300 在线/50 并发验收
 - [ ] 真实多核/多进程评测策略（当前只是异步并发 + 外部进程）
 
-## 4.3 洛谷式题号
+## 4.3 洛谷式题号（已完成）
 
-目前只有设计，没有实现：
-
-- [ ] `problem_categories`
-- [ ] `problems.category_id/seq/display_id`
-- [ ] 旧题迁入 P，从 P1001
-- [ ] 按内部 id 升序
-- [ ] 管理员新增分类/前缀
-- [ ] 管理员手动改题号
-- [ ] URL 同时接受内部 id 和 `P1001`
-- [ ] 批量文件夹接受 `P1001`
-- [ ] 删除不复用编号
+- [x] `problem_categories`
+- [x] `problems.category_id/seq/display_id`
+- [x] 旧题迁入 P，从 P1001
+- [x] 按内部 id 升序
+- [x] 管理员新增分类/前缀
+- [x] 管理员手动改题号
+- [x] URL 同时接受内部 id 和 `P1001`
+- [x] 批量文件夹接受 `P1001`
+- [x] 删除不复用编号
+- [x] 分类独立递增
+- [x] 迁移幂等
 
 ## 4.4 题目附件
 
