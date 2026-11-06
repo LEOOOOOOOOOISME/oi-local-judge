@@ -940,6 +940,27 @@ export interface OfficialRanking {
   officialFrozenUntil?: number | null;
 }
 
+/**
+ * GET /api/contests/:id/official-ranking/page 返回的正式榜分页。
+ * 后端只回当前页 items，不再携带完整 rows；total 为搜索过滤后的行数。
+ */
+export interface OfficialRankingPage {
+  contest: Contest;
+  problems: OfficialRankingProblem[];
+  config: OfficialRankingConfig;
+  archived: boolean;
+  preset: string;
+  version?: number;
+  pluginError?: string;
+  officialFrozenUntil?: number | null;
+  items: OfficialRankingRow[];
+  total: number;
+  allTotal: number;
+  offset: number;
+  limit: number;
+  query: string;
+}
+
 /** 比赛统计仪表盘：总体口径（OI/IOI 为分数，ACM/CF 为通过题数）。 */
 export type ContestStatisticsMode = 'score' | 'solved';
 
