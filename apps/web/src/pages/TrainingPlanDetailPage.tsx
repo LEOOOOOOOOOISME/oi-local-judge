@@ -40,6 +40,7 @@ import type {
 } from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
+import { StatisticsChart } from '../components/StatisticsChart';
 import { formatDateTime, formatMemoryLimit, formatTimeLimit } from '../utils/format';
 import { difficultyLabel, problemTypeLabel } from '../utils/status';
 import {
@@ -719,6 +720,46 @@ export function TrainingPlanDetailPage() {
             title={`成员进度（${detail.memberProgress?.length ?? 0}）`}
             extra={<span className="muted">展开成员可查看逐题完成情况</span>}
           >
+            {detail.memberProgress && detail.memberProgress.length > 0 ? (
+              <div style={{ marginBottom: 16 }}>
+                <StatisticsChart
+                  height={Math.min(420, Math.max(220, detail.memberProgress.length * 26))}
+                  option={{
+                    grid: { left: 96, right: 56, top: 12, bottom: 24 },
+                    tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                    xAxis: {
+                      type: 'value',
+                      max: 100,
+                      axisLabel: { formatter: '{value}%' },
+                      splitLine: { lineStyle: { color: '#f0f0f0' } },
+                    },
+                    yAxis: {
+                      type: 'category',
+                      data: [...detail.memberProgress]
+                        .reverse()
+                        .map((row) => row.realName ?? row.username),
+                    },
+                    series: [
+                      {
+                        type: 'bar',
+                        data: [...detail.memberProgress].reverse().map((row) =>
+                          row.itemCount === 0
+                            ? 0
+                            : Math.round((row.completedCount / row.itemCount) * 100),
+                        ),
+                        itemStyle: { color: '#1677ff', borderRadius: [0, 4, 4, 0] },
+                        label: {
+                          show: true,
+                          position: 'right',
+                          formatter: '{c}%',
+                          color: '#8c8c8c',
+                        },
+                      },
+                    ],
+                  }}
+                />
+              </div>
+            ) : null}
             <Table<TrainingPlanMemberProgress>
               className="oij-table"
               rowKey="userId"
