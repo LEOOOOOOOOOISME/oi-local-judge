@@ -25,6 +25,7 @@ import type {
   ClassWrongProblem,
 } from '../api/types';
 import { ErrorResult, PageLoading } from './PageStates';
+import { StatisticsChart } from './StatisticsChart';
 import {
   INACTIVE_DAYS,
   describeInactive,
@@ -196,6 +197,57 @@ export function ClassWorkbench({ classId }: { classId: number }) {
           <Statistic title="完成题次" value={data.completedProblems} />
           <Statistic title="提交次数" value={data.totalSubmissions} />
         </div>
+        <Card
+          size="small"
+          title="薄弱标签掌握率"
+          className="class-workbench-row"
+          extra={<span className="muted">越低越薄弱</span>}
+        >
+          {data.weakTags.length === 0 ? (
+            <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="还没有可用于统计的标签" />
+          ) : (
+            <StatisticsChart
+              height={Math.max(220, data.weakTags.length * 32)}
+              option={{
+                grid: { left: 96, right: 56, top: 12, bottom: 24 },
+                tooltip: {
+                  trigger: 'axis',
+                  axisPointer: { type: 'shadow' },
+                  formatter: (params: unknown) => {
+                    const item = Array.isArray(params) ? params[0] : params;
+                    const row = item as { name?: string; value?: number };
+                    return `${row.name ?? ''}<br/>掌握率 ${row.value ?? 0}%`;
+                  },
+                },
+                xAxis: {
+                  type: 'value',
+                  max: 100,
+                  axisLabel: { formatter: '{value}%' },
+                  splitLine: { lineStyle: { color: '#f0f0f0' } },
+                },
+                yAxis: {
+                  type: 'category',
+                  data: [...data.weakTags].reverse().map((item) => item.tag),
+                },
+                series: [
+                  {
+                    type: 'bar',
+                    data: [...data.weakTags].reverse().map((item) =>
+                      Math.round(item.solveRate * 100),
+                    ),
+                    itemStyle: { color: '#faad14', borderRadius: [0, 4, 4, 0] },
+                    label: {
+                      show: true,
+                      position: 'right',
+                      formatter: '{c}%',
+                      color: '#8c8c8c',
+                    },
+                  },
+                ],
+              }}
+            />
+          )}
+        </Card>
         <Row gutter={[16, 16]} className="class-workbench-row">
           <Col xs={24} lg={12}>
             <Card
