@@ -98,6 +98,8 @@ export interface ProblemSummary {
   ownerType?: ProblemOwnerType;
   /** 题目归属 id；system 题目为 null。旧后端可能不返回。 */
   ownerId?: number | null;
+  /** 洛谷式题号，如 P1001；旧后端可能不返回。 */
+  displayId?: string;
 }
 
 export interface ProblemDetail extends ProblemSummary {
@@ -140,6 +142,30 @@ export interface AddProblemShareRequest {
 export interface AdminProblemDetail extends ProblemDetail {
   ownerType: ProblemOwnerType;
   ownerId: number | null;
+  /** 题号分类与序号（由后端按 displayId 解析）。 */
+  categoryId?: number | null;
+  seq?: number | null;
+}
+
+/** 洛谷式题号分类（前缀）。 */
+export interface ProblemCategory {
+  id: number;
+  code: string;
+  name: string;
+  nextSeq: number;
+  seqStart: number;
+  createdAt: number;
+}
+
+export interface CreateProblemCategoryRequest {
+  code: string;
+  name?: string;
+  seqStart?: number;
+}
+
+export interface UpdateProblemCategoryRequest {
+  name?: string;
+  seqStart?: number;
 }
 
 /** Phase 1F 管理端列表项（包含隐藏题、可见性与归属）。 */
@@ -675,10 +701,15 @@ export interface CreateProblemRequest {
   objective?: ObjectiveConfig;
   ownerType?: ProblemOwnerType;
   ownerId?: number | null;
+  /** 分类；留空默认 P。 */
+  categoryId?: number;
+  /** 手动指定题号（如 P1001）；留空自动分配。 */
+  displayId?: string;
 }
 
 export interface CreateProblemResult {
   id: number;
+  displayId?: string;
 }
 
 export interface RankingCell {

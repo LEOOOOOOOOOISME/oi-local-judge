@@ -8,7 +8,7 @@ import type { Config } from '../config.js';
 import { hashPassword } from '../security/password.js';
 import { cancelSubmission } from '../services/submissions.js';
 import { MAX_SOURCE_BYTES_ADMIN, submitSource } from '../services/submissions.js';
-import { getProblem } from '../storage/repos/problems.js';
+import { getProblem, resolveProblemReference } from '../storage/repos/problems.js';
 import {
   addBatchItem,
   createBatchJob,
@@ -645,8 +645,8 @@ export function registerAdminBatchRoutes(
       if (problemMap.has(folder)) {
         resolved = problemMap.get(folder)!;
       } else {
-        const numeric = Number(folder);
-        if (Number.isInteger(numeric) && getProblem(options.db, numeric)) resolved = numeric;
+        // The folder itself may be a display id (P1001) or a numeric problem id.
+        resolved = resolveProblemReference(options.db, folder)?.id ?? null;
       }
       resolvedProblems.set(folder, resolved);
       return resolved;

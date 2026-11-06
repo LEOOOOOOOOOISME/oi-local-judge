@@ -22,7 +22,7 @@ export function ProblemListTable({
   emptyText = '暂无题目',
 }: {
   problems: ProblemSummary[];
-  problemPath: (problemId: number) => string;
+  problemPath: (problemId: number, displayId?: string) => string;
   letters?: Map<number, string>;
   scores?: Map<number, ProblemScore>;
   /** 比赛详情接口提供的每题分值（如 100）。 */
@@ -35,16 +35,18 @@ export function ProblemListTable({
     {
       title: '编号',
       dataIndex: 'id',
-      width: 64,
+      width: 84,
       render: (_value, record) => (
-        <span className="problem-no">{letters?.get(record.id) ?? `#${record.id}`}</span>
+        <span className="problem-no">
+          {letters?.get(record.id) ?? record.displayId ?? `#${record.id}`}
+        </span>
       ),
     },
     {
       title: '题目名称',
       dataIndex: 'title',
       render: (_value, record) => (
-        <Link className="problem-link" to={problemPath(record.id)}>
+        <Link className="problem-link" to={problemPath(record.id, record.displayId)}>
           {record.title}
         </Link>
       ),
