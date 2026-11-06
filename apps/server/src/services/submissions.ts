@@ -28,7 +28,13 @@ import { resolveSubmissionTeam } from './contest-teams.js';
 import { canViewProblem, ProblemAclError } from './problem-acl.js';
 
 export const ALLOWED_LANGUAGES = new Set(['cpp17', 'c11', 'objective', 'answer']);
+/**
+ * Students can submit up to 256 KiB source code. Admins / setters may submit
+ * larger files so they can upload generated or bulk programs.
+ */
 export const MAX_SOURCE_BYTES = 256 * 1024;
+/** Admins / setters may submit larger source files for rejudge/batch purposes. */
+export const MAX_SOURCE_BYTES_ADMIN = 512 * 1024 * 1024;
 /** Minimum interval between two submissions with the same user/problem/contest key. */
 export const SUBMIT_COOLDOWN_MS = 10_000;
 /** Priority used for admin rejudges so they jump ahead of regular submissions. */
@@ -154,9 +160,15 @@ export function submitSource(
   if (problem.type !== 'output-only' && input.language === 'answer') {
     throw new Error('output files are only accepted for output-only problems');
   }
+
+  // Admins / setters can submit larger source files (skipAccessCheck/skipCooldown).
+  const maxBytes = input.skipAccessCheck || input.skipCooldown
+    ? MAX_SOURCE_BYTES_ADMIN
+    : MAX_SOURCE_BYTES;
+
   const bytes = Buffer.byteLength(input.code, 'utf8');
   if (bytes === 0) throw new Error('source is empty');
-  if (bytes > MAX_SOURCE_BYTES) throw new Error('source is too large');
+  if (bytes > maxBytes) throw new Error('source is too large');
 
   let phase = input.phase ?? 'contest';
   let teamId: number | null = null;

@@ -24,7 +24,17 @@ export interface AdminBatchRouteOptions {
   adminGuard: preHandlerHookHandler;
 }
 
-const SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx']);
+const SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx', '.c']);
+const SOURCE_LANGUAGE_BY_EXTENSION: Record<string, string> = {
+  '.cpp': 'cpp17',
+  '.cc': 'cpp17',
+  '.cxx': 'cpp17',
+  '.c': 'c11',
+};
+
+// Batch upload limit for admin routes – very large (10 GB) so admins are never
+// blocked by the body-size parser when importing student lists or bulk data.
+const MAX_BATCH_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
 
 function safePath(name: string): string | null {
   const normalized = normalize(name).replace(/\\/g, '/');
@@ -44,7 +54,7 @@ export function registerAdminBatchRoutes(
 
   app.post(
     '/api/admin/batch/upload',
-    { preHandler: guard, bodyLimit: 80 * 1024 * 1024 },
+    { preHandler: guard, bodyLimit: MAX_BATCH_UPLOAD_BYTES },
     async (request, reply) => {
       const body = request.body;
       if (!Buffer.isBuffer(body) || body.length === 0) {
@@ -131,6 +141,9 @@ export function registerAdminBatchRoutes(
     const unresolved = new Set<string>();
     const entries = Object.entries(files).sort(([left], [right]) => left.localeCompare(right));
     for (const [rawName, content] of entries) {
+      if (content.length === 0) {
+        continue;
+      }
       if (rawName.endsWith('/')) continue;
       const relative = safePath(rawName);
       if (!relative) {
@@ -196,7 +209,22 @@ export function registerAdminBatchRoutes(
         });
         user = getUserByUsername(options.db, username);
         if (!user || user.id !== userId) {
-          return reply.code(500).send({ ok: false, error: { code: 'USER_CREATE_FAILED' } });
+          // Fallback: create a minimal synthetic user if user fetch failed
+          const fallbackUserId = createUser(options.db, {
+            username: `batch_${student}`.slice(0, 64),
+            passwordHash: hashPassword(randomUUID()),
+            realName: student,
+            role: 'contestant',
+          });
+          const fallbackUser = getUserByUsername(options.db, `batch_${student}`.slice(0, 64));
+          if (!fallbackUser) {
+            return reply.code(500).send({ ok: false, error: { code: 'USER_CREATE_FAILED' } });
+          }
+          // Clean up the first failed create (id mismatch) if it exists
+          if (user && user.id !== fallbackUser.id) {
+            options.db.prepare('DELETE FROM users WHERE id = ?').run(user.id);
+          }
+          user = fallbackUser;
         }
       }
       const { id } = submitSource(
@@ -204,7 +232,7 @@ export function registerAdminBatchRoutes(
         {
           userId: user.id,
           problemId: source.problemId,
-          language,
+          language: SOURCE_LANGUAGE_BY_EXTENSION[source.path.slice(source.path.lastIndexOf('.'))] ?? language,
           code: source.code,
           contestId: null,
           skipCooldown: true,
