@@ -155,6 +155,7 @@ export function problemToSummary(row: ProblemRow): ProblemSummaryDto {
     memoryMb: row.memory_mb,
     ownerType: row.owner_type,
     ownerId: row.owner_id,
+    displayId: row.display_id ?? '',
   };
 }
 

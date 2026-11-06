@@ -24,6 +24,9 @@ function makeRow(overrides: Partial<ProblemRow> = {}): ProblemRow {
     visibility: 'public',
     owner_type: 'system',
     owner_id: null,
+    category_id: 1,
+    seq: 7,
+    display_id: 'P7',
     version: 1,
     created_at: 0,
     ...overrides,
@@ -60,6 +63,7 @@ describe('problemToSummary owner fields', () => {
       memoryMb: 256,
       ownerType: 'system',
       ownerId: null,
+      displayId: 'P7',
     });
   });
 });

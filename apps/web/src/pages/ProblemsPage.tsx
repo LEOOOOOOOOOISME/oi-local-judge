@@ -26,7 +26,11 @@ export function ProblemsPage() {
         subtitle="按你的权限可见的题目：公开题、自己的题目以及分享给你的题目。"
         extra={<span className="muted">共 {problems.length} 题</span>}
       />
-      <ProblemListTable problems={problems} problemPath={(id) => `/problem/${id}`} emptyText="暂无公开题目" />
+      <ProblemListTable
+        problems={problems}
+        problemPath={(_id, displayId) => `/problem/${displayId ?? _id}`}
+        emptyText="暂无公开题目"
+      />
     </div>
   );
 }

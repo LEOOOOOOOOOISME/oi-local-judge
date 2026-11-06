@@ -22,8 +22,10 @@ import {
   listAllProblems,
   listAllTestcases,
   replaceTestcases,
+  setProblemDisplayId,
   updateTestcasePoints,
 } from '../storage/repos/problems.js';
+import { ProblemNumberingError } from '../storage/repos/problem-categories.js';
 import {
   createProblemWithOwner,
   getProblemDetail,
@@ -57,9 +59,14 @@ export interface AdminProblemRouteOptions {
   adminGuard: preHandlerHookHandler;
 }
 
-/** Maps ownership validation failures to a 400 with code `PROBLEM_OWNER_INVALID`. */
+/** Maps ownership/numbering validation failures to their HTTP error codes. */
 function sendOwnerError(reply: FastifyReply, err: unknown): FastifyReply {
   if (err instanceof ProblemOwnerError) {
+    return reply
+      .code(err.status)
+      .send({ ok: false, error: { code: err.code, message: err.message } });
+  }
+  if (err instanceof ProblemNumberingError) {
     return reply
       .code(err.status)
       .send({ ok: false, error: { code: err.code, message: err.message } });
@@ -334,7 +341,14 @@ export function registerAdminProblemRoutes(
       if (!detail || !row) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
       return {
         ok: true,
-        data: { ...detail, ownerType: row.owner_type, ownerId: row.owner_id },
+        data: {
+          ...detail,
+          ownerType: row.owner_type,
+          ownerId: row.owner_id,
+          categoryId: row.category_id,
+          seq: row.seq,
+          displayId: row.display_id ?? '',
+        },
       };
     },
   );
@@ -354,6 +368,8 @@ export function registerAdminProblemRoutes(
       objective?: unknown;
       ownerType?: string;
       ownerId?: number | null;
+      categoryId?: number;
+      displayId?: string;
     };
   }>('/api/admin/problems', { preHandler: guard }, async (request, reply) => {
     const body = request.body ?? {};
@@ -383,13 +399,41 @@ export function registerAdminProblemRoutes(
         objective: body.objective,
         ownerType,
         ownerId,
+        categoryId:
+          typeof body.categoryId === 'number' && Number.isInteger(body.categoryId)
+            ? body.categoryId
+            : undefined,
+        displayId:
+          typeof body.displayId === 'string' && body.displayId.trim().length > 0
+            ? body.displayId.trim()
+            : undefined,
         testcases: [],
       });
-      return reply.code(201).send({ ok: true, data: { id } });
+      const created = getProblem(options.db, id);
+      return reply
+        .code(201)
+        .send({ ok: true, data: { id, displayId: created?.display_id ?? '' } });
     } catch (err) {
       return sendOwnerError(reply, err);
     }
   });
+
+  app.post<{ Params: { id: string }; Body: { displayId?: string } }>(
+    '/api/admin/problems/:id/display-id',
+    { preHandler: guard },
+    async (request, reply) => {
+      const problemId = Number(request.params.id);
+      if (!Number.isInteger(problemId) || problemId <= 0) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      try {
+        const result = setProblemDisplayId(options.db, problemId, request.body?.displayId);
+        return { ok: true, data: result };
+      } catch (err) {
+        return sendOwnerError(reply, err);
+      }
+    },
+  );
 
   app.get<{ Params: { id: string } }>(
     '/api/admin/problems/:id/assets',

@@ -356,6 +356,7 @@ export function AdminProblemPage() {
 
   const [pointsDraft, setPointsDraft] = useState<Record<number, number>>({});
   const [savingPoints, setSavingPoints] = useState(false);
+  const [displayIdDraft, setDisplayIdDraft] = useState('');
 
   const problemQuery = useQuery({
     queryKey: ['admin-problem', problemId],
@@ -407,6 +408,28 @@ export function AdminProblemPage() {
     if (!problem) return;
     basicForm.setFieldsValue(toBasicFormValues(problem));
   }, [basicForm, problem]);
+
+  useEffect(() => {
+    if (!problem) return;
+    setDisplayIdDraft(problem.displayId ?? '');
+  }, [problem?.id, problem?.displayId]);
+
+  const setDisplayIdMutation = useMutation({
+    mutationFn: (displayId: string) =>
+      apiPost<{ displayId: string }>(`/api/admin/problems/${problemId}/display-id`, {
+        displayId,
+      }),
+    onSuccess: (data) => {
+      message.success(`题号已更新为 ${data.displayId}`);
+      void queryClient.invalidateQueries({ queryKey: ['admin-problem', problemId] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-problems'] });
+      void queryClient.invalidateQueries({ queryKey: ['problems'] });
+      void queryClient.invalidateQueries({ queryKey: ['admin-problem-categories'] });
+    },
+    onError: (error) => {
+      message.error(error instanceof Error ? error.message : '修改题号失败');
+    },
+  });
 
   useEffect(() => {
     if (!problem) return;
@@ -1066,7 +1089,7 @@ export function AdminProblemPage() {
         onFinish={(values) => updateProblemMutation.mutate(values)}
       >
         <Row gutter={12}>
-          <Col span={16}>
+          <Col span={14}>
             <Form.Item
               label="标题"
               name="title"
@@ -1075,9 +1098,29 @@ export function AdminProblemPage() {
               <Input maxLength={120} showCount />
             </Form.Item>
           </Col>
-          <Col span={8}>
-            <Form.Item label="题目 ID">
-              <Input value={`#${problem.id}`} disabled />
+          <Col span={10}>
+            <Form.Item
+              label="题号"
+              extra={`内部 ID #${problem.id}；格式如 P1001，保存后立即生效`}
+            >
+              <Space.Compact style={{ width: '100%' }}>
+                <Input
+                  value={displayIdDraft}
+                  onChange={(event) => setDisplayIdDraft(event.target.value)}
+                  placeholder="例如 P1001"
+                />
+                <Button
+                  type="primary"
+                  loading={setDisplayIdMutation.isPending}
+                  disabled={
+                    displayIdDraft.trim().length === 0 ||
+                    displayIdDraft.trim() === (problem.displayId ?? '')
+                  }
+                  onClick={() => setDisplayIdMutation.mutate(displayIdDraft.trim())}
+                >
+                  保存题号
+                </Button>
+              </Space.Compact>
             </Form.Item>
           </Col>
         </Row>
@@ -2127,12 +2170,12 @@ export function AdminProblemPage() {
         breadcrumb={[
           { label: '管理', to: '/admin/problems' },
           { label: '题目', to: '/admin/problems' },
-          { label: `#${problem.id}` },
+          { label: problem.displayId || `#${problem.id}` },
         ]}
         title={problem.title}
         tags={
           <>
-            <Tag className="mono">#{problem.id}</Tag>
+            <Tag className="mono">{problem.displayId || `#${problem.id}`}</Tag>
             <Tag color={problem.visibility === 'hidden' ? 'gold' : 'green'}>
               {problem.visibility === 'hidden' ? '隐藏' : '公开'}
             </Tag>
@@ -2168,7 +2211,7 @@ export function AdminProblemPage() {
               导出 Lemon 题包
             </Button>
             {problem.visibility === 'public' ? (
-              <Link to={`/problem/${problem.id}`}>
+              <Link to={`/problem/${problem.displayId || problem.id}`}>
                 <Button>前台查看</Button>
               </Link>
             ) : (

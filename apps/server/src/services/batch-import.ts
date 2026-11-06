@@ -15,7 +15,7 @@ import {
   type BatchJobRow,
 } from '../storage/repos/batches.js';
 import { getBatchUpload, updateBatchUploadScan } from '../storage/repos/batch-uploads.js';
-import { getProblem } from '../storage/repos/problems.js';
+import { resolveProblemReference } from '../storage/repos/problems.js';
 import type { UserRow } from '../storage/repos/users.js';
 import { createUser, getUserByUsername } from '../storage/repos/users.js';
 import { BATCH_JUDGE_PRIORITY, MAX_SOURCE_BYTES_ADMIN, submitSource } from './submissions.js';
@@ -240,10 +240,10 @@ async function runBatchImport(
 
     const resolveProblem = (folder: string): number | null => {
       const mapped = input.problemMap[folder];
-      if (Number.isInteger(mapped) && getProblem(db, mapped)) return mapped;
-      const numeric = Number(folder);
-      if (Number.isInteger(numeric) && numeric > 0 && getProblem(db, numeric)) return numeric;
-      return null;
+      const mappedProblem = resolveProblemReference(db, mapped);
+      if (mappedProblem) return mappedProblem.id;
+      // Folders may name a problem by its display id (P1001) or numeric id.
+      return resolveProblemReference(db, folder)?.id ?? null;
     };
     const plan = planBatchSources({
       files: scan.files,
