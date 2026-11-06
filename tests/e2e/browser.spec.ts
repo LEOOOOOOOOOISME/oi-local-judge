@@ -98,6 +98,42 @@ test('admin can log in and open help, system, class, training and learning pages
     expectNoHttpErrors();
   });
 
+  let contestId = 0;
+
+  await test.step('通过 admin API 创建比赛用于统计页冒烟', async () => {
+    const now = Date.now();
+    const response = await page.request.post(`${BASE_URL}/api/admin/contests`, {
+      data: {
+        name: 'E2E 统计冒烟',
+        startAt: now,
+        endAt: now + 60 * 60 * 1000,
+      },
+    });
+    expect(response.status()).toBe(201);
+    const body = (await response.json()) as { ok: boolean; data: { id: number } };
+    expect(body.ok).toBe(true);
+    contestId = body.data.id;
+    expect(contestId).toBeGreaterThan(0);
+    expectNoHttpErrors();
+  });
+
+  await test.step('比赛统计页可以打开', async () => {
+    await page.goto(`${BASE_URL}/contest/${contestId}/statistics`, {
+      waitUntil: 'domcontentloaded',
+    });
+    await expect(page.locator('h1.page-title')).toHaveText('E2E 统计冒烟 · 比赛统计', {
+      timeout: 20_000,
+    });
+    await expect(page.getByRole('button', { name: '导出分析 PDF' })).toBeVisible();
+    expectNoHttpErrors();
+  });
+
+  await test.step('批量评测页可以打开', async () => {
+    await page.goto(`${BASE_URL}/admin/batch`, { waitUntil: 'domcontentloaded' });
+    await expect(page.locator('h1.page-title')).toHaveText('批量评测');
+    expectNoHttpErrors();
+  });
+
   await test.step('学习统计页可以通过导航打开', async () => {
     await page.getByRole('link', { name: '我的学习' }).click();
     await expect(page).toHaveURL(/\/students\/\d+\/learning$/);
