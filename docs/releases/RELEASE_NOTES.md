@@ -1,4 +1,4 @@
-# OiJudge v1.1.0-rc.7
+# OiJudge v1.1.0-rc.8
 
 Windows x64 预发布版本，面向局域网 OI 评测、比赛与教学训练：Electron 桌面端、浏览器选手/管理端、原生 Job Object 评测器。
 
@@ -6,12 +6,24 @@ Windows x64 预发布版本，面向局域网 OI 评测、比赛与教学训练�
 
 ## 下载
 
-GitHub Release 附件同时提供安装器与便携包，`<version>` 与发布 tag 一致（例如 tag `v1.1.0-rc.7` 对应 `1.1.0-rc.7`）：
+GitHub Release 附件同时提供安装器与便携包，`<version>` 与发布 tag 一致（例如 tag `v1.1.0-rc.8` 对应 `1.1.0-rc.8`）：
 
 - `OiJudge-Setup-<version>.exe`：NSIS 安装器，支持自选安装目录，创建桌面与开始菜单快捷方式。
 - `oi-local-judge-<version>-win-x64.zip`：便携版 ZIP，解压即用。
 
 两者均内置 Node 服务、Web 前端、`ojrunner.exe`、`ojinteract.exe` 与 MinGW 运行库。安装版与便携版共用 `%APPDATA%\OiJudge` 数据目录。
+
+## rc.8 修复（重要）
+
+- 修复从 rc.6/rc.7 旧库升级失败：
+  - 现象：`npm start` 报 `no such column: status`
+  - 原因：`SCHEMA` 在 `ensureColumn` 之前创建 `batch_items(batch_id, status)` 索引，而 rc.6 的 `batch_items` 没有 `status`
+  - 修复：索引改到列迁移之后创建
+  - 回归测试：构造 rc.6 风格 `batch_items`，执行 `migrate()` 不抛错，补齐 `status/error_code/error_message` 并创建索引
+  - 已用真实旧 `runtime/db/oijudge.db` 启动验证：`/api/health` 200
+- 修正 update-check 发布测试：远端 fixture 使用比当前版本更高的 `rc.999`，避免版本 bump 后误判
+
+> rc.7 的升级迁移有缺陷，建议直接使用 rc.8；已安装 rc.7 的用户升级前仍请备份数据目录。
 
 ## rc.7 新增
 
@@ -119,7 +131,7 @@ GitHub Release 附件同时提供安装器与便携包，`<version>` 与发布 t
   - desktop 启动日志、userData 可写性探测、单实例失败日志
   - server stdio pipe、60s 超时、子进程输出入日志
 - NSIS 安装包实际构建：
-  - `OiJudge-Setup-1.1.0-rc.7.exe`
+  - `OiJudge-Setup-1.1.0-rc.8.exe`
   - 静默安装/卸载实测
   - 安装态 smoke：窗口、server、`/api/health` 200、LAN、Web UI
 - 新增 `npm run build:installer`
