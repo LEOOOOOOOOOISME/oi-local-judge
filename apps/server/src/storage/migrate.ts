@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { migrateProblemNumbers } from './repos/problems.js';
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS users(
@@ -6,6 +7,10 @@ CREATE TABLE IF NOT EXISTS users(
   real_name TEXT, class_name TEXT, role TEXT NOT NULL DEFAULT 'contestant',
   status TEXT NOT NULL DEFAULT 'active', session_version INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS problem_categories(
+  id INTEGER PRIMARY KEY, code TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+  next_seq INTEGER NOT NULL, seq_start INTEGER NOT NULL, created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS problems(
   id INTEGER PRIMARY KEY, title TEXT NOT NULL, type TEXT NOT NULL,
@@ -21,6 +26,9 @@ CREATE TABLE IF NOT EXISTS problems(
   visibility TEXT NOT NULL DEFAULT 'public',
   owner_type TEXT NOT NULL DEFAULT 'system',
   owner_id INTEGER,
+  category_id INTEGER,
+  seq INTEGER,
+  display_id TEXT,
   version INTEGER NOT NULL DEFAULT 1,
   created_at INTEGER NOT NULL
 );
@@ -337,6 +345,16 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'problems', 'objective_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'problems', 'owner_type', "TEXT NOT NULL DEFAULT 'system'");
   ensureColumn(db, 'problems', 'owner_id', 'INTEGER');
+  ensureColumn(db, 'problems', 'category_id', 'INTEGER');
+  ensureColumn(db, 'problems', 'seq', 'INTEGER');
+  ensureColumn(db, 'problems', 'display_id', 'TEXT');
+  // Numbering columns are added above before their indexes, so legacy databases
+  // (which lack the columns) migrate cleanly as well.
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_problems_display_id ON problems(display_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_problems_category_seq ON problems(category_id, seq);
+    CREATE INDEX IF NOT EXISTS idx_problems_category ON problems(category_id);
+  `);
   ensureColumn(db, 'batch_items', 'problem_id', 'INTEGER');
   ensureColumn(db, 'batch_items', 'score', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'batch_items', 'verdict', 'TEXT');
@@ -380,6 +398,7 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'contest_hacks', 'team_id', 'INTEGER');
   ensureColumn(db, 'teams', 'kind', "TEXT NOT NULL DEFAULT 'team'");
   ensureColumn(db, 'teams', 'allow_contest', 'INTEGER NOT NULL DEFAULT 1');
+  migrateProblemNumbers(db);
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
     db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)').run(Date.now());

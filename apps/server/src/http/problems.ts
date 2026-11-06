@@ -15,7 +15,7 @@ import {
   listVisibleProblems,
   type ProblemActor,
 } from '../services/problem-acl.js';
-import { getProblem, getTestcases } from '../storage/repos/problems.js';
+import { getProblemByIdOrDisplayId, getTestcases } from '../storage/repos/problems.js';
 
 export interface ProblemRouteOptions {
   db: DatabaseSync;
@@ -45,8 +45,8 @@ export function registerProblemRoutes(app: FastifyInstance, options: ProblemRout
   }));
 
   app.get<{ Params: { id: string } }>('/api/problems/:id', async (request, reply) => {
-    const id = Number(request.params.id);
-    const problem = Number.isInteger(id) ? getProblem(options.db, id) : null;
+    // Accept both the internal numeric id and a Luogu-style display id (P1001).
+    const problem = getProblemByIdOrDisplayId(options.db, request.params.id);
     if (!problem || !canViewProblem(options.db, problem, actorFor(request, options))) {
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND', message: 'problem not found' } });
     }
@@ -54,8 +54,7 @@ export function registerProblemRoutes(app: FastifyInstance, options: ProblemRout
   });
 
   app.get<{ Params: { id: string } }>('/api/problems/:id/answer-files', async (request, reply) => {
-    const id = Number(request.params.id);
-    const problem = Number.isInteger(id) ? getProblem(options.db, id) : null;
+    const problem = getProblemByIdOrDisplayId(options.db, request.params.id);
     if (
       !problem ||
       problem.type !== 'output-only' ||
@@ -77,8 +76,7 @@ export function registerProblemRoutes(app: FastifyInstance, options: ProblemRout
   app.get<{ Params: { id: string; testcaseId: string } }>(
     '/api/problems/:id/answer-files/:testcaseId',
     async (request, reply) => {
-      const id = Number(request.params.id);
-      const problem = Number.isInteger(id) ? getProblem(options.db, id) : null;
+      const problem = getProblemByIdOrDisplayId(options.db, request.params.id);
       if (
         !problem ||
         problem.type !== 'output-only' ||

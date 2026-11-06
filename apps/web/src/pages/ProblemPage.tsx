@@ -63,17 +63,17 @@ int main() {
 }
 `;
 
-function readDraft(problemId: number): string | null {
+function readDraft(problemKey: string): string | null {
   try {
-    return window.localStorage.getItem(`oij:draft:${problemId}`);
+    return window.localStorage.getItem(`oij:draft:${problemKey}`);
   } catch {
     return null;
   }
 }
 
-function writeDraft(problemId: number, code: string): void {
+function writeDraft(problemKey: string, code: string): void {
   try {
-    window.localStorage.setItem(`oij:draft:${problemId}`, code);
+    window.localStorage.setItem(`oij:draft:${problemKey}`, code);
   } catch {
     // 本地草稿不可用不影响提交。
   }
@@ -81,9 +81,11 @@ function writeDraft(problemId: number, code: string): void {
 
 export function ProblemPage() {
   const params = useParams<{ contestId?: string; problemId: string }>();
-  const problemId = Number(params.problemId);
+  // The URL accepts both the internal numeric id (legacy links) and the
+  // Luogu-style display id (P1001). The API resolves either form.
+  const problemRef = (params.problemId ?? '').trim();
   const contestId = params.contestId ? Number(params.contestId) : null;
-  const validProblem = Number.isInteger(problemId) && problemId > 0;
+  const validProblem = problemRef.length > 0;
   const validContest = contestId === null || (Number.isInteger(contestId) && contestId > 0);
 
   const { user } = useAuth();
@@ -109,27 +111,39 @@ export function ProblemPage() {
   const [promotingHackId, setPromotingHackId] = useState<number | null>(null);
   const [revertingHackId, setRevertingHackId] = useState<number | null>(null);
   const [code, setCode] = useState<string>(
-    () => (validProblem ? readDraft(problemId) : null) ?? DEFAULT_CODE,
+    () => (validProblem ? readDraft(problemRef) : null) ?? DEFAULT_CODE,
   );
-  const lastProblemRef = useRef(problemId);
+  const lastProblemRef = useRef(problemRef);
 
   useEffect(() => {
-    if (lastProblemRef.current === problemId) return;
-    lastProblemRef.current = problemId;
-    setCode(readDraft(problemId) ?? DEFAULT_CODE);
+    if (lastProblemRef.current === problemRef) return;
+    lastProblemRef.current = problemRef;
+    setCode(readDraft(problemRef) ?? DEFAULT_CODE);
     setObjectiveAnswers({});
     setOutputAnswers({});
-  }, [problemId]);
-
-  useEffect(() => {
-    if (validProblem) writeDraft(problemId, code);
-  }, [problemId, code, validProblem]);
+  }, [problemRef]);
 
   const problemQuery = useQuery({
-    queryKey: ['problem', problemId],
-    queryFn: () => apiGet<ProblemDetail>(`/api/problems/${problemId}`),
+    queryKey: ['problem', problemRef],
+    queryFn: () => apiGet<ProblemDetail>(`/api/problems/${encodeURIComponent(problemRef)}`),
     enabled: validProblem,
   });
+  const problem = problemQuery.data;
+  /** Internal id: every follow-up API (submissions, hacks, drafts) uses it. */
+  const problemId = problem?.id ?? null;
+  const draftKey = problemId !== null ? String(problemId) : problemRef;
+  const lastDraftKey = useRef(draftKey);
+
+  useEffect(() => {
+    if (lastDraftKey.current === draftKey) return;
+    lastDraftKey.current = draftKey;
+    // Once the internal id is known, share the draft with legacy numeric URLs.
+    if (problemId !== null) setCode(readDraft(draftKey) ?? DEFAULT_CODE);
+  }, [draftKey, problemId]);
+
+  useEffect(() => {
+    if (validProblem) writeDraft(draftKey, code);
+  }, [draftKey, code, validProblem]);
   const contestsQuery = useQuery({
     queryKey: ['contests'],
     queryFn: () => apiGet<Contest[]>('/api/contests'),
@@ -159,12 +173,12 @@ export function ProblemPage() {
           contestId === null ? '' : `&contestId=${contestId}`
         }`,
       ),
-    enabled: validProblem && Boolean(user),
+    enabled: problemId !== null && Boolean(user),
   });
   const answerFilesQuery = useQuery({
     queryKey: ['answer-files', problemId],
     queryFn: () => apiGet<AnswerFile[]>(`/api/problems/${problemId}/answer-files`),
-    enabled: validProblem && problemQuery.data?.type === 'output-only',
+    enabled: problemId !== null && problem?.type === 'output-only',
   });
   const hackTargetsQuery = useQuery({
     queryKey: ['hack-targets', contestId, problemId],
@@ -183,7 +197,7 @@ export function ProblemPage() {
     },
     enabled:
       contestId !== null &&
-      validProblem &&
+      problemId !== null &&
       Boolean(user) &&
       !contestEnded,
     retry: false,
@@ -191,7 +205,7 @@ export function ProblemPage() {
   const hackStatusQuery = useQuery({
     queryKey: ['hack-status', contestId, activeHackId],
     queryFn: () => apiGet<HackJob>(`/api/contests/${contestId}/hacks/${activeHackId}`),
-    enabled: contestId !== null && activeHackId !== null,
+    enabled: contestId !== null && problemId !== null && activeHackId !== null,
     refetchInterval: (query) => {
       const status = query.state.data?.status;
       return status === 'queued' || status === 'judging' ? 1_000 : false;
@@ -205,6 +219,7 @@ export function ProblemPage() {
       apiGet<HackHistoryItem[]>(`/api/contests/${contestId}/problems/${problemId}/hacks`),
     enabled:
       contestId !== null &&
+      problemId !== null &&
       !contestEnded &&
       Boolean(user) &&
       (hackLocked || canModerate),
@@ -248,13 +263,15 @@ export function ProblemPage() {
   }, [problemQuery.data?.type, activeTab]);
 
   const submitMutation = useMutation({
-    mutationFn: (payload: { language: string; code: string }) =>
-      apiPost<{ id: number; status: string }>('/api/submissions', {
+    mutationFn: (payload: { language: string; code: string }) => {
+      if (problemId === null) return Promise.reject(new Error('题目尚未加载'));
+      return apiPost<{ id: number; status: string }>('/api/submissions', {
         problemId,
         language: payload.language,
         code: payload.code,
         contestId,
-      }),
+      });
+    },
     onSuccess: (data) => {
       message.success(`提交 #${data.id} 已提交`);
       void queryClient.invalidateQueries({ queryKey: ['submissions'] });
@@ -271,8 +288,11 @@ export function ProblemPage() {
   const letter =
     contestProblem !== undefined ? problemLetter(contestProblem.ordinal - 1) : null;
 
+  const problemUrlRef = problem?.displayId || problemRef;
   const loginHref = `/login?next=${encodeURIComponent(
-    contestId !== null ? `/contest/${contestId}/problem/${problemId}` : `/problem/${problemId}`,
+    contestId !== null
+      ? `/contest/${contestId}/problem/${problemId ?? problemRef}`
+      : `/problem/${problemUrlRef}`,
   )}`;
 
   const handleEditorKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -300,11 +320,9 @@ export function ProblemPage() {
       <ErrorResult error={problemQuery.error} onRetry={() => void problemQuery.refetch()} />
     );
   }
-  const problem = problemQuery.data;
   if (!problem) {
     return <PageLoading tip="正在加载题面…" />;
   }
-
   const isObjective = problem.type === 'objective';
   const objectiveQuestions = problem.objective?.questions ?? [];
   const objectiveTotal = objectiveQuestions.reduce(
@@ -563,7 +581,7 @@ export function ProblemPage() {
   const hackTargets = hackTargetsQuery.data?.targets ?? [];
 
   const lockProblem = async () => {
-    if (contestId === null) return;
+    if (contestId === null || problemId === null) return;
     setLocking(true);
     try {
       await apiPost<{ locked: boolean }>(
@@ -581,7 +599,7 @@ export function ProblemPage() {
   };
 
   const openSource = async (target: HackTarget) => {
-    if (contestId === null) return;
+    if (contestId === null || problemId === null) return;
     setSourceTarget(target);
     setSource(null);
     setSourceLoading(true);
@@ -606,7 +624,7 @@ export function ProblemPage() {
   };
 
   const submitHack = async () => {
-    if (contestId === null || !hackTarget) return;
+    if (contestId === null || problemId === null || !hackTarget) return;
     if (hackInput.length === 0) {
       setHackError('请输入 Hack 测试数据');
       return;
@@ -1078,10 +1096,14 @@ export function ProblemPage() {
               ]
             : [
                 { label: '题目', to: '/problems' },
-                { label: `#${problem.id} ${problem.title}` },
+                { label: `${problem.displayId || `#${problem.id}`} ${problem.title}` },
               ]
         }
-        title={letter ? `${letter}. ${problem.title}` : `#${problem.id} ${problem.title}`}
+        title={
+          letter
+            ? `${letter}. ${problem.title}`
+            : `${problem.displayId || `#${problem.id}`} ${problem.title}`
+        }
         tags={
           <>
             <Tag color="blue">{problemTypeLabel(problem.type)}</Tag>
