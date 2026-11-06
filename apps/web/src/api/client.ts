@@ -59,7 +59,7 @@ export interface RequestOptions {
   skipAuthRedirect?: boolean;
 }
 
-function defaultErrorMessage(status: number): string {
+export function defaultErrorMessage(status: number): string {
   switch (status) {
     case 400:
       return '请求参数有误';
@@ -181,6 +181,97 @@ export function apiUpload<T>(
     method: 'POST',
     rawBody: file,
     headers: { 'Content-Type': contentType },
+  });
+}
+
+export interface UploadProgress {
+  loaded: number;
+  total: number;
+  /** 0-100 的整数；total 未知时为 0。 */
+  percent: number;
+}
+
+export interface UploadWithProgressOptions {
+  headers?: Record<string, string>;
+  onProgress?: (progress: UploadProgress) => void;
+  signal?: AbortSignal;
+}
+
+/**
+ * 带上传进度的文件上传（XHR，fetch 无法观察请求体上传进度）。
+ *
+ * 解析与 `apiRequest` 相同的 `{ ok, data, error }` 信封；401 同样广播全局
+ * 登出事件。后端流式接口要求 Content-Length，浏览器会按 Blob 大小自动设置。
+ */
+export function apiUploadWithProgress<T>(
+  path: string,
+  file: Blob,
+  contentType: string,
+  options: UploadWithProgressOptions = {},
+): Promise<T> {
+  const { headers, onProgress, signal } = options;
+  return new Promise<T>((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException('Aborted', 'AbortError'));
+      return;
+    }
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', path, true);
+    xhr.withCredentials = true;
+    xhr.setRequestHeader('Accept', 'application/json');
+    xhr.setRequestHeader('Content-Type', contentType);
+    for (const [key, value] of Object.entries(headers ?? {})) {
+      xhr.setRequestHeader(key, value);
+    }
+
+    const abortHandler = () => xhr.abort();
+    signal?.addEventListener('abort', abortHandler, { once: true });
+    const cleanup = () => signal?.removeEventListener('abort', abortHandler);
+
+    xhr.upload.onprogress = (event) => {
+      if (!onProgress) return;
+      const total = event.lengthComputable ? event.total : file.size;
+      const loaded = event.loaded;
+      onProgress({
+        loaded,
+        total,
+        percent: total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0,
+      });
+    };
+    xhr.onerror = () => {
+      cleanup();
+      reject(new ApiError(0, '网络连接失败，请确认后端服务已启动'));
+    };
+    xhr.onabort = () => {
+      cleanup();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    xhr.onload = () => {
+      cleanup();
+      const text = xhr.responseText;
+      let envelope: ApiEnvelope<T> | null = null;
+      if (text.length > 0) {
+        try {
+          envelope = JSON.parse(text) as ApiEnvelope<T>;
+        } catch {
+          envelope = null;
+        }
+      }
+      if (xhr.status < 200 || xhr.status >= 300 || envelope === null || envelope.ok !== true) {
+        if (xhr.status === 401) emitUnauthorized();
+        reject(
+          new ApiError(
+            xhr.status,
+            envelope?.error?.message ?? defaultErrorMessage(xhr.status),
+            envelope?.error?.code,
+            envelope?.error?.report,
+          ),
+        );
+        return;
+      }
+      resolve(envelope.data as T);
+    };
+    xhr.send(file);
   });
 }
 
