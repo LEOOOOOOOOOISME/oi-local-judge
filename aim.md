@@ -2,7 +2,8 @@
 
 最后更新：2026-11-06  
 当前分支：`feat/1.1-stability-authoring`  
-当前 HEAD：`4737e29 merge: NSIS installer build and install smoke`  
+当前 HEAD：`ac660ce docs: record v1.1.0-rc.7 release`  
+发布 tag：`v1.1.0-rc.7`（tag 指向 `18dd220 release: prepare v1.1.0-rc.7`）  
 当前 Release：`v1.1.0-rc.7`
 
 ---
