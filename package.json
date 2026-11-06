@@ -29,6 +29,8 @@
     "start": "node apps/server/dist/cli.js",
     "electron:smoke": "electron tools/electron-smoke.cjs",
     "electron:smoke:flags": "electron --no-sandbox --disable-gpu tools/electron-smoke.cjs",
+    "smoke:desktop": "node tools/electron-smoke.mjs",
+    "smoke:desktop:dev": "node tools/electron-smoke.mjs --dev",
     "electron:start": "electron apps/desktop/dist/main.js",
     "web:dev": "npm run dev --workspace @oij/web",
     "web:build": "npm run build --workspace @oij/web",
