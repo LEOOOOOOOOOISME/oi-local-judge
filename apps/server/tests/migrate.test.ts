@@ -113,6 +113,43 @@ describe('migrations and repositories', () => {
     db.close();
   });
 
+  it('upgrades legacy batch_items before creating the status index', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'oij-migrate-legacy-batch-'));
+    dirs.push(dir);
+    const db = openDatabase(join(dir, 'test.db'));
+    db.exec(
+      `CREATE TABLE batch_items(
+         id INTEGER PRIMARY KEY,
+         batch_id INTEGER NOT NULL,
+         student TEXT NOT NULL,
+         source_path TEXT NOT NULL,
+         submission_id INTEGER,
+         problem_id INTEGER,
+         user_id INTEGER
+       )`,
+    );
+
+    let migrationError: unknown;
+    try {
+      migrate(db);
+    } catch (error) {
+      migrationError = error;
+    }
+
+    const columns = db.prepare('PRAGMA table_info(batch_items)').all() as Array<{
+      name: string;
+    }>;
+    expect(columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(['status', 'error_code', 'error_message']),
+    );
+    const index = db
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = ?")
+      .get('idx_batch_items_batch_status');
+    expect(index).toBeTruthy();
+    db.close();
+    expect(migrationError).toBeUndefined();
+  });
+
   it('round-trips user, problem, submission and judge task', () => {
     const db = freshDb();
     const userId = createUser(db, {
