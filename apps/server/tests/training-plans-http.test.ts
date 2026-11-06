@@ -75,6 +75,10 @@ interface PlanListBody {
   ok: true;
   data: Array<{
     id: number;
+    groupId: number;
+    groupName: string;
+    groupKind: 'team' | 'class';
+    memberCount: number;
     title: string;
     canManage: boolean;
     itemCount: number;
@@ -558,6 +562,67 @@ describe('training plan HTTP API', () => {
     expect(remove.statusCode, remove.body).toBe(200);
     const gone = await api('GET', planPath, 'manager');
     expect(gone.statusCode).toBe(404);
+  });
+
+  it('lists every plan for platform managers and validates the scope parameter', async () => {
+    const classPlanId = await createPlan('coach', 'Manager list class plan', [
+      { problemId: p1 },
+    ]);
+    const foreignPlanId = await createPlanInGroup('manager', foreignTeamId, 'Manager list team plan', [
+      { problemId: p1 },
+    ]);
+
+    // Admins default to the platform-wide list, including groups they are not in.
+    const adminList = await api('GET', '/api/training-plans', 'admin');
+    expect(adminList.statusCode, adminList.body).toBe(200);
+    const adminPlans = (adminList.json() as PlanListBody).data;
+    expect(adminPlans.some((plan) => plan.id === classPlanId)).toBe(true);
+    expect(adminPlans.find((plan) => plan.id === foreignPlanId)).toMatchObject({
+      groupId: foreignTeamId,
+      groupName: 'Foreign Team',
+      groupKind: 'team',
+      memberCount: 2,
+      canManage: true,
+    });
+
+    // Contest managers get the same platform-wide default.
+    const managerList = await api('GET', '/api/training-plans', 'manager');
+    expect(managerList.statusCode, managerList.body).toBe(200);
+    expect(
+      (managerList.json() as PlanListBody).data.some((plan) => plan.id === foreignPlanId),
+    ).toBe(true);
+
+    // scope=mine narrows a manager to the groups they belong to.
+    const managerMine = await api('GET', '/api/training-plans?scope=mine', 'manager');
+    expect(managerMine.statusCode, managerMine.body).toBe(200);
+    const managerMineIds = (managerMine.json() as PlanListBody).data.map((plan) => plan.id);
+    expect(managerMineIds).toContain(classPlanId);
+    expect(managerMineIds).not.toContain(foreignPlanId);
+
+    // Students keep the "my groups" list and cannot ask for everything.
+    const studentMine = await api('GET', '/api/training-plans?scope=mine', 'alice');
+    expect(studentMine.statusCode).toBe(200);
+    expect((studentMine.json() as PlanListBody).data.some((plan) => plan.id === foreignPlanId)).toBe(
+      true,
+    );
+    const studentAll = await api('GET', '/api/training-plans?scope=all', 'alice');
+    expect(studentAll.statusCode).toBe(403);
+    expect(errorCode(studentAll.json())).toBe('TRAINING_PLAN_SCOPE_FORBIDDEN');
+
+    // An unrecognized scope is rejected regardless of role.
+    const invalidScope = await api('GET', '/api/training-plans?scope=everyone', 'admin');
+    expect(invalidScope.statusCode).toBe(400);
+    expect(errorCode(invalidScope.json())).toBe('TRAINING_PLAN_SCOPE_INVALID');
+
+    // scope=mine is empty for a manager who belongs to no group.
+    const adminMine = await api('GET', '/api/training-plans?scope=mine', 'admin');
+    expect(adminMine.statusCode).toBe(200);
+    expect((adminMine.json() as PlanListBody).data).toEqual([]);
+
+    expect((await api('DELETE', `/api/training-plans/${classPlanId}`, 'coach')).statusCode).toBe(200);
+    expect((await api('DELETE', `/api/training-plans/${foreignPlanId}`, 'manager')).statusCode).toBe(
+      200,
+    );
   });
 
   it('keeps ordinary coaches limited to their own groups', async () => {

@@ -16,6 +16,8 @@ export interface TrainingPlanRow {
 export interface TrainingPlanViewRow extends TrainingPlanRow {
   group_name: string;
   group_kind: 'team' | 'class';
+  /** Number of members in the target group. */
+  member_count: number;
 }
 
 export interface TrainingPlanItemRow {
@@ -84,15 +86,16 @@ export function insertTrainingPlan(
   return Number(result.lastInsertRowid);
 }
 
+/** Plan columns plus the target group's name, kind and member count. */
+const PLAN_VIEW_SELECT = `SELECT p.*, t.name AS group_name, t.kind AS group_kind,
+         (SELECT COUNT(*) FROM team_members m WHERE m.team_id = t.id) AS member_count
+  FROM training_plans p
+  JOIN teams t ON t.id = p.group_id`;
+
 export function getTrainingPlanRow(db: DatabaseSync, planId: number): TrainingPlanViewRow | null {
   return (
     (db
-      .prepare(
-        `SELECT p.*, t.name AS group_name, t.kind AS group_kind
-         FROM training_plans p
-         JOIN teams t ON t.id = p.group_id
-         WHERE p.id = ?`,
-      )
+      .prepare(`${PLAN_VIEW_SELECT} WHERE p.id = ?`)
       .get(planId) as unknown as TrainingPlanViewRow) ?? null
   );
 }
@@ -107,13 +110,21 @@ export function listTrainingPlanRowsForUser(
 ): TrainingPlanViewRow[] {
   return db
     .prepare(
-      `SELECT p.*, t.name AS group_name, t.kind AS group_kind
-       FROM training_plans p
-       JOIN teams t ON t.id = p.group_id
+      `${PLAN_VIEW_SELECT}
        WHERE p.group_id IN (SELECT team_id FROM team_members WHERE user_id = ?)
        ORDER BY p.updated_at DESC, p.id DESC`,
     )
     .all(userId) as unknown as TrainingPlanViewRow[];
+}
+
+/**
+ * Every plan of every group, for platform managers (admins and contest
+ * managers) who may manage plans outside their own groups.
+ */
+export function listAllTrainingPlanRows(db: DatabaseSync): TrainingPlanViewRow[] {
+  return db
+    .prepare(`${PLAN_VIEW_SELECT} ORDER BY p.updated_at DESC, p.id DESC`)
+    .all() as unknown as TrainingPlanViewRow[];
 }
 
 export function updateTrainingPlanRow(
