@@ -90,10 +90,19 @@ async function fetchLegacyRanking(contestId: number): Promise<OfficialRanking> {
   return legacyRankingToOfficial(contest, legacyRows);
 }
 
-/** 优先正式榜；仅 404（旧后端/旧比赛数据）回退旧 /ranking。 */
-export async function fetchOfficialRanking(contestId: number): Promise<OfficialRanking> {
+/**
+ * 优先正式榜；仅 404（旧后端/旧比赛数据）回退旧 /ranking。
+ * `includeHidden` 仅管理员/比赛管理员可传，用于管理版统计与个人成绩 PDF。
+ */
+export async function fetchOfficialRanking(
+  contestId: number,
+  includeHidden = false,
+): Promise<OfficialRanking> {
+  const query = includeHidden ? '?includeHidden=1' : '';
   try {
-    return await apiGet<OfficialRanking>(`/api/contests/${contestId}/official-ranking`);
+    return await apiGet<OfficialRanking>(
+      `/api/contests/${contestId}/official-ranking${query}`,
+    );
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) throw error;
     try {
