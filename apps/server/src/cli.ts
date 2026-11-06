@@ -44,12 +44,11 @@ const recoveredTasks = recoverInterruptedJudgeTasks(db);
 if (recoveredTasks > 0) {
   app.log.info({ recoveredTasks }, 'requeued interrupted judge tasks');
 }
-// Async batch imports are not resumed after a restart: an import stuck in
-// `importing` is marked failed with BATCH_IMPORT_INTERRUPTED. Items imported
-// before the restart stay queued and are judged normally.
-const recoveredImports = recoverInterruptedBatchImports(db);
-if (recoveredImports > 0) {
-  app.log.warn({ recoveredImports }, 'marked interrupted batch imports as failed');
+// Async batch imports resume after a restart: recorded batch_items are final
+// and the importer continues with the remaining sources of the same upload.
+const resumedImports = recoverInterruptedBatchImports(db, { config });
+if (resumedImports > 0) {
+  app.log.info({ resumedImports }, 'resuming interrupted batch imports');
 }
 const scheduler = startScheduler({ db, config, events: hub });
 // Automatic backups run on their own timer (initial delay + hourly check), so

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
@@ -9,6 +9,7 @@ import {
   addBatchItem,
   getBatchItemStats,
   getBatchJob,
+  listBatchItems,
   listImportingBatchJobs,
   setBatchStatus,
   updateBatchJob,
@@ -226,6 +227,13 @@ async function runBatchImport(
       cancelJob(db, input.batchId);
       return;
     }
+    setBatchStatus(db, input.batchId, 'importing');
+    // A resumed import re-plans the same immutable upload. Every source path
+    // already recorded (imported, skipped or error) is final, so a restart
+    // never duplicates a submission or a failure row.
+    const existingPaths = new Set(
+      listBatchItems(db, input.batchId).map((item) => item.source_path),
+    );
 
     // 1. Streaming scan: only entry metadata is kept, never the archive.
     const scan = await scanZipStream(zipPath, {
@@ -260,9 +268,13 @@ async function runBatchImport(
     });
 
     // 2. Persist every planning failure (skipped/error) before importing, so a
-    // crash mid-import still leaves a truthful failure report.
+    // crash mid-import still leaves a truthful failure report. On resume the
+    // already recorded failures are skipped.
+    const pendingFailures = plan.failures.filter(
+      (failure) => !existingPaths.has(failure.sourcePath),
+    );
     transaction(db, () => {
-      for (const failure of plan.failures) {
+      for (const failure of pendingFailures) {
         addBatchItem(db, {
           batchId: input.batchId,
           student: failure.student,
@@ -281,6 +293,8 @@ async function runBatchImport(
       skippedEntries: plan.skipped.slice(0, 50),
       totalFiles: plan.totalFiles,
       validCount: plan.validCount,
+      existingItemCount: existingPaths.size,
+      resumed: existingPaths.size > 0,
     });
     if (control.canceled) {
       cancelJob(db, input.batchId);
@@ -307,9 +321,13 @@ async function runBatchImport(
 
     // The scan and extraction are two independent passes over the file; an
     // entry that disappeared between them is recorded instead of silently
-    // dropping the item.
+    // dropping the item. Paths already recorded by a previous attempt are not
+    // re-recorded on resume.
     const missing = plan.candidates.filter(
-      (candidate) => candidate.problemId !== null && !extracted.has(candidate.path),
+      (candidate) =>
+        candidate.problemId !== null &&
+        !existingPaths.has(candidate.path) &&
+        !extracted.has(candidate.path),
     );
     if (missing.length > 0) {
       transaction(db, () => {
@@ -330,7 +348,12 @@ async function runBatchImport(
     // 4. Import in chunks: one transaction per chunk, one password hash for the
     // whole batch, per-item failures recorded instead of aborting the batch.
     const ordered = [...plan.candidates]
-      .filter((candidate) => candidate.problemId !== null && extracted.has(candidate.path))
+      .filter(
+        (candidate) =>
+          candidate.problemId !== null &&
+          !existingPaths.has(candidate.path) &&
+          extracted.has(candidate.path),
+      )
       .sort(
         (left, right) =>
           left.student.localeCompare(right.student) ||
@@ -339,6 +362,10 @@ async function runBatchImport(
       );
     const syntheticPasswordHash = hashPassword(randomUUID());
     const userCache = new Map<string, UserRow>();
+    const totalCandidates = plan.candidates.length;
+    const alreadyProcessed = plan.candidates.filter((candidate) =>
+      existingPaths.has(candidate.path),
+    ).length;
     let processed = 0;
 
     for (let offset = 0; offset < ordered.length; offset += chunkSize) {
@@ -430,8 +457,8 @@ async function runBatchImport(
       const stats = getBatchItemStats(db, input.batchId);
       setJobMeta(db, input.batchId, {
         progress: {
-          processed,
-          totalCandidates: ordered.length,
+          processed: alreadyProcessed + processed,
+          totalCandidates,
           imported: stats.imported,
           skipped: stats.skipped,
           errors: stats.errors,
@@ -451,8 +478,8 @@ async function runBatchImport(
     setBatchStatus(db, input.batchId, status);
     setJobMeta(db, input.batchId, {
       progress: {
-        processed,
-        totalCandidates: ordered.length,
+        processed: alreadyProcessed + processed,
+        totalCandidates,
         imported: stats.imported,
         skipped: stats.skipped,
         errors: stats.errors,
@@ -474,28 +501,101 @@ async function runBatchImport(
 /**
  * Startup recovery for imports interrupted by a process restart.
  *
- * Resuming would mean guessing which candidates were already inserted, so the
- * simpler and honest strategy is chosen: an import stuck in `importing` is
- * marked `failed` with a BATCH_IMPORT_INTERRUPTED error. Submissions that were
- * already imported remain queued and are recovered by the judge scheduler;
- * batch items and partial counts stay intact for inspection. Jobs in
- * `queued`/`judging` are left alone because their status is derived from the
- * submissions, not owned by the importer.
+ * The uploaded ZIP is immutable and the plan is deterministic, so an import
+ * stuck in `importing` can be resumed instead of being thrown away: every
+ * `batch_items` row already written (imported, skipped or error) is treated as
+ * final, and the importer continues with the remaining sources. The job keeps
+ * `importing` while the resumed run works and settles back to `queued` (or
+ * `failed` when nothing could be imported), exactly like a fresh import.
+ *
+ * A job whose upload row or archive is gone cannot be resumed and is marked
+ * `failed` with `BATCH_RESUME_UPLOAD_MISSING`; jobs in `queued`/`judging` are
+ * left alone because their status is derived from the submissions.
  */
-export function recoverInterruptedBatchImports(db: DatabaseSync): number {
+export interface BatchRecoveryOptions {
+  config: Config;
+  /** Forwarded to a resumed import (tests/settings overrides). */
+  maxSourceBytes?: number;
+  /** Forwarded to a resumed import (tests/settings overrides). */
+  chunkSize?: number;
+}
+
+function parseProblemMap(json: string): Record<string, number> {
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    const map: Record<string, number> = {};
+    for (const [folder, value] of Object.entries(parsed as Record<string, unknown>)) {
+      const id = Number(value);
+      if (Number.isInteger(id) && id > 0) map[folder] = id;
+    }
+    return map;
+  } catch {
+    return {};
+  }
+}
+
+function markResumeFailed(
+  db: DatabaseSync,
+  batchId: number,
+  code: string,
+  message: string,
+): void {
+  setBatchStatus(db, batchId, 'failed');
+  setJobMeta(db, batchId, {
+    error: { code, message },
+    resumeFailedAt: Date.now(),
+  });
+}
+
+export function recoverInterruptedBatchImports(
+  db: DatabaseSync,
+  options: BatchRecoveryOptions,
+): number {
   const jobs = listImportingBatchJobs(db);
   for (const job of jobs) {
-    updateBatchJob(db, job.id, { status: 'failed' });
-    updateBatchJob(db, job.id, {
-      meta: {
-        ...readMeta(job),
-        error: {
-          code: 'BATCH_IMPORT_INTERRUPTED',
-          message: 'server restarted while the batch import was running',
-        },
-        recoveredAt: Date.now(),
+    if (isBatchImportActive(job.id)) continue;
+    if (!job.upload_id) {
+      markResumeFailed(db, job.id, 'BATCH_RESUME_UPLOAD_MISSING', 'upload id is missing');
+      continue;
+    }
+    const upload = getBatchUpload(db, job.upload_id);
+    if (!upload) {
+      markResumeFailed(
+        db,
+        job.id,
+        'BATCH_RESUME_UPLOAD_MISSING',
+        `upload ${job.upload_id} no longer exists`,
+      );
+      continue;
+    }
+    if (!existsSync(join(options.config.dataDir, upload.zip_path))) {
+      markResumeFailed(
+        db,
+        job.id,
+        'BATCH_RESUME_UPLOAD_MISSING',
+        `archive ${upload.zip_path} no longer exists`,
+      );
+      continue;
+    }
+    setJobMeta(db, job.id, { resumeRequestedAt: Date.now() });
+    startBatchImport(
+      {
+        db,
+        config: options.config,
+        maxSourceBytes: options.maxSourceBytes,
+        chunkSize: options.chunkSize,
       },
-    });
+      {
+        batchId: job.id,
+        uploadId: job.upload_id,
+        studentLevel: Math.max(1, Math.floor(job.student_level || 1)),
+        problemLevel: Math.max(0, Math.floor(job.problem_level ?? 0)),
+        problemId: job.problem_id,
+        problemMap: parseProblemMap(job.problem_map_json),
+        language: 'cpp17',
+      },
+    );
   }
   return jobs.length;
 }

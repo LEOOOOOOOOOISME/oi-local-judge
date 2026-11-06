@@ -175,6 +175,29 @@ export interface AdminProblemSummary extends ProblemSummary {
   ownerId: number | null;
 }
 
+/**
+ * GET /api/admin/problems/picker 的题目选择器项。
+ * `scope` 是把 owner 类型映射成 个人 / 团队 / 公共 后的结果；`kind` 与
+ * `type` 相同（standard / objective / ...），保留两种命名以兼容旧调用。
+ */
+export interface AdminProblemPickerItem {
+  id: number;
+  displayId: string;
+  title: string;
+  type: ProblemType;
+  kind: ProblemType;
+  tags: string[];
+  difficulty: number | null;
+  visibility: 'public' | 'hidden';
+  owner: { type: ProblemOwnerType; id: number | null };
+  ownerType: ProblemOwnerType;
+  ownerId: number | null;
+  ownerKind: 'personal' | 'team' | 'public';
+  scope: 'personal' | 'team' | 'public';
+  timeMs: number;
+  memoryMb: number;
+}
+
 /** Phase 1E 管理端：题目基础信息更新（所有字段可选）。 */
 export interface UpdateProblemRequest {
   title?: string;
