@@ -443,6 +443,61 @@ export const HELP_DOCS: HelpDoc[] = [
     ]
   },
   {
+    "slug": "maintenance/windows-deploy",
+    "title": "Windows 一键部署",
+    "category": "维护",
+    "path": "docs/help/maintenance/windows-deploy.md",
+    "html": "<h1 id=\"windows-一键部署\">Windows 一键部署</h1>\n<p>适用于 Windows 10/11 + PowerShell 5.1。脚本位于：</p>\n<pre><code class=\"language-text\">tools/deploy/windows/\n  install.ps1\n  uninstall.ps1\n  start.ps1\n  stop.ps1\n  status.ps1\n  oij-common.ps1\n</code></pre>\n<h2 id=\"前提\">前提</h2>\n<ul>\n<li>已构建：\n<ul>\n<li>仓库：<code>npm run build</code></li>\n<li>或便携版：<code>npm run build:release</code></li>\n</ul>\n</li>\n<li>Node.js 已安装（或使用便携版自带的资源路径）</li>\n<li>防火墙步骤需要管理员 PowerShell；可加 <code>-NoFirewall</code> 跳过</li>\n</ul>\n<h2 id=\"安装\">安装</h2>\n<pre><code class=\"language-powershell\"># 仓库/已构建目录\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\install.ps1\n\n# 指定便携版目录\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\install.ps1 `\n  -RepoRoot C:\\builds\\oi-local-judge-1.1.0-win-x64 `\n  -Port 8787\n</code></pre>\n<p>默认：</p>\n<pre><code class=\"language-text\">部署目录：%LOCALAPPDATA%\\OiJudge\\deploy\n数据目录：%LOCALAPPDATA%\\OiJudge\\runtime\n端口：8787\n</code></pre>\n<p>安装会：</p>\n<ol>\n<li>校验应用目录</li>\n<li>复制/链接应用树</li>\n<li>创建数据目录</li>\n<li>创建防火墙规则（默认）</li>\n<li>创建桌面快捷方式（默认）</li>\n<li>写 HKCU Run 开机自启（默认）</li>\n<li>启动服务并等待 <code>/api/health</code></li>\n<li>写 <code>install.json</code></li>\n</ol>\n<h2 id=\"先演练\">先演练</h2>\n<pre><code class=\"language-powershell\">powershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\install.ps1 -DryRun\n</code></pre>\n<p>DryRun 不修改机器，只打印计划。</p>\n<h2 id=\"启动-停止-状态\">启动 / 停止 / 状态</h2>\n<pre><code class=\"language-powershell\">powershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\start.ps1\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\stop.ps1\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\status.ps1\n</code></pre>\n<h2 id=\"卸载\">卸载</h2>\n<pre><code class=\"language-powershell\">powershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\uninstall.ps1\n</code></pre>\n<p>默认保留数据目录；按脚本提示选择是否删除。</p>\n<h2 id=\"参数\">参数</h2>\n<table>\n<thead>\n<tr>\n<th>参数</th>\n<th>说明</th>\n</tr>\n</thead>\n<tbody>\n<tr>\n<td><code>-RepoRoot</code></td>\n<td>应用源目录（仓库或便携版）</td>\n</tr>\n<tr>\n<td><code>-DeployDir</code></td>\n<td>部署目录</td>\n</tr>\n<tr>\n<td><code>-DataDir</code></td>\n<td>数据目录</td>\n</tr>\n<tr>\n<td><code>-Port</code></td>\n<td>端口，默认 8787</td>\n</tr>\n<tr>\n<td><code>-NoFirewall</code></td>\n<td>不创建防火墙规则</td>\n</tr>\n<tr>\n<td><code>-NoShortcut</code></td>\n<td>不创建桌面快捷方式</td>\n</tr>\n<tr>\n<td><code>-NoAutostart</code></td>\n<td>不写开机自启</td>\n</tr>\n<tr>\n<td><code>-DryRun</code></td>\n<td>只演练，不修改</td>\n</tr>\n</tbody>\n</table>\n<h2 id=\"故障排查\">故障排查</h2>\n<ul>\n<li>端口占用：先 <code>status.ps1</code>，确认 8787 是否被其他进程占用</li>\n<li>健康检查失败：查看数据目录下 <code>logs/</code> 与服务进程</li>\n<li>防火墙：校园网跨机器访问需要放行 TCP 端口</li>\n<li>开机自启：检查 HKCU Run 中的 <code>OiJudge</code></li>\n<li>重装：数据目录默认保留，升级前建议先做备份</li>\n</ul>\n<h2 id=\"与-electron-的关系\">与 Electron 的关系</h2>\n<p>桌面端还有托盘/开机自启；本脚本面向<strong>服务器式部署</strong>，适合一台 Windows 机器作为局域网 OJ 主机。</p>\n",
+    "plainText": "Windows 一键部署\n适用于 Windows 10/11 + PowerShell 5.1。脚本位于：\ntools/deploy/windows/\n  install.ps1\n  uninstall.ps1\n  start.ps1\n  stop.ps1\n  status.ps1\n  oij-common.ps1\n\n前提\n\n已构建：\n\n仓库：npm run build\n或便携版：npm run build:release\n\n\nNode.js 已安装（或使用便携版自带的资源路径）\n防火墙步骤需要管理员 PowerShell；可加 -NoFirewall 跳过\n\n安装\n# 仓库/已构建目录\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\install.ps1\n\n# 指定便携版目录\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\install.ps1 `\n  -RepoRoot C:\\builds\\oi-local-judge-1.1.0-win-x64 `\n  -Port 8787\n\n默认：\n部署目录：%LOCALAPPDATA%\\OiJudge\\deploy\n数据目录：%LOCALAPPDATA%\\OiJudge\\runtime\n端口：8787\n\n安装会：\n\n校验应用目录\n复制/链接应用树\n创建数据目录\n创建防火墙规则（默认）\n创建桌面快捷方式（默认）\n写 HKCU Run 开机自启（默认）\n启动服务并等待 /api/health\n写 install.json\n\n先演练\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\install.ps1 -DryRun\n\nDryRun 不修改机器，只打印计划。\n启动 / 停止 / 状态\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\start.ps1\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\stop.ps1\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\status.ps1\n\n卸载\npowershell -ExecutionPolicy Bypass -File tools\\deploy\\windows\\uninstall.ps1\n\n默认保留数据目录；按脚本提示选择是否删除。\n参数\n\n\n\n参数\n说明\n\n\n\n\n-RepoRoot\n应用源目录（仓库或便携版）\n\n\n-DeployDir\n部署目录\n\n\n-DataDir\n数据目录\n\n\n-Port\n端口，默认 8787\n\n\n-NoFirewall\n不创建防火墙规则\n\n\n-NoShortcut\n不创建桌面快捷方式\n\n\n-NoAutostart\n不写开机自启\n\n\n-DryRun\n只演练，不修改\n\n\n\n故障排查\n\n端口占用：先 status.ps1，确认 8787 是否被其他进程占用\n健康检查失败：查看数据目录下 logs/ 与服务进程\n防火墙：校园网跨机器访问需要放行 TCP 端口\n开机自启：检查 HKCU Run 中的 OiJudge\n重装：数据目录默认保留，升级前建议先做备份\n\n与 Electron 的关系\n桌面端还有托盘/开机自启；本脚本面向服务器式部署，适合一台 Windows 机器作为局域网 OJ 主机。\n",
+    "headings": [
+      {
+        "id": "windows-一键部署",
+        "text": "Windows 一键部署",
+        "level": 1
+      },
+      {
+        "id": "前提",
+        "text": "前提",
+        "level": 2
+      },
+      {
+        "id": "安装",
+        "text": "安装",
+        "level": 2
+      },
+      {
+        "id": "先演练",
+        "text": "先演练",
+        "level": 2
+      },
+      {
+        "id": "启动-停止-状态",
+        "text": "启动 / 停止 / 状态",
+        "level": 2
+      },
+      {
+        "id": "卸载",
+        "text": "卸载",
+        "level": 2
+      },
+      {
+        "id": "参数",
+        "text": "参数",
+        "level": 2
+      },
+      {
+        "id": "故障排查",
+        "text": "故障排查",
+        "level": 2
+      },
+      {
+        "id": "与-electron-的关系",
+        "text": "与 Electron 的关系",
+        "level": 2
+      }
+    ]
+  },
+  {
     "slug": "contest/ranking",
     "title": "排名与赛制",
     "category": "比赛",
