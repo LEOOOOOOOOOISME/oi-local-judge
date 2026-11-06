@@ -2,7 +2,7 @@
 
 最后更新：2026-11-06  
 当前分支：`feat/1.1-stability-authoring`  
-当前 HEAD：`2b0e0f2 docs: record round 139 batch P0 and statistics S1`  
+当前 HEAD：`db84c2a merge: streaming async batch imports`  
 当前 Release：`v1.1.0-rc.6`
 
 ---
@@ -180,7 +180,10 @@
   - 成员进度
   - 逾期
   - 教练/owner/admin 管理
-  - 比赛管理员可管理任意组（列表可见性仍有限）
+  - 比赛管理员可管理任意组
+  - `scope=mine|all`：平台管理员默认查看全部计划
+  - summary 含 `memberCount`
+  - 管理员/普通用户列表标题与空态区分
 - 错题/进度：
   - `student_problem_stats`
   - `student_tag_stats`
@@ -259,19 +262,42 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - `SH-S01313/migrate.cpp` 216.8 MB > 后端 64 MB 限制
 - 批量循环没有逐文件 catch -> 整批 500
 
+### 已完成 P1 后端
+
+- 流式 ZIP 上传：
+  - raw zip 流式落盘
+  - `.part` + rename
+  - sha256
+  - Content-Length 预检
+  - 5 GiB 上限
+  - 磁盘预检
+- 流式预览：
+  - fflate 流式解压
+  - treeSample/students/problemFolders
+  - invalidStudents/duplicates
+  - 路径安全校验
+- 后台异步导入：
+  - `POST /uploads/:id/run` 202
+  - 500 条事务
+  - 密码每批只 hash 一次
+  - batch 优先级 10
+  - 逐条失败隔离
+- 进度/分页/取消：
+  - `GET /api/admin/batch/:id`
+  - `POST /api/admin/batch/:id/cancel`
+  - 状态 uploaded/importing/queued/judging/finished/failed/canceled
+- 启动恢复：importing 标记 failed（不 resume）
+
 ### 未完成 P1
 
-- 流式 ZIP 上传
-- 流式解压
-- 后台异步导入
-- 分批事务
-- 真正的映射工作区
+- 真正的映射工作区 UI
 - 文件结构可视化
 - 个人/团队/公共题目搜索
 - 按题目顺序批量绑定
 - Excel/HTML 批量导出
 - 学生×题目矩阵
 - 5000×4 压力验收
+- 导入恢复（resume）
 
 ## 3.5 统计 / UI / PDF
 
@@ -359,10 +385,10 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 当前验证：
 
-- `npm test`：**103 文件 / 912 用例通过**
+- `npm test`：**104 文件 / 924 用例通过**
 - `npm run build`：通过
 - `npm run web:build`：通过
-- 浏览器 E2E：基础主流程通过
+- 浏览器 E2E：2 passed（主流程 + 建班/学生访问）
 - 子代理统计页烟测：图表/分析/虚拟表/搜索通过
 
 ---

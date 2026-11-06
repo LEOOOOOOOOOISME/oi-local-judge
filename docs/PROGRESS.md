@@ -2,6 +2,65 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-06 / Round 141（批量 P1 后端 + 训练列表 + E2E）
+
+### 本轮提交
+
+- `db84c2a merge: streaming async batch imports`
+- `e43f5a2 merge: all training plans for managers`
+- `d5dadfe merge: business flow e2e`
+
+### 已完成
+
+1. **批量 P1 后端**
+   - `POST /api/admin/batch/uploads` raw zip 流式落盘，`.part` + rename，sha256。
+   - Content-Length 预检（411）、5 GiB 上限（413）、磁盘预检（507）。
+   - `GET /uploads/:id/preview`：流式 fflate，treeSample/students/problemFolders/invalid/duplicates/validCount。
+   - `POST /uploads/:id/run` 202，后台导入：
+     - 500 条事务
+     - 密码每批一次
+     - batch 优先级 10
+     - 逐条失败隔离
+   - `GET /api/admin/batch/:id` 分页/进度；`POST /:id/cancel`。
+   - 启动恢复：importing 标记 failed（不 resume）。
+   - 旧 P0 入口保留兼容。
+2. **训练计划全量列表**
+   - `GET /api/training-plans?scope=mine|all`
+   - all 仅 admin/contestmanager
+   - 管理员默认 all；普通用户 mine
+   - summary 增加 memberCount
+   - 前端管理员“全部训练计划”/普通“我的训练计划”
+3. **业务流 E2E**
+   - 合并到当前分支
+   - `test:e2e:browser` 同时跑 browser + business-flow
+   - admin 建班、加学生、学生登录见班级
+   - 新增统计页/批量页冒烟
+
+### 验证
+
+- 全量 `npm test`：**104 文件 / 924 用例通过**
+- `npm run build`：通过
+- `npm run test:e2e:browser`：**2 passed**
+- 工作树：干净
+
+### 仍缺
+
+- 批量映射工作区 UI、文件结构图、题目搜索/顺序绑定
+- Excel/HTML 批量导出、学生×题目矩阵
+- 5000×4 压力测试
+- 导入 resume
+- 统计 5000+ 服务端分页、班级/训练复用
+- 洛谷题号、题目附件
+- Windows 服务化、rc.7、4C/8G 验收
+
+### 下一轮
+
+1. 批量映射工作区 UI + Excel/HTML 导出
+2. 统计 S3：班级/训练复用
+3. 洛谷题号 + 附件
+4. 5000×4 / 4C8G 验收
+5. rc.7
+
 ## 2026-11-06 / Round 140（需求总账）
 
 ### 本轮产出
