@@ -19,18 +19,25 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost, apiPut } from '../api/client';
 import type {
   BackupEntry,
+  BackupKind,
   DiagnosticCheck,
   DiagnosticsReport,
   DiagnosticStatus,
+  LearningStatsRebuildResult,
   RestoreRequestResult,
+  RuntimeMetrics,
+  SlowRequest,
   SystemSettings,
   SystemSettingsEffective,
   SystemSettingsPatch,
   SystemSettingsUpdateResult,
+  UpdateCheckFailure,
+  UpdateCheckResult,
+  UpdatePrepareResult,
 } from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
-import { formatBytes, formatDateTime } from '../utils/format';
+import { formatBytes, formatDateTime, formatDuration } from '../utils/format';
 import '../styles/admin.css';
 
 const CHECK_STATUS_META: Record<DiagnosticStatus, { label: string; color: string }> = {
@@ -236,6 +243,410 @@ function DiagnosticsPanel() {
           />
         </>
       )}
+    </Card>
+  );
+}
+
+/** 毫秒的紧凑展示：小于 10 ms 保留两位，其余保留一位。 */
+function formatMetricsMs(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value) || value < 0) return '—';
+  if (value >= 1000) return `${(value / 1000).toFixed(2)} s`;
+  return `${value < 10 ? value.toFixed(2) : value.toFixed(1)} ms`;
+}
+
+const SLOW_REQUEST_COLUMNS: TableColumnsType<SlowRequest> = [
+  {
+    title: '时间',
+    dataIndex: 'at',
+    width: 170,
+    render: (value: number) => <span className="mono">{formatDateTime(value)}</span>,
+  },
+  {
+    title: '方法',
+    dataIndex: 'method',
+    width: 90,
+    render: (value: string) => <span className="mono">{value}</span>,
+  },
+  {
+    title: '路径',
+    dataIndex: 'url',
+    render: (value: string) => (
+      <span className="mono system-metrics-path" title={value}>
+        {value}
+      </span>
+    ),
+  },
+  {
+    title: '状态',
+    dataIndex: 'status',
+    width: 90,
+    render: (value: number) => (
+      <Tag color={value >= 500 ? 'red' : value >= 400 ? 'gold' : 'green'}>{value}</Tag>
+    ),
+  },
+  {
+    title: '耗时',
+    dataIndex: 'durationMs',
+    width: 110,
+    render: (value: number) => (
+      <span className="mono system-metrics-duration">{formatMetricsMs(value)}</span>
+    ),
+  },
+];
+
+function MetricsPanel() {
+  const metricsQuery = useQuery({
+    queryKey: ['admin-system-metrics'],
+    queryFn: () => apiGet<RuntimeMetrics>('/api/admin/system/metrics'),
+  });
+  const metrics = metricsQuery.data;
+  const hasServerErrors = (metrics?.requests.serverErrors ?? 0) > 0;
+
+  return (
+    <Card
+      className="oij-card"
+      title="运行指标"
+      extra={
+        <Button
+          icon={<ReloadOutlined />}
+          loading={metricsQuery.isFetching}
+          onClick={() => void metricsQuery.refetch()}
+        >
+          刷新
+        </Button>
+      }
+    >
+      {metricsQuery.isError ? (
+        <ErrorResult error={metricsQuery.error} onRetry={() => void metricsQuery.refetch()} />
+      ) : !metrics ? (
+        <PageLoading tip="正在读取运行指标…" />
+      ) : (
+        <>
+          <Alert
+            className="system-overall"
+            type="info"
+            showIcon
+            message="进程内本地指标，仅统计本次启动以来的数据"
+            description={`生成时间：${formatDateTime(metrics.generatedAt)} · 进程启动：${formatDateTime(
+              metrics.process.startedAt,
+            )} · 数据目录剩余：${metrics.disk ? formatBytes(metrics.disk.freeBytes) : '未知'}`}
+          />
+          <div className="system-stat-grid">
+            <div className="system-stat">
+              <div className="system-stat-label">请求总数</div>
+              <div className="system-stat-value mono">{metrics.requests.total}</div>
+            </div>
+            <div className={`system-stat ${hasServerErrors ? 'system-stat-bad' : ''}`}>
+              <div className="system-stat-label">5xx 响应</div>
+              <div className="system-stat-value mono">{metrics.requests.serverErrors}</div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">平均延迟</div>
+              <div className="system-stat-value mono">
+                {formatMetricsMs(metrics.requests.avgLatencyMs)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">p95 延迟</div>
+              <div className="system-stat-value mono">
+                {formatMetricsMs(metrics.requests.p95LatencyMs)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">事件循环 p95</div>
+              <div className="system-stat-value mono">
+                {formatMetricsMs(metrics.eventLoopDelay.p95Ms)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">常驻内存 RSS</div>
+              <div className="system-stat-value system-stat-value-text mono">
+                {formatBytes(metrics.process.rssBytes)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">堆内存</div>
+              <div className="system-stat-value system-stat-value-text mono">
+                {formatBytes(metrics.process.heapUsedBytes)} /{' '}
+                {formatBytes(metrics.process.heapTotalBytes)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">CPU 使用率</div>
+              <div className="system-stat-value mono">
+                {metrics.process.cpu.percent.toFixed(1)}%
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">运行时长</div>
+              <div className="system-stat-value system-stat-value-text mono">
+                {formatDuration(metrics.process.uptimeSec * 1000)}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">评测队列</div>
+              <div className="system-stat-value system-stat-value-text mono">
+                排队 {metrics.queue.queued} · 运行 {metrics.queue.running} · 失败{' '}
+                {metrics.queue.failed}
+              </div>
+            </div>
+          </div>
+          <div className="system-metrics-title">慢请求（≥ 500 ms，最近 50 条）</div>
+          <Table<SlowRequest>
+            className="oij-table"
+            rowKey={(row) => `${row.at}-${row.method}-${row.url}`}
+            size="small"
+            columns={SLOW_REQUEST_COLUMNS}
+            dataSource={metrics.slowRequests}
+            pagination={false}
+            locale={{ emptyText: '暂无慢请求' }}
+          />
+        </>
+      )}
+    </Card>
+  );
+}
+
+function LearningStatsPanel() {
+  const { message } = App.useApp();
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null,
+  );
+
+  const rebuildMutation = useMutation({
+    mutationFn: () =>
+      apiPost<LearningStatsRebuildResult>('/api/admin/system/learning-stats/rebuild'),
+    onSuccess: (result) => {
+      const text = `学习统计已重建：${result.users} 名学生，${result.problems} 条题目记录、${result.tags} 条标签记录、${result.days} 条每日记录，用时 ${formatMetricsMs(result.durationMs)}。`;
+      setFeedback({ type: 'success', text });
+      message.success('学习统计已重建');
+    },
+    onError: (error) => {
+      const text = error instanceof Error ? error.message : '学习统计重建失败';
+      setFeedback({ type: 'error', text });
+      message.error(text);
+    },
+  });
+
+  return (
+    <Card
+      className="oij-card"
+      title="学习统计"
+      extra={
+        <Button
+          type="primary"
+          icon={<ReloadOutlined />}
+          loading={rebuildMutation.isPending}
+          onClick={() => rebuildMutation.mutate()}
+        >
+          重建学习统计
+        </Button>
+      }
+    >
+      <Alert
+        className="system-settings-note"
+        type="info"
+        showIcon
+        message="学习统计缓存会定时重建"
+        description="服务启动约 2 分钟后首次重建，之后每 6 小时自动重建一次（可用 OIJ_STATS_REBUILD=0 关闭）。这里可以立即手动重建；重建是同步操作，数据量大时会短暂占用服务进程。"
+      />
+      {feedback ? (
+        <Alert
+          className="system-settings-note"
+          type={feedback.type}
+          showIcon
+          message={feedback.text}
+          closable
+          onClose={() => setFeedback(null)}
+        />
+      ) : null}
+    </Card>
+  );
+}
+
+function isUpdateFailure(result: UpdateCheckResult): result is UpdateCheckFailure {
+  return 'error' in result;
+}
+
+/**
+ * 升级页：只做版本检查与升级前备份，不下载、不安装任何更新。
+ * 后端把网络失败封装在 200 响应中，这里按结构化错误友好展示。
+ */
+function UpgradePanel() {
+  const { message } = App.useApp();
+  const queryClient = useQueryClient();
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(
+    null,
+  );
+
+  const updateQuery = useQuery({
+    queryKey: ['admin-system-update-check'],
+    queryFn: () => apiGet<UpdateCheckResult>('/api/admin/system/update-check'),
+    // 检查会访问 GitHub；失败时不做自动重试，由用户点“检查更新”重试。
+    retry: false,
+    refetchOnWindowFocus: false,
+    staleTime: 60 * 60 * 1000,
+  });
+
+  const result = updateQuery.data;
+  const info = result && !isUpdateFailure(result) ? result : null;
+  const failure = result && isUpdateFailure(result) ? result : null;
+
+  const prepareMutation = useMutation({
+    mutationFn: () => apiPost<UpdatePrepareResult>('/api/admin/system/update/prepare'),
+    onSuccess: (prepared) => {
+      const text = `升级前备份已创建：${prepared.backup.id}（${formatBytes(
+        prepared.backup.sizeBytes,
+      )}）。当前版本 ${prepared.currentVersion}；未下载或安装任何更新。`;
+      setFeedback({ type: 'success', text });
+      message.success('升级前备份已创建');
+      void queryClient.invalidateQueries({ queryKey: ['admin-system-backups'] });
+    },
+    onError: (error) => {
+      const text = error instanceof Error ? error.message : '升级前备份创建失败';
+      setFeedback({ type: 'error', text });
+      message.error(text);
+    },
+  });
+
+  return (
+    <Card
+      className="oij-card"
+      title="版本升级"
+      extra={
+        <Button
+          icon={<ReloadOutlined />}
+          loading={updateQuery.isFetching}
+          onClick={() => void updateQuery.refetch()}
+        >
+          检查更新
+        </Button>
+      }
+    >
+      <Alert
+        className="system-settings-note"
+        type="info"
+        showIcon
+        message="不会自动下载或安装更新"
+        description="这里只检查 GitHub Releases 中版本号最高的发布（默认包含预发布版本），并按需创建升级前备份。升级本身请按 Release 页面说明手动完成。"
+      />
+
+      {updateQuery.isError ? (
+        <ErrorResult error={updateQuery.error} onRetry={() => void updateQuery.refetch()} />
+      ) : updateQuery.isPending ? (
+        <PageLoading tip="正在检查最新版本…" />
+      ) : (
+        <>
+          <div className="system-stat-grid">
+            <div className="system-stat">
+              <div className="system-stat-label">当前版本</div>
+              <div className="system-stat-value mono">{info?.current ?? failure?.current ?? '—'}</div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">最新版本</div>
+              <div className="system-stat-value mono">
+                {info?.latest ?? '—'}
+                {info?.isPrerelease ? (
+                  <Tag color="gold" style={{ marginLeft: 8 }}>
+                    预发布
+                  </Tag>
+                ) : null}
+              </div>
+            </div>
+            <div className={`system-stat ${info?.updateAvailable ? 'system-stat-warn' : ''}`}>
+              <div className="system-stat-label">更新状态</div>
+              <div className="system-stat-value system-stat-value-text">
+                {info ? (info.updateAvailable ? '有新版本可用' : '已是最新版本') : '检查失败'}
+              </div>
+            </div>
+            <div className="system-stat">
+              <div className="system-stat-label">上次检查</div>
+              <div className="system-stat-value system-stat-value-text">
+                {formatDateTime(info?.checkedAt ?? failure?.checkedAt)}
+              </div>
+            </div>
+          </div>
+
+          {failure ? (
+            <Alert
+              className="system-settings-note"
+              type="warning"
+              showIcon
+              message="检查更新失败"
+              description={`${failure.error}。请检查网络连接或稍后重试。`}
+            />
+          ) : null}
+
+          {info?.updateAvailable ? (
+            <Alert
+              className="system-settings-note"
+              type="success"
+              showIcon
+              message={
+                <Space size={6}>
+                  <span>发现新版本 {info.latest}</span>
+                  {info.isPrerelease ? <Tag color="gold">预发布</Tag> : null}
+                </Space>
+              }
+              description={
+                <Space direction="vertical" size={4}>
+                  <span>
+                    {info.tagName ? `标签：${info.tagName}。` : ''}
+                    {info.publishedAt ? `发布时间：${formatDateTime(info.publishedAt)}。` : ''}
+                    升级前建议先创建备份。
+                  </span>
+                  {info.url ? (
+                    <a href={info.url} target="_blank" rel="noreferrer">
+                      查看 Release 与下载说明
+                    </a>
+                  ) : null}
+                </Space>
+              }
+            />
+          ) : info ? (
+            <Alert
+              className="system-settings-note"
+              type="success"
+              showIcon
+              message="已是最新版本"
+              description={`当前版本 ${info.current} 不早于最新发布版本 ${info.latest}。`}
+            />
+          ) : null}
+
+          {info?.notes ? (
+            <div className="system-settings-note">
+              <div className="system-metrics-title">Release 说明</div>
+              <div style={{ whiteSpace: 'pre-wrap', maxHeight: 260, overflow: 'auto' }}>
+                {info.notes}
+              </div>
+            </div>
+          ) : null}
+        </>
+      )}
+
+      {feedback ? (
+        <Alert
+          className="system-settings-note"
+          type={feedback.type}
+          showIcon
+          message={feedback.text}
+          closable
+          onClose={() => setFeedback(null)}
+        />
+      ) : null}
+
+      <div className="system-settings-footer">
+        <span className="muted">
+          创建升级前备份会把数据库与 problems / submissions / plugins / hacks 目录复制到 backups 下。
+        </span>
+        <Button
+          type="primary"
+          loading={prepareMutation.isPending}
+          onClick={() => prepareMutation.mutate()}
+        >
+          创建升级前备份
+        </Button>
+      </div>
     </Card>
   );
 }
@@ -509,6 +920,13 @@ function SettingsPanel() {
   );
 }
 
+const BACKUP_KIND_META: Record<BackupKind, { label: string; color?: string }> = {
+  manual: { label: '手动备份' },
+  auto: { label: '自动备份', color: 'blue' },
+  'pre-restore': { label: '恢复前快照', color: 'gold' },
+  'pre-upgrade': { label: '升级前备份', color: 'purple' },
+};
+
 const BACKUP_COLUMNS: TableColumnsType<BackupEntry> = [
   {
     title: '备份 ID',
@@ -524,14 +942,12 @@ const BACKUP_COLUMNS: TableColumnsType<BackupEntry> = [
   },
   {
     title: '类型',
-    dataIndex: 'manifest',
+    dataIndex: 'kind',
     width: 130,
-    render: (manifest: Record<string, unknown>) =>
-      manifest.kind === 'pre-restore' ? (
-        <Tag color="gold">恢复前快照</Tag>
-      ) : (
-        <Tag>手动备份</Tag>
-      ),
+    render: (value: BackupKind) => {
+      const meta = BACKUP_KIND_META[value] ?? BACKUP_KIND_META.manual;
+      return <Tag color={meta.color}>{meta.label}</Tag>;
+    },
   },
   {
     title: '大小',
@@ -722,7 +1138,7 @@ function BackupsPanel() {
               </span>
               <span>
                 类型：
-                {restoreTarget.manifest.kind === 'pre-restore' ? '恢复前快照' : '手动备份'}
+                {BACKUP_KIND_META[restoreTarget.kind]?.label ?? '手动备份'}
               </span>
             </div>
             <div>
@@ -760,13 +1176,16 @@ export function AdminSystemPage() {
       <PageHead
         breadcrumb={[{ label: '管理', to: '/admin/problems' }, { label: '系统运维' }]}
         title="系统运维"
-        subtitle="查看运行环境诊断，修改需要重启生效的系统设置，并创建或恢复数据备份。"
+        subtitle="查看运行环境诊断，修改需要重启生效的系统设置，检查版本更新并创建升级前备份。"
       />
       <Tabs
         className="admin-tabs"
         defaultActiveKey="diagnostics"
         items={[
           { key: 'diagnostics', label: '诊断', children: <DiagnosticsPanel /> },
+          { key: 'metrics', label: '指标', children: <MetricsPanel /> },
+          { key: 'learning-stats', label: '学习统计', children: <LearningStatsPanel /> },
+          { key: 'upgrade', label: '升级', children: <UpgradePanel /> },
           { key: 'settings', label: '设置', children: <SettingsPanel /> },
           { key: 'backups', label: '备份', children: <BackupsPanel /> },
         ]}

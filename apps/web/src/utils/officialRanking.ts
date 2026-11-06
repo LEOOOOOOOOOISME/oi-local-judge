@@ -3,12 +3,14 @@ import type {
   Contest,
   OfficialRanking,
   OfficialRankingCell,
+  OfficialRankingPage,
   OfficialRankingProblem,
   OfficialRankingRow,
   RankingPreset,
   RankingRow,
 } from '../api/types';
 import { rankingProblemLetter } from './ranking';
+import { searchRankingRows } from './statistics';
 
 export const PRESET_LABEL: Record<RankingPreset, string> = {
   oi: 'OI 正式榜',
@@ -90,10 +92,19 @@ async function fetchLegacyRanking(contestId: number): Promise<OfficialRanking> {
   return legacyRankingToOfficial(contest, legacyRows);
 }
 
-/** 优先正式榜；仅 404（旧后端/旧比赛数据）回退旧 /ranking。 */
-export async function fetchOfficialRanking(contestId: number): Promise<OfficialRanking> {
+/**
+ * 优先正式榜；仅 404（旧后端/旧比赛数据）回退旧 /ranking。
+ * `includeHidden` 仅管理员/比赛管理员可传，用于管理版统计与个人成绩 PDF。
+ */
+export async function fetchOfficialRanking(
+  contestId: number,
+  includeHidden = false,
+): Promise<OfficialRanking> {
+  const query = includeHidden ? '?includeHidden=1' : '';
   try {
-    return await apiGet<OfficialRanking>(`/api/contests/${contestId}/official-ranking`);
+    return await apiGet<OfficialRanking>(
+      `/api/contests/${contestId}/official-ranking${query}`,
+    );
   } catch (error) {
     if (!(error instanceof ApiError) || error.status !== 404) throw error;
     try {
@@ -101,6 +112,47 @@ export async function fetchOfficialRanking(contestId: number): Promise<OfficialR
     } catch {
       throw error;
     }
+  }
+}
+
+export interface RankingPageParams {
+  offset: number;
+  limit: number;
+  query?: string;
+}
+
+/**
+ * 统计页成绩表的服务端分页：只请求当前页，后端负责搜索与切片。
+ * 旧后端（/page 404）回退到完整正式榜，并在前端做同样的切片。
+ */
+export async function fetchOfficialRankingPage(
+  contestId: number,
+  params: RankingPageParams,
+  includeHidden = false,
+): Promise<OfficialRankingPage> {
+  const search = new URLSearchParams({
+    offset: String(Math.max(0, Math.floor(params.offset))),
+    limit: String(Math.max(1, Math.floor(params.limit))),
+  });
+  const query = params.query?.trim();
+  if (query) search.set('query', query);
+  if (includeHidden) search.set('includeHidden', '1');
+  const path = `/api/contests/${contestId}/official-ranking/page?${search.toString()}`;
+  try {
+    return await apiGet<OfficialRankingPage>(path);
+  } catch (error) {
+    if (!(error instanceof ApiError) || error.status !== 404) throw error;
+    const ranking = await fetchOfficialRanking(contestId, includeHidden);
+    const filtered = searchRankingRows(ranking.rows, query ?? '');
+    return {
+      ...ranking,
+      items: filtered.slice(params.offset, params.offset + params.limit),
+      total: filtered.length,
+      allTotal: ranking.rows.length,
+      offset: params.offset,
+      limit: params.limit,
+      query: query ?? '',
+    };
   }
 }
 

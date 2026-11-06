@@ -301,14 +301,60 @@ export function ContestRankingPage() {
       align: 'right',
       render: (value: number) => <span className="mono">{value}</span>,
     },
-    {
-      title: '总分',
-      dataIndex: 'totalScore',
-      width: 84,
-      align: 'right',
-      render: (value: number) => <strong className="rank-total">{value}</strong>,
-    },
   ];
+
+  // ACM/CF-like 团队榜按过题数与罚时排序；OI/IOI 仍看每题最高分求和。
+  // CF-like 的 totalScore 含 Hack 分，额外展示；ACM 的 totalScore 等于过题数，
+  // 为避免重复不再展示。
+  const teamScoreColumns: TableColumnsType<TeamRankingRow> = isAcm
+    ? [
+        {
+          title: '通过题数',
+          dataIndex: 'solved',
+          width: 82,
+          align: 'right',
+          render: (value: number) => <span className="mono">{value}</span>,
+        },
+        {
+          title: '罚时',
+          dataIndex: 'penalty',
+          width: 82,
+          align: 'right',
+          render: (value: number) => <span className="mono">{value}</span>,
+        },
+        ...(preset === 'cf-like'
+          ? [
+              {
+                title: '总分',
+                dataIndex: 'totalScore' as const,
+                width: 84,
+                align: 'right' as const,
+                render: (value: number | undefined) =>
+                  typeof value === 'number' ? (
+                    <strong className="rank-total">{value}</strong>
+                  ) : (
+                    <span className="muted">—</span>
+                  ),
+              },
+            ]
+          : []),
+      ]
+    : [
+        {
+          title: '总分',
+          dataIndex: 'totalScore',
+          width: 84,
+          align: 'right',
+          render: (value: number) => <strong className="rank-total">{value}</strong>,
+        },
+        {
+          title: 'AC 数',
+          dataIndex: 'solved',
+          width: 82,
+          align: 'right',
+          render: (value: number) => <span className="mono">{value}</span>,
+        },
+      ];
 
   const teamProblemColumns: TableColumnsType<TeamRankingRow> = problems.map(
     (problem, index) => ({
@@ -328,13 +374,24 @@ export function ContestRankingPage() {
   );
 
   const teamTrailingColumns: TableColumnsType<TeamRankingRow> = [
-    {
-      title: 'AC 数',
-      dataIndex: 'solved',
-      width: 82,
-      align: 'right',
-      render: (value: number) => <span className="mono">{value}</span>,
-    },
+    ...(preset === 'cf-like'
+      ? [
+          {
+            title: 'Hack 分',
+            dataIndex: 'hackScore' as const,
+            width: 86,
+            align: 'right' as const,
+            render: (value: number | undefined) =>
+              value === undefined ? (
+                <span className="muted">—</span>
+              ) : (
+                <span className={value < 0 ? 'correction-total-changed mono' : 'mono'}>
+                  {value > 0 ? `+${value}` : value}
+                </span>
+              ),
+          },
+        ]
+      : []),
     {
       title: '最后 AC',
       dataIndex: 'lastAcAt',
@@ -356,7 +413,7 @@ export function ContestRankingPage() {
       }
       downloadCsv(
         `contest-${contestId}-team-ranking.csv`,
-        buildTeamRankingCsv(problems, teamRows),
+        buildTeamRankingCsv(problems, teamRows, isAcm, preset === 'cf-like'),
       );
       message.success('团队榜 CSV 已导出');
       return;
@@ -393,7 +450,9 @@ export function ContestRankingPage() {
         }
         subtitle={
           activeView === 'team'
-            ? '团队榜：每题取团队成员最佳得分后求和，仅统计已报名团队。'
+            ? isAcm
+              ? `${presetLabel(preset)}：团队榜按通过题数与罚时排序，仅统计已报名团队。`
+              : '团队榜：每题取团队成员最佳得分后求和，仅统计已报名团队。'
             : isAcm
               ? `${presetLabel(preset)}：按通过题数与罚时排序，正式榜数据只读。`
               : `${presetLabel(preset)}：每题取正式得分，总分降序；正式榜数据只读。`
@@ -480,6 +539,7 @@ export function ContestRankingPage() {
               columns={[
                 ...teamBaseColumns,
                 ...teamProblemColumns,
+                ...teamScoreColumns,
                 ...teamTrailingColumns,
               ]}
               dataSource={teamRows}

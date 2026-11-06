@@ -5,343 +5,413 @@ import {
   Button,
   Card,
   Empty,
+  Progress,
+  Segmented,
   Select,
   Space,
   Spin,
   Table,
   Tag,
+  Tooltip,
 } from 'antd';
 import type { TableColumnsType } from 'antd';
-import { DownloadOutlined, InboxOutlined, PlayCircleOutlined } from '@ant-design/icons';
+import {
+  DownloadOutlined,
+  FileExcelOutlined,
+  Html5Outlined,
+  InboxOutlined,
+  PlayCircleOutlined,
+  ReloadOutlined,
+  StopOutlined,
+  TableOutlined,
+} from '@ant-design/icons';
 import { useQuery } from '@tanstack/react-query';
-import { ApiError, apiGet, apiPost, apiUpload } from '../api/client';
+import { apiGet, apiPost, apiUploadWithProgress, downloadApiFile } from '../api/client';
 import type {
-  AdminProblemSummary,
+  AdminProblemPickerItem,
+  BatchAsyncRunResult,
+  BatchExportFormat,
+  BatchFailureItem,
+  BatchImportStatus,
+  BatchItemStatus,
   BatchJob,
+  BatchPreview,
   BatchResultItem,
-  BatchRunResult,
-  BatchUploadResult,
+  BatchUploadStreamResult,
   SubmissionStatus,
 } from '../api/types';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { VerdictBadge } from '../components/VerdictBadge';
 import {
-  formatMemoryKb,
-  formatRunTime,
-} from '../utils/format';
+  BATCH_PROBLEM_SCOPE_OPTIONS,
+  applyOrderedMapping,
+  autoProblemId,
+  batchStatusColor,
+  batchStatusLabel,
+  describeBatchError,
+  estimateSubmissions,
+  isBatchActive,
+  levelExample,
+  MAX_BATCH_ZIP_BYTES,
+  problemScope,
+  treeSampleRows,
+  validateFolderMapping,
+  validateZipFile,
+  type BatchProblemScope,
+} from '../utils/batch';
+import { formatBytes, formatMemoryKb, formatRunTime } from '../utils/format';
 import { SUBMISSION_STATUS_LABEL } from '../utils/status';
 import '../styles/admin.css';
 import '../styles/batch.css';
 
-const MAX_UPLOAD_BYTES = 80 * 1024 * 1024;
-const SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx']);
-const LEVEL_OPTIONS = Array.from({ length: 6 }, (_, index) => ({
-  value: index + 1,
-  label: `第 ${index + 1} 层`,
-}));
+const DEFAULT_PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = ['20', '50', '100', '200'];
 
-interface ParsedStudent {
-  student: string;
-  path: string;
-}
+type LevelState = { studentLevel: number; problemLevel: number };
 
-interface MultiPair {
-  student: string;
-  folder: string;
-  problemId: number;
-  problemTitle: string;
-  path: string;
-}
+const SOURCE_SKIP_REASON_LABEL: Record<string, string> = {
+  UNSAFE_PATH: '路径不安全',
+  BATCH_FILE_TOO_LARGE: '单个文件超过 512 MB',
+  ENTRY_ERROR: '压缩条目读取失败',
+};
 
-function extensionOf(path: string): string {
-  const index = path.lastIndexOf('.');
-  return index >= 0 ? path.slice(index).toLowerCase() : '';
-}
+const ERROR_CODE_LABEL: Record<string, string> = {
+  SOURCE_TOO_LARGE: '源码超过管理员上限',
+  EMPTY_SOURCE: '源码为空',
+  UNSUPPORTED_SOURCE: '题目类型不支持该源码',
+  UNMAPPED_PROBLEM: '题目文件夹未映射',
+  INVALID_STUDENT_FOLDER: '无效学生文件夹（缺少可用源码）',
+  USER_CREATE_FAILED: '创建合成学生失败',
+  SUBMIT_FAILED: '创建提交失败',
+  UNSAFE_PATH: 'zip 路径不安全',
+  EXTRACT_FAILED: '源码解压失败',
+  BATCH_IMPORT_INTERRUPTED: '服务重启导致导入中断',
+  BATCH_RESUME_UPLOAD_MISSING: '服务重启后无法恢复（上传文件已丢失）',
+};
 
-function isSourceFile(path: string): boolean {
-  return SOURCE_EXTENSIONS.has(extensionOf(path));
-}
-
-function autoProblemId(
-  folder: string,
-  problems: Map<number, AdminProblemSummary>,
-): number | null {
-  if (!/^\d+$/.test(folder)) return null;
-  const id = Number(folder);
-  return Number.isInteger(id) && problems.has(id) ? id : null;
-}
-
-/** 多题模式下可选的题目文件夹（按学生层级/题目层级解析）。 */
-function parseFolderKeys(files: string[], studentLevel: number, problemLevel: number): string[] {
-  const maxLevel = Math.max(studentLevel, problemLevel);
-  const folders = new Set<string>();
-  for (const path of files) {
-    if (!isSourceFile(path)) continue;
-    const parts = path.split('/');
-    if (parts.length <= maxLevel) continue;
-    const student = parts[studentLevel - 1];
-    const folder = parts[problemLevel - 1];
-    if (student && folder) folders.add(folder);
-  }
-  return [...folders].sort((left, right) =>
-    left.localeCompare(right, undefined, { numeric: true }),
-  );
-}
-
-/** 与后端 batch/run 相同的层级规则：取第 level 段目录作为选手名。 */
-function parseStudents(files: string[], level: number): ParsedStudent[] {
-  const map = new Map<string, string>();
-  for (const path of files) {
-    if (!isSourceFile(path)) continue;
-    const parts = path.split('/');
-    if (parts.length <= level) continue;
-    const student = parts[level - 1];
-    if (!student || map.has(student)) continue;
-    map.set(student, path);
-  }
-  return [...map.entries()]
-    .map(([student, path]) => ({ student, path }))
-    .sort((left, right) => left.student.localeCompare(right.student));
-}
-
-function statusLabel(status: BatchResultItem['status']): string {
+function statusLabel(status: BatchItemStatus): string {
   if (status === 'missing') return '缺失';
+  if (status === 'skipped') return '已跳过';
+  if (status === 'error') return '导入失败';
   return SUBMISSION_STATUS_LABEL[status as SubmissionStatus] ?? status;
 }
 
-function statusColor(status: BatchResultItem['status']): string {
+function statusColor(status: BatchItemStatus): string {
   if (status === 'missing') return 'red';
+  if (status === 'skipped') return 'orange';
+  if (status === 'error') return 'red';
   if (status === 'finished') return 'green';
   if (status === 'failed' || status === 'canceled') return 'red';
   return 'blue';
 }
 
-function csvCell(value: string): string {
-  if (/[",\r\n]/.test(value)) {
-    return `"${value.replace(/"/g, '""')}"`;
-  }
-  return value;
+function importStatusLabel(status: BatchImportStatus | null): string {
+  if (status === 'imported') return '已导入';
+  if (status === 'skipped') return '已跳过';
+  if (status === 'error') return '导入失败';
+  return '—';
 }
 
-function describeBatchError(error: unknown): string {
-  if (error instanceof ApiError) {
-    switch (error.code) {
-      case 'BAD_ZIP':
-        return `无法解析 zip：${error.message}`;
-      case 'EMPTY_BODY':
-        return 'zip 文件为空';
-      case 'UNSAFE_PATH':
-        return `zip 内含不安全路径：${error.message}`;
-      case 'NO_SOURCES':
-        return '当前层级没有识别到 .cpp 源文件，请调整层级或检查 zip 目录结构。';
-      case 'UPLOAD_NOT_FOUND':
-        return '上传记录不存在，请重新上传 zip。';
-      case 'BAD_UPLOAD_ID':
-        return 'uploadId 无效，请重新上传 zip。';
-      case 'PROBLEM_NOT_FOUND':
-        return '题目不存在';
-      case 'UNMAPPED_PROBLEMS':
-        return `有题目文件夹未映射：${error.message}`;
-      case 'BAD_REQUEST':
-        return '请求参数有误';
-      default:
-        return error.message;
-    }
+function errorCodeLabel(code: string | null | undefined): string {
+  if (!code) return '—';
+  return ERROR_CODE_LABEL[code] ?? code;
+}
+
+/** 导出格式 → 服务端查询串后缀 / 下载文件名后缀。 */
+const EXPORT_REQUEST: Record<BatchExportFormat, { query: string; extension: string }> = {
+  csv: { query: 'format=csv', extension: 'csv' },
+  matrix: { query: 'format=csv&matrix=1', extension: 'matrix.csv' },
+  xlsx: { query: 'format=xlsx', extension: 'xlsx' },
+  html: { query: 'format=html', extension: 'html' },
+};
+
+/** 上传时文件名走请求头，必须转义成 ASCII；展示时还原。 */
+function decodeFileName(value: string | null | undefined): string {
+  if (!value) return '';
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
   }
-  return error instanceof Error ? error.message : '批量评测请求失败';
+}
+
+function problemOptionLabel(problem: AdminProblemPickerItem): string {
+  const scope = problemScope(problem);
+  const scopeLabel = scope === 'personal' ? '个人' : scope === 'team' ? '团队' : '公共';
+  const tags = (problem.tags ?? []).slice(0, 3).join(',');
+  return `#${problem.id} ${problem.title}（${scopeLabel}）${tags ? ` · ${tags}` : ''}`;
+}
+
+function FailureList({
+  items,
+  total,
+  tone,
+}: {
+  items: BatchFailureItem[];
+  total: number;
+  tone: 'warning' | 'error';
+}) {
+  if (items.length === 0) return null;
+  return (
+    <div className="batch-failure-list">
+      {items.map((item) => (
+        <div className="batch-failure-row" key={item.id}>
+          <span className="batch-failure-student">{item.student}</span>
+          <span className="mono batch-failure-path" title={item.sourcePath}>
+            {item.sourcePath}
+          </span>
+          <Tag color={tone === 'warning' ? 'orange' : 'red'}>{item.errorCode ?? 'ERROR'}</Tag>
+          <span className="batch-failure-message">
+            {errorCodeLabel(item.errorCode)}
+            {item.errorMessage ? `：${item.errorMessage}` : ''}
+          </span>
+        </div>
+      ))}
+      {total > items.length ? (
+        <div className="muted batch-failure-more">
+          仅显示前 {items.length} 条，共 {total} 条；可翻页查看全部条目。
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 export function AdminBatchPage() {
-  const { message } = App.useApp();
+  const { message, modal } = App.useApp();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
-  const [uploadFileName, setUploadFileName] = useState('');
-  const [uploadResult, setUploadResult] = useState<BatchUploadResult | null>(null);
+  const [uploadPercent, setUploadPercent] = useState(0);
+  const [uploadLoaded, setUploadLoaded] = useState(0);
+  const [uploadTotal, setUploadTotal] = useState(0);
+  const [fileName, setFileName] = useState('');
+  const [upload, setUpload] = useState<BatchUploadStreamResult | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
-  const [studentLevel, setStudentLevel] = useState(1);
-  const [problemLevel, setProblemLevel] = useState(0);
+  const [levelDraft, setLevelDraft] = useState<LevelState>({
+    studentLevel: 1,
+    problemLevel: 0,
+  });
+  const [previewParams, setPreviewParams] = useState<LevelState | null>(null);
+  const [scope, setScope] = useState<BatchProblemScope>('all');
   const [problemMap, setProblemMap] = useState<Record<string, number | undefined>>({});
-  const [problemId, setProblemId] = useState<number | undefined>(undefined);
+  const [singleProblemId, setSingleProblemId] = useState<number | undefined>(undefined);
+  const [orderedSelection, setOrderedSelection] = useState<number[]>([]);
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [batchId, setBatchId] = useState<number | null>(null);
+  const [jobId, setJobId] = useState<number | null>(null);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
+  const [exportingFormat, setExportingFormat] = useState<BatchExportFormat | null>(null);
+  const [canceling, setCanceling] = useState(false);
 
+  // 全量题目目录用于映射校验/数字自动匹配；选项列表按后端 scope 查询。
   const problemsQuery = useQuery({
-    queryKey: ['admin-problems'],
-    queryFn: () => apiGet<AdminProblemSummary[]>('/api/admin/problems'),
+    queryKey: ['admin-problem-picker', 'all'],
+    queryFn: () =>
+      apiGet<AdminProblemPickerItem[]>('/api/admin/problems/picker?scope=all&limit=500'),
     staleTime: 30_000,
   });
-  const batchQuery = useQuery({
-    queryKey: ['batch', batchId],
-    queryFn: () => apiGet<BatchJob>(`/api/admin/batch/${batchId}`),
-    enabled: batchId !== null,
+  const scopedProblemsQuery = useQuery({
+    queryKey: ['admin-problem-picker', scope],
+    queryFn: () =>
+      apiGet<AdminProblemPickerItem[]>(
+        `/api/admin/problems/picker?scope=${scope}&limit=500`,
+      ),
+    enabled: scope !== 'all',
+    staleTime: 30_000,
+  });
+  const problemsError = problemsQuery.isError || scopedProblemsQuery.isError;
+  const problemsPending =
+    problemsQuery.isPending || (scope !== 'all' && scopedProblemsQuery.isPending);
+
+  const previewQuery = useQuery({
+    queryKey: [
+      'batch-preview',
+      upload?.uploadId ?? 'none',
+      previewParams?.studentLevel ?? 0,
+      previewParams?.problemLevel ?? 0,
+    ],
+    queryFn: () => {
+      if (!upload || !previewParams) throw new Error('预览参数缺失');
+      return apiGet<BatchPreview>(
+        `/api/admin/batch/uploads/${upload.uploadId}/preview?studentLevel=${previewParams.studentLevel}&problemLevel=${previewParams.problemLevel}`,
+      );
+    },
+    enabled: upload !== null && previewParams !== null,
+    retry: false,
+    staleTime: 5 * 60_000,
+  });
+
+  const jobQuery = useQuery({
+    queryKey: ['batch', jobId, page, pageSize],
+    queryFn: () =>
+      apiGet<BatchJob>(
+        `/api/admin/batch/${jobId}?offset=${(page - 1) * pageSize}&limit=${pageSize}`,
+      ),
+    enabled: jobId !== null,
     retry: false,
     refetchInterval: (query) => {
       const data = query.state.data;
       if (!data) return 1000;
-      return data.status === 'running' ? 1000 : false;
+      return isBatchActive(data.status) ? 1000 : false;
     },
   });
 
-  const job = batchQuery.data ?? null;
+  const problems = problemsQuery.data ?? [];
   const problemsById = useMemo(
-    () => new Map((problemsQuery.data ?? []).map((problem) => [problem.id, problem])),
-    [problemsQuery.data],
+    () => new Map(problems.map((problem) => [problem.id, problem])),
+    [problems],
   );
-  const sourcePaths = useMemo(
-    () => (uploadResult?.files ?? []).filter(isSourceFile),
-    [uploadResult],
-  );
-  const maxDepth = useMemo(() => {
-    if (!uploadResult || uploadResult.files.length === 0) return 0;
-    return uploadResult.files.reduce(
-      (maximum, path) => Math.max(maximum, path.split('/').length),
-      0,
-    );
-  }, [uploadResult]);
-  const parsedStudents = useMemo(
-    () => parseStudents(uploadResult?.files ?? [], studentLevel),
-    [uploadResult, studentLevel],
-  );
-  const example = parsedStudents[0];
-  const multiProblem = problemLevel > 0;
-  const folderKeys = useMemo(
+  const knownProblemIds = useMemo(() => new Set(problemsById.keys()), [problemsById]);
+
+  const preview = previewQuery.data ?? null;
+  const multiProblem = (previewParams?.problemLevel ?? 0) > 0;
+  const folders = useMemo(() => preview?.problemFolders ?? [], [preview]);
+  const maxDepth = preview?.maxDepth ?? 0;
+
+  const levelOptions = useMemo(
     () =>
-      multiProblem
-        ? parseFolderKeys(uploadResult?.files ?? [], studentLevel, problemLevel)
-        : [],
-    [uploadResult, studentLevel, problemLevel, multiProblem],
+      Array.from({ length: Math.max(6, maxDepth) }, (_, index) => ({
+        value: index + 1,
+        label: `第 ${index + 1} 层`,
+      })),
+    [maxDepth],
   );
 
-  const multiPreview = useMemo(() => {
-    if (!multiProblem || !uploadResult) {
-      return {
-        pairs: [] as MultiPair[],
-        unresolved: [] as string[],
-        studentCount: 0,
-        problemIds: [] as number[],
-      };
-    }
-    const maxLevel = Math.max(studentLevel, problemLevel);
-    const seen = new Set<string>();
-    const pairs: MultiPair[] = [];
-    const unresolved = new Set<string>();
-    for (const path of uploadResult.files) {
-      if (!isSourceFile(path)) continue;
-      const parts = path.split('/');
-      if (parts.length <= maxLevel) continue;
-      const student = parts[studentLevel - 1];
-      const folder = parts[problemLevel - 1];
-      if (!student || !folder) continue;
-      const resolved =
-        problemMap[folder] ??
-        autoProblemId(folder, problemsById) ??
-        undefined;
-      const problem = resolved ? problemsById.get(resolved) : undefined;
-      if (!resolved || !problem) {
-        unresolved.add(folder);
-        continue;
-      }
-      const key = `${student}|${resolved}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      pairs.push({
-        student,
-        folder,
-        problemId: resolved,
-        problemTitle: problem.title,
-        path,
-      });
-    }
-    pairs.sort(
-      (left, right) =>
-        left.student.localeCompare(right.student) || left.problemId - right.problemId,
-    );
-    return {
-      pairs,
-      unresolved: [...unresolved].sort(),
-      studentCount: new Set(pairs.map((pair) => pair.student)).size,
-      problemIds: [...new Set(pairs.map((pair) => pair.problemId))].sort(
-        (left, right) => left - right,
-      ),
-    };
-  }, [
-    multiProblem,
-    uploadResult,
-    studentLevel,
-    problemLevel,
-    problemMap,
-    problemsById,
-  ]);
+  const mapping = useMemo(
+    () => validateFolderMapping(folders, problemMap, knownProblemIds),
+    [folders, problemMap, knownProblemIds],
+  );
+  const estimate = useMemo(
+    () =>
+      estimateSubmissions({
+        validCount: preview?.validCount ?? 0,
+        multiProblem,
+        folders,
+        problemMap,
+      }),
+    [preview, multiProblem, folders, problemMap],
+  );
 
+  const problemOptions = useMemo(() => {
+    const options = scope === 'all' ? problems : (scopedProblemsQuery.data ?? []);
+    return options.map((problem) => ({
+      value: problem.id,
+      label: problemOptionLabel(problem),
+    }));
+  }, [problems, scopedProblemsQuery.data, scope]);
+
+  const mappedProblemIds = useMemo(() => {
+    if (!multiProblem) return singleProblemId === undefined ? [] : [singleProblemId];
+    return [
+      ...new Set(
+        folders
+          .map((folder) => problemMap[folder])
+          .filter((id): id is number => typeof id === 'number'),
+      ),
+    ].sort((left, right) => left - right);
+  }, [multiProblem, singleProblemId, folders, problemMap]);
+
+  const levelsDirty =
+    previewParams !== null &&
+    (levelDraft.studentLevel !== previewParams.studentLevel ||
+      levelDraft.problemLevel !== previewParams.problemLevel);
+
+  // 数字文件夹自动匹配题目 ID；保留用户已经手动选择的映射。
   useEffect(() => {
-    if (!multiProblem || !uploadResult) {
-      setProblemMap({});
+    if (!preview || preview.problemLevel <= 0) {
+      setProblemMap((previous) => (Object.keys(previous).length === 0 ? previous : {}));
       return;
     }
     setProblemMap((previous) => {
       const next: Record<string, number | undefined> = {};
-      for (const folder of folderKeys) {
-        const auto = autoProblemId(folder, problemsById);
-        if (auto !== null) {
-          next[folder] = auto;
-        } else if (previous[folder] && problemsById.has(previous[folder]!)) {
-          next[folder] = previous[folder];
+      for (const folder of preview.problemFolders) {
+        const manual = previous[folder];
+        if (typeof manual === 'number') {
+          next[folder] = manual;
+          continue;
         }
+        const auto = autoProblemId(folder, knownProblemIds);
+        if (auto !== null) next[folder] = auto;
       }
       return next;
     });
-  }, [multiProblem, uploadResult, folderKeys, problemsById]);
+  }, [preview, knownProblemIds]);
 
-  const batchRunning = batchId !== null && job?.status !== 'finished';
-  const multiReady =
-    multiProblem &&
-    multiPreview.pairs.length > 0 &&
-    multiPreview.unresolved.length === 0;
-  const canRun =
-    Boolean(uploadResult) &&
+  const job = jobQuery.data ?? null;
+  const jobActive = job !== null && isBatchActive(job.status);
+
+  const canStart =
+    upload !== null &&
+    preview !== null &&
+    !uploading &&
     !starting &&
-    !batchRunning &&
-    (multiProblem ? multiReady : problemId !== undefined);
+    !jobActive &&
+    !problemsError &&
+    preview.validCount > 0 &&
+    (multiProblem ? folders.length > 0 && mapping.complete : singleProblemId !== undefined);
+
+  const resetMappingState = () => {
+    setProblemMap({});
+    setSingleProblemId(undefined);
+    setOrderedSelection([]);
+    setRunError(null);
+  };
 
   const uploadZip = async (file: File) => {
-    if (!file.name.toLowerCase().endsWith('.zip')) {
-      setUploadError('请选择 .zip 文件');
-      return;
-    }
-    if (file.size > MAX_UPLOAD_BYTES) {
-      setUploadError('zip 超过 80 MB 限制');
+    const validation = validateZipFile(file);
+    if (validation) {
+      setUploadError(validation);
+      message.error(validation);
       return;
     }
     setUploading(true);
     setUploadError(null);
     setRunError(null);
-    setUploadResult(null);
-    setBatchId(null);
-    setUploadFileName(file.name);
+    setUploadPercent(0);
+    setUploadLoaded(0);
+    setUploadTotal(file.size);
+    setFileName(file.name);
+    setUpload(null);
+    setPreviewParams(null);
+    setLevelDraft({ studentLevel: 1, problemLevel: 0 });
+    resetMappingState();
+    setJobId(null);
+    setPage(1);
     try {
-      const result = await apiUpload<BatchUploadResult>(
-        '/api/admin/batch/upload',
+      const result = await apiUploadWithProgress<BatchUploadStreamResult>(
+        '/api/admin/batch/uploads',
         file,
         'application/zip',
+        {
+          headers: { 'x-file-name': encodeURIComponent(file.name) },
+          onProgress: ({ loaded, total, percent }) => {
+            setUploadLoaded(loaded);
+            setUploadTotal(total);
+            setUploadPercent(percent);
+          },
+        },
       );
-      setUploadResult(result);
-      setStudentLevel(1);
-      setProblemLevel(0);
-      setProblemMap({});
-      message.success(`zip 解析成功，共 ${result.files.length} 个文件`);
+      setUploadPercent(100);
+      setUpload(result);
+      setPreviewParams({ studentLevel: 1, problemLevel: 0 });
+      message.success(
+        `zip 已流式上传（${formatBytes(result.sizeBytes)}），正在生成解析预览…`,
+      );
     } catch (error) {
-      setUploadError(describeBatchError(error));
-      message.error(describeBatchError(error));
+      if (error instanceof DOMException && error.name === 'AbortError') return;
+      const description = describeBatchError(error);
+      setUploadError(description);
+      message.error(description);
     } finally {
       setUploading(false);
     }
   };
 
   const handleFile = (file: File | undefined) => {
-    if (file) void uploadZip(file);
+    if (!file || uploading) return;
+    void uploadZip(file);
   };
 
   const handleDrop = (event: DragEvent<HTMLDivElement>) => {
@@ -350,62 +420,144 @@ export function AdminBatchPage() {
     handleFile(event.dataTransfer.files?.[0]);
   };
 
+  const applyLevels = () => {
+    const next: LevelState = {
+      studentLevel: levelDraft.studentLevel,
+      problemLevel: levelDraft.problemLevel,
+    };
+    resetMappingState();
+    const same =
+      previewParams !== null &&
+      previewParams.studentLevel === next.studentLevel &&
+      previewParams.problemLevel === next.problemLevel;
+    if (same) {
+      void previewQuery.refetch();
+    } else {
+      setPreviewParams(next);
+    }
+  };
+
+  const applySuggestedLevels = () => {
+    if (!preview) return;
+    const next: LevelState = {
+      studentLevel: preview.studentLevel,
+      problemLevel: preview.studentLevel + 1,
+    };
+    setLevelDraft(next);
+    resetMappingState();
+    setPreviewParams(next);
+  };
+
+  const bindOrdered = () => {
+    const ordered = orderedSelection.filter((id) => knownProblemIds.has(id));
+    if (ordered.length === 0) return;
+    setProblemMap((previous) => applyOrderedMapping(folders, ordered, previous));
+    message.success(`已按顺序绑定 ${Math.min(ordered.length, folders.length)} 个题目文件夹`);
+  };
+
+  const bindNumeric = () => {
+    const next: Record<string, number | undefined> = { ...problemMap };
+    let bound = 0;
+    for (const folder of folders) {
+      const auto = autoProblemId(folder, knownProblemIds);
+      if (auto !== null) {
+        next[folder] = auto;
+        bound += 1;
+      }
+    }
+    setProblemMap(next);
+    if (bound === 0) {
+      message.info('没有可用数字 ID 自动匹配的文件夹');
+    } else {
+      message.success(`已按数字 ID 自动绑定 ${bound} 个文件夹`);
+    }
+  };
+
   const startBatch = async () => {
-    if (!uploadResult || !canRun) return;
+    if (!upload || !preview || !canStart) return;
     setStarting(true);
     setRunError(null);
     try {
-      const result = await apiPost<BatchRunResult>('/api/admin/batch/run', {
-        uploadId: uploadResult.uploadId,
-        studentLevel,
-        language: 'cpp17',
-        ...(multiProblem
-          ? {
-              problemLevel,
-              problemMap: Object.fromEntries(
-                Object.entries(problemMap).filter(
-                  (entry): entry is [string, number] => typeof entry[1] === 'number',
-                ),
-              ),
-            }
-          : { problemId }),
-      });
-      setBatchId(result.id);
-      message.success(`已提交 ${result.count} 份代码，开始评测`);
+      const body = multiProblem
+        ? {
+            studentLevel: preview.studentLevel,
+            problemLevel: preview.problemLevel,
+            language: 'cpp17',
+            problemMap: Object.fromEntries(
+              folders
+                .map((folder) => [folder, problemMap[folder]] as const)
+                .filter((entry): entry is readonly [string, number] => typeof entry[1] === 'number'),
+            ),
+          }
+        : {
+            studentLevel: preview.studentLevel,
+            problemLevel: 0,
+            language: 'cpp17',
+            problemId: singleProblemId,
+          };
+      const result = await apiPost<BatchAsyncRunResult>(
+        `/api/admin/batch/uploads/${upload.uploadId}/run`,
+        body,
+      );
+      setJobId(result.jobId);
+      setPage(1);
+      message.success('已提交异步批量任务，正在后台导入并评测');
     } catch (error) {
-      setRunError(describeBatchError(error));
-      message.error(describeBatchError(error));
+      const description = describeBatchError(error);
+      setRunError(description);
+      message.error(description);
     } finally {
       setStarting(false);
     }
   };
 
-  const exportCsv = () => {
-    if (!job || job.items.length === 0) return;
-    const header = ['选手', '题目', '源文件', '状态', 'Verdict', '得分', '用时(ms)', '内存(KB)'];
-    const rows = job.items.map((item) => [
-      item.student,
-      item.problemTitle ?? `#${item.problemId}`,
-      item.sourcePath,
-      statusLabel(item.status),
-      item.verdict ?? '',
-      String(item.score),
-      String(item.timeMs),
-      String(item.memoryKb),
-    ]);
-    const csv = [header, ...rows]
-      .map((row) => row.map((cell) => csvCell(cell)).join(','))
-      .join('\r\n');
-    const blob = new Blob([`\uFEFF${csv}`], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = url;
-    anchor.download = `batch-${job.id}.csv`;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    URL.revokeObjectURL(url);
-    message.success('CSV 已导出');
+  const cancelBatch = async () => {
+    if (!job) return;
+    setCanceling(true);
+    try {
+      await apiPost<{ id: number; status: string; canceled: number }>(
+        `/api/admin/batch/${job.id}/cancel`,
+      );
+      message.success('已请求取消批次');
+      await jobQuery.refetch();
+    } catch (error) {
+      message.error(describeBatchError(error));
+    } finally {
+      setCanceling(false);
+    }
+  };
+
+  const confirmCancel = () => {
+    if (!job) return;
+    modal.confirm({
+      title: `取消批次 #${job.id}？`,
+      content: '已导入的提交会尽量取消并保留记录；取消后可以重新上传运行。',
+      okText: '取消批次',
+      okButtonProps: { danger: true },
+      cancelText: '继续评测',
+      onOk: () => cancelBatch(),
+    });
+  };
+
+  const exportBatch = async (format: BatchExportFormat) => {
+    if (!job || job.total === 0) return;
+    setExportingFormat(format);
+    try {
+      const request = EXPORT_REQUEST[format];
+      await downloadApiFile(
+        `/api/admin/batch/${job.id}/export?${request.query}`,
+        `batch-${job.id}.${request.extension}`,
+      );
+      message.success(
+        format === 'matrix'
+          ? '学生×题目矩阵已导出'
+          : `${format.toUpperCase()} 已导出（由服务端流式生成）`,
+      );
+    } catch (error) {
+      message.error(describeBatchError(error));
+    } finally {
+      setExportingFormat(null);
+    }
   };
 
   const columns: TableColumnsType<BatchResultItem> = [
@@ -415,8 +567,8 @@ export function AdminBatchPage() {
       dataIndex: 'problemTitle',
       width: 180,
       render: (_value, item) => (
-        <span title={item.problemTitle ?? `#${item.problemId}`}>
-          {item.problemTitle ?? `#${item.problemId}`}
+        <span title={item.problemTitle ?? (item.problemId === null ? '—' : `#${item.problemId}`)}>
+          {item.problemTitle ?? (item.problemId === null ? '—' : `#${item.problemId}`)}
         </span>
       ),
     },
@@ -430,10 +582,40 @@ export function AdminBatchPage() {
       ),
     },
     {
+      title: '导入',
+      dataIndex: 'importStatus',
+      width: 90,
+      render: (value: BatchImportStatus | null) =>
+        value === 'error' ? (
+          <Tag color="red">{importStatusLabel(value)}</Tag>
+        ) : value === 'skipped' ? (
+          <Tag color="orange">{importStatusLabel(value)}</Tag>
+        ) : (
+          <Tag color="green">{importStatusLabel(value)}</Tag>
+        ),
+    },
+    {
+      title: '错误',
+      dataIndex: 'errorCode',
+      width: 210,
+      render: (_value, item) =>
+        item.errorCode ? (
+          <Tooltip
+            title={`${errorCodeLabel(item.errorCode)}${
+              item.errorMessage ? `：${item.errorMessage}` : ''
+            }`}
+          >
+            <span className="batch-error-code mono">{item.errorCode}</span>
+          </Tooltip>
+        ) : (
+          <span className="muted">—</span>
+        ),
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       width: 98,
-      render: (value: BatchResultItem['status']) => (
+      render: (value: BatchItemStatus) => (
         <Tag color={statusColor(value)}>{statusLabel(value)}</Tag>
       ),
     },
@@ -466,30 +648,49 @@ export function AdminBatchPage() {
     },
   ];
 
-  const acCount = (job?.items ?? []).filter((item) => item.verdict === 'AC').length;
-  const totalStudents = job?.items.length ?? 0;
-  const averageScore =
-    totalStudents > 0
-      ? (job?.items ?? []).reduce((sum, item) => sum + item.score, 0) / totalStudents
-      : 0;
-  const judgedCount =
-    job?.items.filter((item) => item.status === 'finished' || item.status === 'failed')
-      .length ?? 0;
-  const resultMulti = Boolean(job?.multiProblem);
-  const distinctStudentCount = new Set((job?.items ?? []).map((item) => item.student)).size;
-  const distinctProblemCount = new Set((job?.items ?? []).map((item) => item.problemId)).size;
+  const treeRows = useMemo(() => treeSampleRows(preview?.treeSample ?? []), [preview]);
+  const example = useMemo(
+    () =>
+      preview
+        ? levelExample(preview.treeSample, preview.studentLevel, preview.problemLevel)
+        : null,
+    [preview],
+  );
+  const importProgress = job?.progress?.import ?? null;
+  const progressPercent =
+    job?.progress?.percent ?? (job?.status === 'finished' ? 100 : 0);
+  const progressStatus =
+    job?.status === 'failed'
+      ? 'exception'
+      : job?.status === 'finished'
+        ? 'success'
+        : jobActive
+          ? 'active'
+          : 'normal';
 
-  const problemOptions = (problemsQuery.data ?? []).map((problem) => ({
-    value: problem.id,
-    label: `#${problem.id} ${problem.title}`,
-  }));
+  const scopeControl = (
+    <Segmented
+      size="small"
+      value={scope}
+      options={BATCH_PROBLEM_SCOPE_OPTIONS.map((option) => ({
+        value: option.value,
+        label: option.label,
+      }))}
+      onChange={(value) => setScope(value as BatchProblemScope)}
+    />
+  );
+
+  const problemSearchHint =
+    scope === 'all'
+      ? '搜索题号 / 标题 / 标签；可按 个人 / 团队 / 公共 过滤。'
+      : `仅在${scope === 'personal' ? '个人' : scope === 'team' ? '团队' : '公共'}题目中搜索题号 / 标题 / 标签。`;
 
   return (
     <div>
       <PageHead
         breadcrumb={[{ label: '管理', to: '/admin/problems' }, { label: '批量评测' }]}
         title="批量评测"
-        subtitle="上传选手代码 zip，按目录层级映射选手，自动创建 batch_<姓名> 用户并评测。"
+        subtitle="流式上传选手代码 zip，预览目录结构，把题目文件夹映射到题目后异步导入并评测。"
         extra={
           <a href="/admin/problems">
             <Button>题目管理</Button>
@@ -500,7 +701,7 @@ export function AdminBatchPage() {
       <Card
         className="oij-card"
         title="1. 上传选手代码 zip"
-        extra={<span className="muted">仅识别 .cpp / .cc / .cxx</span>}
+        extra={<span className="muted">流式上传 · 最大 5 GB· 仅识别 .cpp / .cc / .cxx / .c</span>}
       >
         <div
           className={`batch-drop${dragActive ? ' batch-drop-active' : ''}${
@@ -508,34 +709,32 @@ export function AdminBatchPage() {
           }`}
           role="button"
           tabIndex={0}
-          onClick={() => fileInputRef.current?.click()}
+          onClick={() => {
+            if (!uploading) fileInputRef.current?.click();
+          }}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' || event.key === ' ') {
+            if (!uploading && (event.key === 'Enter' || event.key === ' ')) {
               event.preventDefault();
               fileInputRef.current?.click();
             }
           }}
           onDragOver={(event) => {
             event.preventDefault();
-            setDragActive(true);
+            if (!uploading) setDragActive(true);
           }}
           onDragLeave={() => setDragActive(false)}
           onDrop={handleDrop}
         >
-          {uploading ? (
-            <Spin />
-          ) : (
-            <InboxOutlined className="batch-drop-icon" />
-          )}
+          {uploading ? <Spin /> : <InboxOutlined className="batch-drop-icon" />}
           <div className="batch-drop-title">
             {uploading
-              ? '正在上传并解析 zip…'
-              : uploadFileName
+              ? '正在流式上传 zip…'
+              : upload
                 ? '拖拽或点击替换 zip 文件'
                 : '拖拽选手代码 zip 到此，或点击选择文件'}
           </div>
           <div className="batch-drop-hint muted">
-            {uploadFileName || '支持 .zip，最大 80 MB；例如 Alice/main.cpp、Bob/main.cpp'}
+            {fileName || '支持 .zip，最大 5 GB；上传期间服务器边接收边落盘。'}
           </div>
         </div>
         <input
@@ -544,11 +743,22 @@ export function AdminBatchPage() {
           type="file"
           accept=".zip,application/zip"
           data-testid="batch-zip-input"
+          disabled={uploading}
           onChange={(event) => {
             handleFile(event.target.files?.[0]);
             event.target.value = '';
           }}
         />
+
+        {uploading ? (
+          <div className="batch-upload-progress">
+            <Progress percent={uploadPercent} status="active" />
+            <div className="muted">
+              {formatBytes(uploadLoaded)} / {formatBytes(uploadTotal)}
+              {uploadTotal > 0 ? `（${uploadPercent}%）` : ''}
+            </div>
+          </div>
+        ) : null}
 
         {uploadError ? (
           <Alert
@@ -560,364 +770,768 @@ export function AdminBatchPage() {
           />
         ) : null}
 
-        {uploadResult ? (
+        {upload ? (
           <div className="batch-upload-result">
             <div className="batch-upload-meta">
               <span>
+                <span className="muted">文件</span> {decodeFileName(upload.originalName) || fileName}
+              </span>
+              <span>
                 <span className="muted">uploadId</span>{' '}
-                <span className="mono">{uploadResult.uploadId}</span>
+                <span className="mono">{upload.uploadId}</span>
               </span>
               <span className="muted">
-                共 {uploadResult.files.length} 个文件 · {sourcePaths.length} 个源文件
-                {maxDepth > 0 ? ` · 最大路径深度 ${maxDepth}` : ''}
+                {formatBytes(upload.sizeBytes)} · sha256{' '}
+                <span className="mono">{upload.sha256.slice(0, 12)}…</span>
               </span>
             </div>
-            <div className="batch-file-list">
-              {uploadResult.files.map((path) => (
-                <div className="batch-file-row" key={path}>
-                  <span className="mono batch-file-path" title={path}>
-                    {path}
-                  </span>
-                  {isSourceFile(path) ? <Tag color="blue">源文件</Tag> : <Tag>其他</Tag>}
-                </div>
-              ))}
+            <div className="muted">
+              上传完成（上限 {MAX_BATCH_ZIP_BYTES / 1024 ** 3} GB），下一步解析目录层级并生成预览。
             </div>
           </div>
         ) : null}
       </Card>
 
-      <div className="batch-grid">
-        <Card className="oij-card" title="2. 目录层级映射">
-          <div className="batch-field batch-level-field">
+      <Card
+        className="oij-card batch-section"
+        title="2. 目录层级与文件结构"
+        extra={<span className="muted">按目录层级识别学生与题目文件夹</span>}
+      >
+        <div className="batch-level-bar">
+          <div className="batch-field">
             <span className="muted">选手目录层级</span>
             <Select
-              value={studentLevel}
-              options={LEVEL_OPTIONS}
-              onChange={(value: number) => setStudentLevel(value)}
-              style={{ width: 150 }}
-              disabled={!uploadResult || uploading}
+              value={levelDraft.studentLevel}
+              options={levelOptions}
+              onChange={(value: number) =>
+                setLevelDraft((previous) => ({ ...previous, studentLevel: value }))
+              }
+              style={{ width: 130 }}
+              disabled={!upload || uploading}
             />
           </div>
-          <div className="batch-field batch-problem-level-field">
+          <div className="batch-field">
             <span className="muted">题目层级</span>
             <Select
-              value={problemLevel}
+              value={levelDraft.problemLevel}
               options={[
-                { value: 0, label: '不启用（单题模式）' },
-                ...LEVEL_OPTIONS.map((option) => ({
+                { value: 0, label: '0（单题目模式）' },
+                ...levelOptions.map((option) => ({
                   ...option,
                   label: `第 ${option.value} 层`,
                 })),
               ]}
-              onChange={(value: number) => setProblemLevel(value)}
-              style={{ width: 190 }}
-              disabled={!uploadResult || uploading}
+              onChange={(value: number) =>
+                setLevelDraft((previous) => ({ ...previous, problemLevel: value }))
+              }
+              style={{ width: 170 }}
+              disabled={!upload || uploading}
             />
           </div>
-          <div className="batch-level-hint muted">
-            {uploadResult
-              ? multiProblem
-                ? `zip 内路径最大深度 ${maxDepth}；学生取第 ${studentLevel} 层，题目取第 ${problemLevel} 层目录。`
-                : `zip 内路径最大深度 ${maxDepth}；当前取第 ${studentLevel} 层目录作为选手名。`
-              : '上传 zip 后可调整层级。'}
-          </div>
-          <div className="batch-example">
-            {multiProblem && multiPreview.pairs[0] ? (
-              <span>
-                示例：<span className="mono">{multiPreview.pairs[0].path}</span> → 选手{' '}
-                <strong>{multiPreview.pairs[0].student}</strong> · 题目{' '}
-                <strong>
-                  {multiPreview.pairs[0].problemTitle}（#{multiPreview.pairs[0].problemId}）
-                </strong>
-              </span>
-            ) : example ? (
-              <span>
-                示例：<span className="mono">{example.path}</span> → 选手{' '}
-                <strong>{example.student}</strong>
-              </span>
-            ) : uploadResult ? (
-              <span className="batch-example-empty">
-                {multiProblem
-                  ? '当前层级无法解析出“学生/题目”，请检查层级或题目映射。'
-                  : '当前层级无法解析出选手（源文件路径层级不足），请调小层级。'}
-              </span>
-            ) : (
-              <span className="muted">等待上传 zip。</span>
-            )}
-          </div>
-          {uploadResult && multiProblem ? (
-            <div className="batch-folder-map">
+          <Button
+            type="primary"
+            icon={<ReloadOutlined />}
+            onClick={applyLevels}
+            disabled={!upload || uploading}
+            loading={previewQuery.isFetching && !previewQuery.isPending}
+          >
+            解析 / 重新解析
+          </Button>
+          {levelsDirty ? (
+            <Tag color="orange">层级已修改，需重新解析</Tag>
+          ) : preview ? (
+            <Tag color="green">当前预览：学生第 {preview.studentLevel} 层 / 题目第 {preview.problemLevel} 层</Tag>
+          ) : null}
+        </div>
+        <div className="batch-level-hint muted">
+          {upload
+            ? preview
+              ? `zip 内路径最大深度 ${preview.maxDepth}；学生取第 ${preview.studentLevel} 层，题目取第 ${preview.problemLevel} 层目录。`
+              : '层级确定后点击“解析 / 重新解析”生成预览。'
+            : '上传 zip 后可调整层级。'}
+          {preview && preview.problemLevel === 0 && preview.maxDepth > preview.studentLevel ? (
+            <Button size="small" type="link" onClick={applySuggestedLevels}>
+              按“学生 / 题目”结构解析（题目层级 = {preview.studentLevel + 1}）
+            </Button>
+          ) : null}
+        </div>
+
+        {!upload ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="上传 zip 后自动生成目录结构预览。"
+          />
+        ) : previewQuery.isPending ? (
+          <PageLoading tip="正在流式扫描 zip 并生成预览…" />
+        ) : previewQuery.isError ? (
+          <ErrorResult
+            error={previewQuery.error}
+            onRetry={() => void previewQuery.refetch()}
+          />
+        ) : preview ? (
+          <div>
+            <div className="batch-preview-meta">
+              <Tag>条目 {preview.entryCount}</Tag>
+              <Tag>源文件 {preview.totalFiles}</Tag>
+              <Tag color="blue">有效源码 {preview.validCount}</Tag>
+              <Tag color="purple">学生 {preview.students}</Tag>
+              <Tag color="green">题目文件夹 {preview.problemFolders.length}</Tag>
+              {preview.invalidStudents.length > 0 ? (
+                <Tag color="orange">无效学生 {preview.invalidStudents.length}</Tag>
+              ) : null}
+              {preview.duplicateCount > 0 ? (
+                <Tag color="gold">重复 {preview.duplicateCount}</Tag>
+              ) : null}
+              {preview.skipped.length > 0 ? (
+                <Tag color="red">跳过条目 {preview.skipped.length}</Tag>
+              ) : null}
+              {preview.failures.length > 0 ? (
+                <Tag color="red">文件异常 {preview.failures.length}</Tag>
+              ) : null}
+            </div>
+
+            <div className="batch-structure">
               <div className="batch-preview-head">
-                <span>文件夹 → 题目映射</span>
+                <span>文件结构（路径示例）</span>
                 <span className="muted">
-                  {folderKeys.length} 个题目文件夹
-                  {multiPreview.unresolved.length > 0
-                    ? ` · ${multiPreview.unresolved.length} 个未映射`
-                    : ''}
+                  前 {treeRows.length} 条 · 最大深度 {preview.maxDepth}
                 </span>
               </div>
-              {folderKeys.length === 0 ? (
-                <Empty
-                  image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description="当前题目层级没有可识别的文件夹"
-                />
+              {example ? (
+                <div className="batch-example">
+                  示例：<span className="mono">{example.path}</span> → 学生{' '}
+                  <strong>{example.student}</strong>
+                  {example.problemFolder ? (
+                    <>
+                      {' '}
+                      · 题目文件夹 <strong>{example.problemFolder}</strong>
+                    </>
+                  ) : null}
+                </div>
               ) : (
-                <div className="batch-map-list">
-                  {folderKeys.map((folder) => {
-                    const auto = autoProblemId(folder, problemsById);
-                    const selected = problemMap[folder] ?? auto ?? undefined;
-                    return (
-                      <div
-                        className={`batch-map-row${
-                          selected === undefined ? ' batch-map-row-unresolved' : ''
-                        }`}
-                        key={folder}
-                      >
-                        <span className="mono batch-map-folder">{folder}</span>
-                        <span className="muted batch-map-auto">
-                          {auto !== null ? '数字 ID 自动匹配' : '手动映射'}
-                        </span>
-                        <Select
-                          allowClear={auto === null}
-                          showSearch
-                          optionFilterProp="label"
-                          placeholder="选择题目"
-                          value={selected}
-                          options={problemOptions}
-                          onChange={(value: number | undefined) =>
-                            setProblemMap((previous) => ({
-                              ...previous,
-                              [folder]: value,
-                            }))
-                          }
-                          loading={problemsQuery.isPending}
-                          style={{ flex: 1, minWidth: 220 }}
-                        />
-                        {selected === undefined ? (
-                          <Tag color="red">未映射</Tag>
-                        ) : (
-                          <Tag color="green">已映射</Tag>
-                        )}
-                      </div>
-                    );
-                  })}
+                <div className="batch-example batch-example-empty">
+                  当前层级无法从路径样例中解析出“学生
+                  {preview.problemLevel > 0 ? ' / 题目文件夹' : ''}”，请调整层级后重新解析。
                 </div>
               )}
-            </div>
-          ) : null}
-          {uploadResult ? (
-            <div className="batch-preview">
-              <div className="batch-preview-head">
-                <span>{multiProblem ? '学生 × 题目预览' : '解析预览'}</span>
-                <span className="muted">
-                  {multiProblem
-                    ? `${multiPreview.studentCount} 位学生 × ${multiPreview.problemIds.length} 道题 · ${multiPreview.pairs.length} 条`
-                    : `${parsedStudents.length} 位选手`}
-                </span>
-              </div>
-              {multiProblem ? (
-                multiPreview.pairs.length === 0 ? (
-                  <Empty
-                    image={Empty.PRESENTED_IMAGE_SIMPLE}
-                    description="当前层级没有可识别的“学生/题目”组合"
-                  />
-                ) : (
-                  <div className="batch-preview-list">
-                    {multiPreview.pairs.map((pair) => (
-                      <div
-                        className="batch-preview-row batch-preview-row-multi"
-                        key={`${pair.student}|${pair.problemId}`}
-                      >
-                        <span className="batch-preview-student">{pair.student}</span>
-                        <span className="batch-preview-problem">
-                          {pair.problemTitle} · #{pair.problemId}
-                        </span>
-                        <span className="mono batch-preview-path" title={pair.path}>
-                          {pair.path}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                )
-              ) : parsedStudents.length === 0 ? (
+              {treeRows.length === 0 ? (
                 <Empty
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description="当前层级没有可识别的选手"
+                  description="没有可展示的路径样例"
                 />
               ) : (
-                <div className="batch-preview-list">
-                  {parsedStudents.map((item) => (
-                    <div className="batch-preview-row" key={item.student}>
-                      <span className="batch-preview-student">{item.student}</span>
-                      <span className="mono batch-preview-path" title={item.path}>
-                        {item.path}
-                      </span>
+                <div className="batch-tree">
+                  {treeRows.map((row) => (
+                    <div
+                      className="batch-tree-row"
+                      key={row.path}
+                      style={{ paddingLeft: row.depth * 14 }}
+                    >
+                      <span className="mono">{row.name}</span>
+                      <span className="muted batch-tree-path">{row.path}</span>
                     </div>
                   ))}
                 </div>
               )}
+              {preview.studentSample.length > 0 ? (
+                <div className="batch-student-sample muted">
+                  学生示例：{preview.studentSample.slice(0, 8).join('、')}
+                  {preview.students > 8 ? `…（共 ${preview.students} 人）` : ''}
+                </div>
+              ) : null}
             </div>
-          ) : null}
-        </Card>
 
-        <Card className="oij-card" title="3. 评测配置">
-          {multiProblem ? (
+            <div className="batch-preview-columns">
+              <div className="batch-report-block">
+                <div className="batch-preview-head">
+                  <span>无效学生（{preview.invalidStudents.length}）</span>
+                  <span className="muted">丢弃，不阻塞整批</span>
+                </div>
+                {preview.invalidStudents.length === 0 ? (
+                  <span className="muted">无</span>
+                ) : (
+                  <div className="batch-report-list">
+                    {preview.invalidStudents.map((item) => (
+                      <div className="batch-report-row" key={`${item.student}|${item.sourcePath}`}>
+                        <span className="batch-report-name">{item.student}</span>
+                        <Tag color="orange">{errorCodeLabel(item.reason)}</Tag>
+                        <span className="muted mono batch-report-path" title={item.sourcePath}>
+                          {item.sourcePath}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              <div className="batch-report-block">
+                <div className="batch-preview-head">
+                  <span>重复学生-题目（{preview.duplicateCount}）</span>
+                  <span className="muted">同一学生-题目保留第一条</span>
+                </div>
+                {preview.duplicates.length === 0 ? (
+                  <span className="muted">无</span>
+                ) : (
+                  <div className="batch-report-list">
+                    {preview.duplicates.map((item) => (
+                      <div
+                        className="batch-report-row"
+                        key={`${item.student}|${item.problemFolder}|${item.sourcePath}`}
+                      >
+                        <span className="batch-report-name">{item.student}</span>
+                        <Tag>{item.problemFolder || '—'}</Tag>
+                        <span className="muted mono batch-report-path" title={item.sourcePath}>
+                          {item.sourcePath}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {preview.skipped.length > 0 ? (
+                <div className="batch-report-block">
+                  <div className="batch-preview-head">
+                    <span>跳过的 zip 条目（{preview.skipped.length}）</span>
+                    <span className="muted">继续解析其余文件</span>
+                  </div>
+                  <div className="batch-report-list">
+                    {preview.skipped.map((item) => (
+                      <div className="batch-report-row" key={`${item.path}|${item.reason}`}>
+                        <Tag color="red">
+                          {SOURCE_SKIP_REASON_LABEL[item.reason] ?? item.reason}
+                        </Tag>
+                        <span className="muted mono batch-report-path" title={item.path}>
+                          {item.path}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {preview.failures.length > 0 ? (
+                <div className="batch-report-block">
+                  <div className="batch-preview-head">
+                    <span>文件级异常（{preview.failures.length}）</span>
+                    <span className="muted">导入时逐条记录</span>
+                  </div>
+                  <div className="batch-report-list">
+                    {preview.failures.map((item) => (
+                      <div
+                        className="batch-report-row"
+                        key={`${item.student}|${item.sourcePath}|${item.errorCode}`}
+                      >
+                        <span className="batch-report-name">{item.student}</span>
+                        <Tag color="red">{errorCodeLabel(item.errorCode)}</Tag>
+                        <span className="muted mono batch-report-path" title={item.sourcePath}>
+                          {item.sourcePath}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+      </Card>
+
+      <Card
+        className="oij-card batch-section"
+        title="3. 题目映射"
+        extra={<span className="muted">未映射禁止开始</span>}
+      >
+        {!preview ? (
+          <Empty
+            image={Empty.PRESENTED_IMAGE_SIMPLE}
+            description="先上传 zip 并完成目录解析。"
+          />
+        ) : problemsError ? (
+          <Alert
+            className="batch-alert"
+            type="error"
+            showIcon
+            message="题目列表加载失败"
+            description="题目选择器不可用，请刷新页面重试。"
+          />
+        ) : multiProblem ? (
+          <div>
             <Alert
               className="batch-alert"
               type="info"
               showIcon
-              message="多题模式"
-              description={`按“学生第 ${studentLevel} 层 / 题目第 ${problemLevel} 层”解析，每位学生的每道题生成一条提交；数值文件夹自动映射题目 ID，其余文件夹需在上方选择题目。`}
+              message="多题目模式"
+              description={`每个题目文件夹一行。数字文件夹会自动匹配题目 ID；其余请手动选择，或按顺序批量绑定。当前 ${folders.length} 个题目文件夹。`}
             />
-          ) : (
-            <div className="batch-field batch-problem-field">
+
+            <div className="batch-map-toolbar">
+              <div className="batch-map-scope">
+                <span className="muted">题目来源</span>
+                {scopeControl}
+              </div>
+              <div className="batch-map-order">
+                <span className="muted">按顺序批量绑定</span>
+                <Select
+                  mode="multiple"
+                  showSearch
+                  allowClear
+                  optionFilterProp="label"
+                  placeholder="按题目顺序选择：第 1 道 → 第 1 个文件夹"
+                  value={orderedSelection}
+                  options={problemOptions}
+                  onChange={(values: number[]) => setOrderedSelection(values)}
+                  style={{ width: '100%' }}
+                  loading={problemsPending}
+                />
+                <Space wrap>
+                  <Button
+                    onClick={bindOrdered}
+                    disabled={orderedSelection.length === 0 || folders.length === 0}
+                  >
+                    按顺序绑定
+                  </Button>
+                  <Button
+                    onClick={bindNumeric}
+                    disabled={folders.length === 0 || knownProblemIds.size === 0}
+                  >
+                    数字 ID 自动绑定
+                  </Button>
+                  <Button
+                    type="text"
+                    danger
+                    onClick={() => {
+                      resetMappingState();
+                      setProblemMap({});
+                    }}
+                    disabled={Object.keys(problemMap).length === 0}
+                  >
+                    清空映射
+                  </Button>
+                </Space>
+                {orderedSelection.length > 0 ? (
+                  <div className="batch-order-preview">
+                    {orderedSelection.map((id, index) => (
+                      <Tag key={`${id}-${index}`} color="blue">
+                        {index + 1}. #{id} {problemsById.get(id)?.title ?? '未知题目'}
+                      </Tag>
+                    ))}
+                  </div>
+                ) : null}
+                <span className="muted batch-search-hint">{problemSearchHint}</span>
+              </div>
+            </div>
+
+            {folders.length === 0 ? (
+              <Empty
+                image={Empty.PRESENTED_IMAGE_SIMPLE}
+                description="当前题目层级没有识别到题目文件夹，请调整层级后重新解析。"
+              />
+            ) : (
+              <div className="batch-map-list">
+                {folders.map((folder) => {
+                  const auto = autoProblemId(folder, knownProblemIds);
+                  const selected = problemMap[folder];
+                  return (
+                    <div
+                      className={`batch-map-row${
+                        selected === undefined ? ' batch-map-row-unresolved' : ''
+                      }`}
+                      key={folder}
+                    >
+                      <span className="mono batch-map-folder" title={folder}>
+                        {folder}
+                      </span>
+                      <span className="muted batch-map-auto">
+                        {auto !== null ? `数字 ID 自动匹配 #${auto}` : '手动映射'}
+                      </span>
+                      <Select
+                        allowClear
+                        showSearch
+                        optionFilterProp="label"
+                        placeholder="选择题目"
+                        value={selected}
+                        options={problemOptions}
+                        onChange={(value: number | undefined) =>
+                          setProblemMap((previous) => ({ ...previous, [folder]: value }))
+                        }
+                        loading={problemsPending}
+                        style={{ flex: 1, minWidth: 220 }}
+                      />
+                      {selected === undefined ? (
+                        <Tag color="red">未映射</Tag>
+                      ) : (
+                        <Tag color="green">已映射</Tag>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <div className="batch-mapping-status">
+              <span>
+                已映射{' '}
+                <strong>
+                  {folders.length - mapping.unmapped.length - mapping.unknown.length}
+                </strong>{' '}
+                / {folders.length}
+              </span>
+              <span>已选 {mappedProblemIds.length} 道题</span>
+              <span className="mono">
+                预计提交 {estimate.submissions} 条{estimate.exact ? '' : '（上界）'}
+              </span>
+            </div>
+
+            {mapping.unmapped.length > 0 ? (
+              <Alert
+                className="batch-alert"
+                type="warning"
+                showIcon
+                message={`还有 ${mapping.unmapped.length} 个题目文件夹未映射，不能开始`}
+                description={mapping.unmapped.join('、')}
+              />
+            ) : null}
+            {mapping.unknown.length > 0 ? (
+              <Alert
+                className="batch-alert"
+                type="error"
+                showIcon
+                message="映射到了题目目录中不存在的题目"
+                description={`${mapping.unknown.join('、')}；请重新选择题目后开始。`}
+              />
+            ) : null}
+            {mapping.duplicateProblems.length > 0 ? (
+              <Alert
+                className="batch-alert"
+                type="info"
+                showIcon
+                message="多个文件夹映射到同一题目"
+                description={`题目 ${mapping.duplicateProblems
+                  .map((id) => `#${id}`)
+                  .join('、')} 被多个文件夹选中；导入时会按“学生-题目”去重，实际提交数可能少于 ${estimate.submissions}。`}
+              />
+            ) : null}
+          </div>
+        ) : (
+          <div>
+            <Alert
+              className="batch-alert"
+              type="info"
+              showIcon
+              message="单题目模式"
+              description={`题目层级为 0：第 ${preview.studentLevel} 层目录作为学生，所有有效源码提交到同一道题。若要按文件夹映射多道题，请把题目层级设为 > 0。`}
+            />
+            <div className="batch-map-toolbar">
+              <div className="batch-map-scope">
+                <span className="muted">题目来源</span>
+                {scopeControl}
+              </div>
+            </div>
+            <div className="batch-field batch-single-problem">
               <span className="muted">题目</span>
               <Select
                 showSearch
                 optionFilterProp="label"
-                placeholder={problemsQuery.isPending ? '正在加载题目…' : '选择题目'}
-                value={problemId}
+                placeholder={problemsPending ? '正在加载题目…' : '搜索并选择题目'}
+                value={singleProblemId}
                 options={problemOptions}
-                onChange={(value: number) => setProblemId(value)}
+                onChange={(value: number) => setSingleProblemId(value)}
                 style={{ width: '100%' }}
-                loading={problemsQuery.isPending}
+                loading={problemsPending}
               />
             </div>
-          )}
-          {problemsQuery.isError ? (
-            <Alert
-              className="batch-alert"
-              type="error"
-              showIcon
-              message="题目列表加载失败"
-              description="请刷新页面重试。"
-            />
-          ) : null}
-          <div className="batch-field">
-            <span className="muted">语言</span>
-            <Select
-              value="cpp17"
-              options={[{ value: 'cpp17', label: 'C++17' }]}
-              style={{ width: 160 }}
-              disabled
-            />
+            <span className="muted batch-search-hint">{problemSearchHint}</span>
+            <div className="batch-mapping-status">
+              <span>有效源码 {preview.validCount} 条</span>
+              <span>已选 {mappedProblemIds.length} 道题</span>
+              <span className="mono">预计提交 {estimate.submissions} 条</span>
+            </div>
           </div>
-          <div className="batch-config-hint muted">
-            {uploadResult
-              ? multiProblem
-                ? multiPreview.unresolved.length > 0
-                  ? `有 ${multiPreview.unresolved.length} 个题目文件夹未映射：${multiPreview.unresolved.join('、')}，请先完成映射。`
-                  : `将提交 ${multiPreview.studentCount} 位学生、${multiPreview.problemIds.length} 道题、共 ${multiPreview.pairs.length} 条提交。`
-                : `将提交 ${parsedStudents.length} 位选手、共 ${sourcePaths.length} 个源文件。`
-              : '请先上传 zip。'}
+        )}
+
+        {preview ? (
+          <div className="batch-estimate">
+            <div className="batch-estimate-numbers">
+              <div>
+                <span className="batch-stat-value">{preview.students}</span>
+                <span className="muted">位学生</span>
+              </div>
+              <span className="batch-estimate-op">×</span>
+              <div>
+                <span className="batch-stat-value">{mappedProblemIds.length}</span>
+                <span className="muted">道题目</span>
+              </div>
+              <span className="batch-estimate-op">=</span>
+              <div>
+                <span className="batch-stat-value">{estimate.submissions}</span>
+                <span className="muted">条提交</span>
+              </div>
+            </div>
+            <span className="muted batch-estimate-hint">
+              后端预览结构有效源码 {preview.validCount} 条
+              {estimate.exact ? '，按当前映射预计全部导入。' : '；存在未映射或重复映射时，实际数量可能更少。'}
+            </span>
           </div>
-          {runError ? (
-            <Alert
-              className="batch-alert"
-              type="error"
-              showIcon
-              message="批量评测失败"
-              description={runError}
-            />
-          ) : null}
-          {batchRunning ? (
-            <Alert
-              className="batch-alert"
-              type="info"
-              showIcon
-              message="评测进行中"
-              description="批次未完成前不能重复提交；结果每 1 秒刷新。"
-            />
-          ) : null}
+        ) : null}
+
+        {runError ? (
+          <Alert
+            className="batch-alert"
+            type="error"
+            showIcon
+            message="提交批量任务失败"
+            description={runError}
+          />
+        ) : null}
+        {jobActive ? (
+          <Alert
+            className="batch-alert"
+            type="info"
+            showIcon
+            message="评测进行中"
+            description="当前上传已有未完成的批次；完成或取消后才能再次运行。结果每 1 秒刷新。"
+          />
+        ) : null}
+
+        <div className="batch-run-bar">
           <Button
             type="primary"
             icon={<PlayCircleOutlined />}
-            disabled={!canRun}
+            disabled={!canStart}
             loading={starting}
             onClick={() => void startBatch()}
           >
             开始批量评测
           </Button>
-        </Card>
-      </div>
+          {preview && !canStart ? (
+            <span className="muted">
+              {multiProblem
+                ? mapping.unmapped.length > 0
+                  ? `还有 ${mapping.unmapped.length} 个题目文件夹未映射`
+                  : mapping.unknown.length > 0
+                    ? '映射中包含题目目录里不存在的题目'
+                    : preview.validCount === 0
+                      ? '当前层级没有结构有效的源码'
+                      : jobActive
+                        ? '当前批次仍在运行'
+                        : '请先完成题目映射'
+                : singleProblemId === undefined
+                  ? '请先选择题目'
+                  : preview.validCount === 0
+                    ? '当前层级没有结构有效的源码'
+                    : jobActive
+                      ? '当前批次仍在运行'
+                      : '暂时无法开始'}
+            </span>
+          ) : null}
+        </div>
+      </Card>
 
       <Card
         className="oij-card batch-result"
         title={
           <Space>
-            评测结果
-            {job ? (
-              <Tag color={job.status === 'finished' ? 'green' : 'blue'}>
-                {job.status === 'finished' ? '已完成' : '评测中'}
-              </Tag>
-            ) : null}
+            4. 运行结果
+            {job ? <Tag color={batchStatusColor(job.status)}>{batchStatusLabel(job.status)}</Tag> : null}
           </Space>
         }
         extra={
-          <Space>
-            {job?.status === 'running' ? <Spin size="small" /> : null}
+          <Space wrap size={[8, 8]}>
+            {jobActive ? <Spin size="small" /> : null}
+            <Button
+              danger
+              icon={<StopOutlined />}
+              loading={canceling}
+              disabled={!job || !jobActive}
+              onClick={confirmCancel}
+            >
+              取消批次
+            </Button>
             <Button
               icon={<DownloadOutlined />}
-              disabled={!job || job.status !== 'finished' || job.items.length === 0}
-              onClick={exportCsv}
+              loading={exportingFormat === 'csv'}
+              disabled={
+                !job || jobActive || job.total === 0 || exportingFormat !== null
+              }
+              onClick={() => void exportBatch('csv')}
             >
               导出 CSV
+            </Button>
+            <Button
+              icon={<TableOutlined />}
+              loading={exportingFormat === 'matrix'}
+              disabled={
+                !job || jobActive || job.total === 0 || exportingFormat !== null
+              }
+              onClick={() => void exportBatch('matrix')}
+            >
+              矩阵 CSV
+            </Button>
+            <Button
+              icon={<FileExcelOutlined />}
+              loading={exportingFormat === 'xlsx'}
+              disabled={
+                !job || jobActive || job.total === 0 || exportingFormat !== null
+              }
+              onClick={() => void exportBatch('xlsx')}
+            >
+              导出 Excel
+            </Button>
+            <Button
+              icon={<Html5Outlined />}
+              loading={exportingFormat === 'html'}
+              disabled={
+                !job || jobActive || job.total === 0 || exportingFormat !== null
+              }
+              onClick={() => void exportBatch('html')}
+            >
+              导出 HTML
             </Button>
           </Space>
         }
       >
-        {batchId === null ? (
+        {jobId === null ? (
           <Empty
             image={Empty.PRESENTED_IMAGE_SIMPLE}
-            description="上传 zip、选择题目并开始评测后，这里显示结果。"
+            description="完成题目映射并开始评测后，这里显示导入进度、分页结果和失败明细。"
           />
-        ) : batchQuery.isPending ? (
-          <PageLoading tip="正在提交并加载批次结果…" />
-        ) : batchQuery.isError ? (
-          <ErrorResult
-            error={batchQuery.error}
-            onRetry={() => void batchQuery.refetch()}
-          />
+        ) : jobQuery.isPending ? (
+          <PageLoading tip="正在加载批次进度…" />
+        ) : jobQuery.isError ? (
+          <ErrorResult error={jobQuery.error} onRetry={() => void jobQuery.refetch()} />
         ) : job ? (
           <div>
             <div className="batch-result-meta muted">
               {job.multiProblem
-                ? `批次 #${job.id} · 多题 · 学生层级 ${job.studentLevel} · 已评测 ${judgedCount} / ${totalStudents}`
-                : `批次 #${job.id} · 题目 #${job.problemId} · 层级 ${job.studentLevel} · 已评测 ${judgedCount} / ${totalStudents}`}
+                ? `批次 #${job.id} · 多题 · 学生层级 ${job.studentLevel}`
+                : `批次 #${job.id} · 题目 #${job.problemId} · 层级 ${job.studentLevel}`}
+              {job.uploadId ? ` · upload ${job.uploadId.slice(0, 8)}…` : ''}
+              {` · 状态 ${batchStatusLabel(job.status)}`}
             </div>
+
+            <div className="batch-progress">
+              <div className="batch-progress-head">
+                <span>
+                  {job.status === 'importing'
+                    ? '导入进度'
+                    : job.status === 'finished'
+                      ? '评测完成'
+                      : isBatchActive(job.status)
+                        ? '评测进度'
+                        : '批次进度'}
+                </span>
+                <span className="muted">
+                  {job.status === 'importing' && importProgress
+                    ? `已处理 ${importProgress.processed} / ${importProgress.totalCandidates} 条源码`
+                    : `已评测 ${job.judgedCount} / ${job.importedCount}`}
+                </span>
+              </div>
+              <Progress
+                percent={progressPercent}
+                status={progressStatus}
+                strokeWidth={10}
+              />
+            </div>
+
+            {job.status === 'failed' ? (
+              <Alert
+                className="batch-alert"
+                type="error"
+                showIcon
+                message="批次失败"
+                description="导入过程中出现整批级错误（如 zip 损坏、服务重启）。请重新上传后运行，已写入的逐条失败记录仍可在下方查看。"
+              />
+            ) : job.status === 'canceled' ? (
+              <Alert
+                className="batch-alert"
+                type="warning"
+                showIcon
+                message="批次已取消"
+                description="已导入的提交已尽量取消；可以重新上传并运行。"
+              />
+            ) : null}
+
             <div className="batch-summary">
               <div className="batch-stat">
-                <span className="batch-stat-value">{acCount}</span>
-                <span className="muted">{resultMulti ? 'AC 数量' : 'AC 人数'}</span>
+                <span className="batch-stat-value">{job.acCount}</span>
+                <span className="muted">{job.multiProblem ? 'AC 数量' : 'AC 人数'}</span>
               </div>
               <div className="batch-stat">
-                <span className="batch-stat-value">{totalStudents}</span>
-                <span className="muted">{resultMulti ? '总提交' : '总人数'}</span>
+                <span className="batch-stat-value">{job.total}</span>
+                <span className="muted">总条目</span>
               </div>
-              {resultMulti ? (
+              <div className="batch-stat">
+                <span className="batch-stat-value">{job.importedCount}</span>
+                <span className="muted">成功导入</span>
+              </div>
+              <div className="batch-stat">
+                <span className="batch-stat-value">{job.skippedCount}</span>
+                <span className="muted">跳过</span>
+              </div>
+              <div className="batch-stat">
+                <span className="batch-stat-value">{job.errorCount}</span>
+                <span className="muted">导入失败</span>
+              </div>
+              {job.multiProblem ? (
                 <>
                   <div className="batch-stat">
-                    <span className="batch-stat-value">{distinctStudentCount}</span>
+                    <span className="batch-stat-value">{job.distinctStudentCount}</span>
                     <span className="muted">学生数</span>
                   </div>
                   <div className="batch-stat">
-                    <span className="batch-stat-value">{distinctProblemCount}</span>
+                    <span className="batch-stat-value">{job.distinctProblemCount}</span>
                     <span className="muted">题目数</span>
                   </div>
                 </>
               ) : null}
               <div className="batch-stat">
-                <span className="batch-stat-value">{averageScore.toFixed(1)}</span>
+                <span className="batch-stat-value">{job.averageScore.toFixed(1)}</span>
                 <span className="muted">平均分</span>
               </div>
             </div>
+
+            {job.skippedCount > 0 ? (
+              <Alert
+                className="batch-alert"
+                type="warning"
+                showIcon
+                message={`跳过 ${job.skippedCount} 个无效学生文件夹`}
+                description={<FailureList items={job.skipped} total={job.skippedCount} tone="warning" />}
+              />
+            ) : null}
+            {job.errorCount > 0 ? (
+              <Alert
+                className="batch-alert"
+                type="error"
+                showIcon
+                message={`${job.errorCount} 条导入失败`}
+                description={<FailureList items={job.errors} total={job.errorCount} tone="error" />}
+              />
+            ) : null}
+
             <Table<BatchResultItem>
-              className="oij-table"
-              rowKey={(item) => `${item.student}:${item.problemId}`}
+              className="oij-table batch-result-table"
+              rowKey={(item) => item.id}
               size="small"
               columns={columns}
               dataSource={job.items}
-              pagination={false}
+              pagination={{
+                current: page,
+                pageSize,
+                total: job.total,
+                showSizeChanger: true,
+                pageSizeOptions: PAGE_SIZE_OPTIONS,
+                showTotal: (total, range) => `${range[0]}-${range[1]} / 共 ${total} 条`,
+                onChange: (nextPage, nextPageSize) => {
+                  if (nextPageSize !== pageSize) {
+                    setPageSize(nextPageSize);
+                    setPage(1);
+                  } else {
+                    setPage(nextPage);
+                  }
+                },
+              }}
               locale={{ emptyText: '本批次没有选手' }}
             />
           </div>

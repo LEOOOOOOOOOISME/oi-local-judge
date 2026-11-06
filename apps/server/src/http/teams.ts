@@ -68,7 +68,7 @@ export function registerTeamRoutes(app: FastifyInstance, options: TeamRouteOptio
     async (request, reply) => {
       const teamId = parsePositiveInt(request.params.id);
       const team = teamId === null ? null : getTeam(options.db, teamId);
-      if (!team) {
+      if (!team || team.kind !== 'team') {
         return notFound(reply, 'TEAM_NOT_FOUND', 'team not found');
       }
       const user = request.user!;
@@ -77,6 +77,8 @@ export function registerTeamRoutes(app: FastifyInstance, options: TeamRouteOptio
         id: team.id,
         name: team.name,
         ownerId: team.ownerId,
+        kind: team.kind,
+        allowContest: team.allowContest,
         createdAt: team.createdAt,
         viewerRole: member?.role ?? null,
       };
@@ -118,13 +120,16 @@ export function registerTeamRoutes(app: FastifyInstance, options: TeamRouteOptio
       }
       const user = request.user!;
       try {
-        addTeamMember(options.db, {
+        const sync = addTeamMember(options.db, {
           teamId,
           actorId: user.id,
           username,
           isAdmin: user.role === 'admin',
         });
-        return reply.code(201).send({ ok: true, data: null });
+        // Contest participation granted by this membership, plus contests that
+        // were deliberately skipped because the user already represents
+        // another registered team.
+        return reply.code(201).send({ ok: true, data: { sync } });
       } catch (err) {
         return sendTeamError(reply, err);
       }
@@ -183,6 +188,10 @@ export function registerTeamRoutes(app: FastifyInstance, options: TeamRouteOptio
       if (teamId === null) {
         return notFound(reply, 'TEAM_NOT_FOUND', 'team not found');
       }
+      const team = getTeam(options.db, teamId);
+      if (!team || team.kind !== 'team') {
+        return notFound(reply, 'TEAM_NOT_FOUND', 'team not found');
+      }
       const rawUserId = (request.body ?? {}).userId;
       const userId =
         typeof rawUserId === 'number' && Number.isInteger(rawUserId) && rawUserId > 0
@@ -212,6 +221,10 @@ export function registerTeamRoutes(app: FastifyInstance, options: TeamRouteOptio
     async (request, reply) => {
       const teamId = parsePositiveInt(request.params.id);
       if (teamId === null) {
+        return notFound(reply, 'TEAM_NOT_FOUND', 'team not found');
+      }
+      const team = getTeam(options.db, teamId);
+      if (!team || team.kind !== 'team') {
         return notFound(reply, 'TEAM_NOT_FOUND', 'team not found');
       }
       const actor = request.user!;

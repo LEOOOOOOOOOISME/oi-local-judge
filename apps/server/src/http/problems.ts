@@ -11,11 +11,22 @@ import {
   stripObjectiveAnswers,
 } from '../services/problems.js';
 import {
+  canEditProblem,
   canViewProblem,
   listVisibleProblems,
   type ProblemActor,
 } from '../services/problem-acl.js';
-import { getProblem, getTestcases } from '../storage/repos/problems.js';
+import {
+  attachmentContentDisposition,
+  attachmentFilePath,
+  getProblemAttachmentRow,
+  listProblemAttachmentDtos,
+} from '../services/attachments.js';
+import {
+  getProblem,
+  getProblemByIdOrDisplayId,
+  getTestcases,
+} from '../storage/repos/problems.js';
 
 export interface ProblemRouteOptions {
   db: DatabaseSync;
@@ -45,17 +56,61 @@ export function registerProblemRoutes(app: FastifyInstance, options: ProblemRout
   }));
 
   app.get<{ Params: { id: string } }>('/api/problems/:id', async (request, reply) => {
-    const id = Number(request.params.id);
-    const problem = Number.isInteger(id) ? getProblem(options.db, id) : null;
+    // Accept both the internal numeric id and a Luogu-style display id (P1001).
+    const problem = getProblemByIdOrDisplayId(options.db, request.params.id);
     if (!problem || !canViewProblem(options.db, problem, actorFor(request, options))) {
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND', message: 'problem not found' } });
     }
     return { ok: true, data: stripObjectiveAnswers(getProblemDetail(options.db, problem.id)!) };
   });
 
+  app.get<{ Params: { id: string } }>(
+    '/api/problems/:id/attachments',
+    async (request, reply) => {
+      const problem = getProblemByIdOrDisplayId(options.db, request.params.id);
+      const actor = actorFor(request, options);
+      if (!problem || !canViewProblem(options.db, problem, actor)) {
+        return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      }
+      // Admin-only attachments are part of the authoring workspace and are
+      // hidden from ordinary readers, even when the problem is public.
+      const includeAdmin = canEditProblem(options.db, problem, actor);
+      return {
+        ok: true,
+        data: listProblemAttachmentDtos(options.db, problem.id, { includeAdmin }),
+      };
+    },
+  );
+
+  app.get<{ Params: { id: string } }>('/api/attachments/:id', async (request, reply) => {
+    const attachmentId = Number(request.params.id);
+    const row = Number.isInteger(attachmentId) && attachmentId > 0
+      ? getProblemAttachmentRow(options.db, attachmentId)
+      : null;
+    if (!row) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    const problem = getProblem(options.db, row.problem_id);
+    const actor = actorFor(request, options);
+    if (!problem) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    const allowed =
+      row.visibility === 'admin'
+        ? canEditProblem(options.db, problem, actor)
+        : canViewProblem(options.db, problem, actor);
+    if (!allowed) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    const absolute = attachmentFilePath(options.config, row);
+    if (!absolute || !existsSync(absolute)) {
+      return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+    }
+    return reply
+      .header('content-type', row.mime)
+      .header('content-length', String(row.size))
+      .header('content-disposition', attachmentContentDisposition(row.filename))
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'private, no-store')
+      .send(createReadStream(absolute));
+  });
+
   app.get<{ Params: { id: string } }>('/api/problems/:id/answer-files', async (request, reply) => {
-    const id = Number(request.params.id);
-    const problem = Number.isInteger(id) ? getProblem(options.db, id) : null;
+    const problem = getProblemByIdOrDisplayId(options.db, request.params.id);
     if (
       !problem ||
       problem.type !== 'output-only' ||
@@ -77,8 +132,7 @@ export function registerProblemRoutes(app: FastifyInstance, options: ProblemRout
   app.get<{ Params: { id: string; testcaseId: string } }>(
     '/api/problems/:id/answer-files/:testcaseId',
     async (request, reply) => {
-      const id = Number(request.params.id);
-      const problem = Number.isInteger(id) ? getProblem(options.db, id) : null;
+      const problem = getProblemByIdOrDisplayId(options.db, request.params.id);
       if (
         !problem ||
         problem.type !== 'output-only' ||

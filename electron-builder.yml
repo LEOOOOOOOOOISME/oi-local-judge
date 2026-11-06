@@ -16,6 +16,13 @@ directories:
 
 asar: false
 
+# Releases are uploaded manually (or by a workflow) from release/installer.
+# An explicit empty provider list stops electron-builder from trying to infer a
+# GitHub repository when computing update metadata, which previously failed
+# with `TypeError: Cannot read properties of null (reading 'channel')` even
+# with `--publish never`.
+publish: []
+
 win:
   target:
     - target: nsis

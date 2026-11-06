@@ -98,6 +98,8 @@ export interface ProblemSummary {
   ownerType?: ProblemOwnerType;
   /** 题目归属 id；system 题目为 null。旧后端可能不返回。 */
   ownerId?: number | null;
+  /** 洛谷式题号，如 P1001；旧后端可能不返回。 */
+  displayId?: string;
 }
 
 export interface ProblemDetail extends ProblemSummary {
@@ -140,6 +142,30 @@ export interface AddProblemShareRequest {
 export interface AdminProblemDetail extends ProblemDetail {
   ownerType: ProblemOwnerType;
   ownerId: number | null;
+  /** 题号分类与序号（由后端按 displayId 解析）。 */
+  categoryId?: number | null;
+  seq?: number | null;
+}
+
+/** 洛谷式题号分类（前缀）。 */
+export interface ProblemCategory {
+  id: number;
+  code: string;
+  name: string;
+  nextSeq: number;
+  seqStart: number;
+  createdAt: number;
+}
+
+export interface CreateProblemCategoryRequest {
+  code: string;
+  name?: string;
+  seqStart?: number;
+}
+
+export interface UpdateProblemCategoryRequest {
+  name?: string;
+  seqStart?: number;
 }
 
 /** Phase 1F 管理端列表项（包含隐藏题、可见性与归属）。 */
@@ -147,6 +173,29 @@ export interface AdminProblemSummary extends ProblemSummary {
   visibility: 'public' | 'hidden';
   ownerType: ProblemOwnerType;
   ownerId: number | null;
+}
+
+/**
+ * GET /api/admin/problems/picker 的题目选择器项。
+ * `scope` 是把 owner 类型映射成 个人 / 团队 / 公共 后的结果；`kind` 与
+ * `type` 相同（standard / objective / ...），保留两种命名以兼容旧调用。
+ */
+export interface AdminProblemPickerItem {
+  id: number;
+  displayId: string;
+  title: string;
+  type: ProblemType;
+  kind: ProblemType;
+  tags: string[];
+  difficulty: number | null;
+  visibility: 'public' | 'hidden';
+  owner: { type: ProblemOwnerType; id: number | null };
+  ownerType: ProblemOwnerType;
+  ownerId: number | null;
+  ownerKind: 'personal' | 'team' | 'public';
+  scope: 'personal' | 'team' | 'public';
+  timeMs: number;
+  memoryMb: number;
 }
 
 /** Phase 1E 管理端：题目基础信息更新（所有字段可选）。 */
@@ -235,20 +284,154 @@ export interface BatchRunItem {
   problemTitle?: string | null;
 }
 
+export type BatchImportStatus = 'imported' | 'skipped' | 'error';
+export type BatchItemStatus = SubmissionStatus | 'missing' | 'skipped' | 'error';
+
+/**
+ * GET /api/admin/batch/:id/export 的格式。
+ * `matrix` 是 CSV + `matrix=1`，导出学生×题目矩阵而不是长表。
+ */
+export type BatchExportFormat = 'csv' | 'matrix' | 'xlsx' | 'html';
+
+/** P0：逐文件导入失败/无效学生文件夹的摘要。 */
+export interface BatchFailureItem {
+  id: number;
+  student: string;
+  sourcePath: string;
+  problemId: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+}
+
 export interface BatchRunResult {
   id: number;
+  status: 'running' | 'finished' | 'failed';
   count: number;
+  total: number;
+  importedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  duplicateCount: number;
   items: BatchRunItem[];
   multiProblem?: boolean;
+  skipped: BatchFailureItem[];
+  errors: BatchFailureItem[];
+}
+
+/**
+ * P1 异步批量的任务状态：`importing` 由后台导入持有，之后按持久化的
+ * batch_items/submissions 推导为 queued → judging → finished。
+ * `running` 仅由旧同步接口返回，保留在联合类型里兼容。
+ */
+export type BatchJobStatus =
+  | 'importing'
+  | 'queued'
+  | 'judging'
+  | 'running'
+  | 'finished'
+  | 'failed'
+  | 'canceled';
+
+/** POST /api/admin/batch/uploads 返回的流式上传结果。 */
+export interface BatchUploadStreamResult {
+  uploadId: string;
+  originalName: string | null;
+  status: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+/** GET /api/admin/batch/uploads/:id/preview 的无效学生项。 */
+export interface BatchPreviewInvalidStudent {
+  student: string;
+  reason: string;
+  sourcePath: string;
+}
+
+/** GET /api/admin/batch/uploads/:id/preview 的重复学生-题目项。 */
+export interface BatchPreviewDuplicate {
+  student: string;
+  problemFolder: string;
+  problemId: number | null;
+  sourcePath: string;
+}
+
+/** 预览中的逐文件失败项（空源码、超大源码等）。 */
+export interface BatchPreviewFailure {
+  student: string;
+  sourcePath: string;
+  problemId: number | null;
+  status: BatchImportStatus;
+  errorCode: string;
+  errorMessage: string;
+}
+
+/** 扫描阶段跳过的 zip 条目（不安全路径、超大文件、读取失败）。 */
+export interface BatchPreviewSkippedEntry {
+  path: string;
+  reason: string;
+  message?: string;
+}
+
+/** GET /api/admin/batch/uploads/:id/preview 的返回结构。 */
+export interface BatchPreview {
+  uploadId: string;
+  originalName: string | null;
+  status: string;
+  sizeBytes: number;
+  sha256: string;
+  entryCount: number;
+  totalUncompressedBytes: number;
+  studentLevel: number;
+  problemLevel: number;
+  treeSample: string[];
+  maxDepth: number;
+  /** 去重后的学生数量。 */
+  students: number;
+  studentSample: string[];
+  problemFolders: string[];
+  invalidStudents: BatchPreviewInvalidStudent[];
+  duplicates: BatchPreviewDuplicate[];
+  duplicateCount: number;
+  /** 结构上有效的源码数（尚未要求题目映射）。 */
+  validCount: number;
+  totalFiles: number;
+  skipped: BatchPreviewSkippedEntry[];
+  failures: BatchPreviewFailure[];
+}
+
+/** GET /api/admin/batch/:id 的进度块。 */
+export interface BatchProgress {
+  total: number;
+  imported: number;
+  skipped: number;
+  errors: number;
+  judged: number;
+  percent: number;
+  /** 与任务状态一致：importing/queued/judging/finished/failed/canceled。 */
+  phase: string;
+  /** 导入阶段的分条进度；非导入阶段为 null。 */
+  import: { processed: number; totalCandidates: number } | null;
+}
+
+/** POST /api/admin/batch/uploads/:id/run 返回 202。 */
+export interface BatchAsyncRunResult {
+  jobId: number;
+  id: number;
+  status: BatchJobStatus;
 }
 
 export interface BatchResultItem {
+  id: number;
   student: string;
-  problemId: number;
+  problemId: number | null;
   problemTitle: string | null;
   sourcePath: string;
   submissionId: number | null;
-  status: SubmissionStatus | 'missing';
+  importStatus: BatchImportStatus | null;
+  status: BatchItemStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
   verdict: Verdict | null;
   score: number;
   timeMs: number;
@@ -259,8 +442,27 @@ export interface BatchJob {
   id: number;
   problemId: number;
   multiProblem?: boolean;
-  status: 'running' | 'finished';
+  status: BatchJobStatus;
+  /** 数据库中的原始任务状态（异步批次可能是 importing，而 status 已推导）。 */
+  jobStatus?: string;
+  mode?: 'async' | 'sync' | string;
+  uploadId?: string | null;
   studentLevel: number;
+  offset: number;
+  limit: number;
+  total: number;
+  count: number;
+  importedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  judgedCount: number;
+  acCount: number;
+  averageScore: number;
+  distinctStudentCount: number;
+  distinctProblemCount: number;
+  progress?: BatchProgress | null;
+  skipped: BatchFailureItem[];
+  errors: BatchFailureItem[];
   items: BatchResultItem[];
 }
 
@@ -409,6 +611,8 @@ export interface Submission {
   hackedAt?: string | null;
   hackedBy?: number | null;
   hackId?: number | null;
+  /** 队列位置（1-based）；仅排队中的提交有值，其余为 null。 */
+  queuePosition?: number | null;
   code?: string;
   results?: TestResult[];
 }
@@ -464,7 +668,11 @@ export interface TeamRankingRow {
   teamName: string;
   memberCount: number;
   totalScore: number;
+  /** CF-like：成功/失败 Hack 的分值（已计入 totalScore）。 */
+  hackScore?: number;
   solved: number;
+  /** ACM/CF-like 罚时（分钟）；OI/IOI 为 0。 */
+  penalty: number;
   lastAcAt: number | null;
   cells: TeamRankingCell[];
 }
@@ -589,6 +797,20 @@ export interface ProblemAsset {
   updated_at: number;
 }
 
+export type AttachmentVisibility = 'problem' | 'admin';
+
+/** 题目附件（题目可见即可下载；admin 仅作者/管理员可见）。 */
+export interface ProblemAttachment {
+  id: number;
+  problemId: number;
+  filename: string;
+  size: number;
+  mime: string;
+  visibility: AttachmentVisibility;
+  createdAt: number;
+  downloadUrl: string;
+}
+
 export interface ProblemAssetSource extends ProblemAsset {
   source: string;
 }
@@ -630,10 +852,15 @@ export interface CreateProblemRequest {
   objective?: ObjectiveConfig;
   ownerType?: ProblemOwnerType;
   ownerId?: number | null;
+  /** 分类；留空默认 P。 */
+  categoryId?: number;
+  /** 手动指定题号（如 P1001）；留空自动分配。 */
+  displayId?: string;
 }
 
 export interface CreateProblemResult {
   id: number;
+  displayId?: string;
 }
 
 export interface RankingCell {
@@ -711,6 +938,158 @@ export interface OfficialRanking {
   version?: number;
   pluginError?: string;
   officialFrozenUntil?: number | null;
+}
+
+/**
+ * GET /api/contests/:id/official-ranking/page 返回的正式榜分页。
+ * 后端只回当前页 items，不再携带完整 rows；total 为搜索过滤后的行数。
+ */
+export interface OfficialRankingPage {
+  contest: Contest;
+  problems: OfficialRankingProblem[];
+  config: OfficialRankingConfig;
+  archived: boolean;
+  preset: string;
+  version?: number;
+  pluginError?: string;
+  officialFrozenUntil?: number | null;
+  items: OfficialRankingRow[];
+  total: number;
+  allTotal: number;
+  offset: number;
+  limit: number;
+  query: string;
+}
+
+/** 比赛统计仪表盘：总体口径（OI/IOI 为分数，ACM/CF 为通过题数）。 */
+export type ContestStatisticsMode = 'score' | 'solved';
+
+/** 统计直方图分桶；`from`/`to` 均为闭区间端点。 */
+export interface ContestStatisticsDistributionBin {
+  from: number;
+  to: number;
+  count: number;
+}
+
+/** 累计分布点：分数阈值、达到人数与占比（0-1）。 */
+export interface ContestStatisticsCumulativePoint {
+  score: number;
+  count: number;
+  ratio: number;
+}
+
+export interface ContestStatisticsSummary {
+  participants: number;
+  submissions: number;
+  /** `solved` 模式下为平均通过题数。 */
+  avgScore: number | null;
+  medianScore: number | null;
+  stddev: number | null;
+  maxScore: number | null;
+  minScore: number | null;
+  fullScoreCount: number;
+  zeroScoreCount: number;
+  /** 仅 `solved` 模式返回；否则为 null。 */
+  avgPenalty: number | null;
+  medianPenalty: number | null;
+}
+
+export interface ContestStatisticsProblem {
+  problemId: number;
+  ordinal: number;
+  title: string;
+  fullScore: number;
+  avgScore: number | null;
+  medianScore: number | null;
+  stddev: number | null;
+  acRate: number | null;
+  fullRate: number | null;
+  zeroRate: number | null;
+  /** OI/IOI：平均分/满分；ACM/CF：1 - AC 率。 */
+  difficulty: number | null;
+  discrimination: number | null;
+  distribution: ContestStatisticsDistributionBin[];
+}
+
+export interface ContestStatisticsGroup {
+  name: string;
+  kind: 'class' | 'team';
+  participants: number;
+  avgScore: number | null;
+  fullRate: number | null;
+}
+
+/** GET /api/contests/:id/statistics 返回结构（仅聚合，不含成绩行）。 */
+export interface ContestStatistics {
+  contest: {
+    id: number;
+    title: string;
+    /** 原始赛制（oi/ioi/acm/...）。 */
+    mode: string;
+    preset: string;
+    frozen: boolean;
+    generatedAt: number;
+  };
+  mode: ContestStatisticsMode;
+  summary: ContestStatisticsSummary;
+  distribution: ContestStatisticsDistributionBin[];
+  cumulative: ContestStatisticsCumulativePoint[];
+  problems: ContestStatisticsProblem[];
+  groups: ContestStatisticsGroup[];
+  insights: string[];
+  includeHidden: boolean;
+}
+
+/** 比赛成绩报告：参与者统计。 */
+export interface ContestReportParticipantStats {
+  total: number;
+  accepted: number;
+  pending: number;
+  rejected: number;
+  checkedIn: number;
+}
+
+/** 比赛成绩报告：提交统计。 */
+export interface ContestReportSubmissionStats {
+  total: number;
+  /** 按 verdict 计数；无 verdict 的提交记为 none。 */
+  byVerdict: Record<string, number>;
+  byStatus: Record<string, number>;
+}
+
+/** 比赛成绩报告：每题统计。 */
+export interface ContestReportProblemStats {
+  problemId: number;
+  ordinal: number;
+  title: string;
+  points: number;
+  submissions: number;
+  acSubmissions: number;
+  /** 有至少一次 AC 的去重人数。 */
+  acUsers: number;
+  /** AC 提交率（0-100，保留一位小数）。 */
+  acRate: number;
+  averageScore: number;
+  maxScore: number;
+}
+
+/** 比赛成绩报告：团队统计（仅团队赛）。 */
+export interface ContestReportTeamStats {
+  teamCount: number;
+  rows: TeamRankingRow[];
+}
+
+/** GET /api/admin/contests/:id/report；个人榜已排除隐藏选手。 */
+export interface ContestReport {
+  generatedAt: number;
+  contest: Contest;
+  participants: ContestReportParticipantStats;
+  submissions: ContestReportSubmissionStats;
+  problems: ContestReportProblemStats[];
+  ranking: OfficialRankingRow[];
+  /** 应用 top 限制前的可见榜行数。 */
+  rankingTotal: number;
+  teamStats: ContestReportTeamStats | null;
 }
 
 /** WebSocket `ranking.delta` 载荷：只含变化行、全部名次与移除用户。 */
@@ -1191,12 +1570,97 @@ export interface DiagnosticsReport {
   queue: { queued: number; running: number; failed: number };
 }
 
+/** 本地监控指标（GET /api/admin/system/metrics）。 */
+export interface RequestMetrics {
+  total: number;
+  serverErrors: number;
+  avgLatencyMs: number;
+  p95LatencyMs: number;
+}
+
+/** 慢请求样本：url 只包含路径，不含查询串。 */
+export interface SlowRequest {
+  method: string;
+  url: string;
+  status: number;
+  durationMs: number;
+  at: number;
+}
+
+export interface ProcessMetrics {
+  startedAt: number;
+  uptimeSec: number;
+  rssBytes: number;
+  heapUsedBytes: number;
+  heapTotalBytes: number;
+  externalBytes: number;
+  cpu: {
+    userMs: number;
+    systemMs: number;
+    percent: number;
+  };
+}
+
+export interface EventLoopDelayMetrics {
+  p50Ms: number;
+  p95Ms: number;
+  p99Ms: number;
+  maxMs: number;
+}
+
+export interface RuntimeMetrics {
+  generatedAt: number;
+  requests: RequestMetrics;
+  slowRequests: SlowRequest[];
+  process: ProcessMetrics;
+  eventLoopDelay: EventLoopDelayMetrics;
+  queue: { queued: number; running: number; failed: number };
+  /** 数据目录不可读时为 null。 */
+  disk: { freeBytes: number; totalBytes: number } | null;
+}
+
+/** 备份触发方式；pre-upgrade 由升级前备份接口创建。 */
+export type BackupKind = 'manual' | 'auto' | 'pre-restore' | 'pre-upgrade';
+
 export interface BackupEntry {
   id: string;
   path: string;
   createdAt: number;
   sizeBytes: number;
+  kind: BackupKind;
   manifest: Record<string, unknown>;
+}
+
+/** GET /api/admin/system/update-check：检查成功。 */
+export interface UpdateCheckSuccess {
+  current: string;
+  latest: string;
+  /** 选中 Release 的原始 tag（如 `v1.1.0-rc.7`）。 */
+  tagName: string;
+  /** 选中 Release 是否为预发布版本。 */
+  isPrerelease: boolean;
+  updateAvailable: boolean;
+  /** Release 页面地址（不是安装包直链）。 */
+  url: string | null;
+  /** Release 发布时间（毫秒时间戳）；缺失时为 null。 */
+  publishedAt: number | null;
+  notes: string;
+  checkedAt: number;
+}
+
+/** GET /api/admin/system/update-check：网络/接口失败（HTTP 仍为 200）。 */
+export interface UpdateCheckFailure {
+  error: string;
+  current: string;
+  checkedAt: number;
+}
+
+export type UpdateCheckResult = UpdateCheckSuccess | UpdateCheckFailure;
+
+/** POST /api/admin/system/update/prepare：只创建升级前备份，不下载、不安装。 */
+export interface UpdatePrepareResult {
+  backup: BackupEntry;
+  currentVersion: string;
 }
 
 /** Settings Center v1.1：运行时设置（GET/PUT /api/admin/system/settings）。 */
@@ -1239,6 +1703,15 @@ export interface RestoreRequestResult {
   restartRequired: true;
 }
 
+/** POST /api/admin/system/learning-stats/rebuild 返回结构：重建写入的行数。 */
+export interface LearningStatsRebuildResult {
+  users: number;
+  problems: number;
+  tags: number;
+  days: number;
+  durationMs: number;
+}
+
 /** Teams v1.2：常驻团队。 */
 export type TeamRole = 'captain' | 'member';
 
@@ -1251,6 +1724,26 @@ export interface TeamSummary {
   memberCount: number;
   /** 当前用户在团队中的角色。 */
   role: TeamRole;
+}
+
+/** GET /api/admin/teams 全量团队搜索项（管理员/比赛管理员）。 */
+export interface AdminTeamSummary {
+  id: number;
+  name: string;
+  ownerId: number;
+  memberCount: number;
+  createdAt: number;
+}
+
+/** GET /api/admin/groups：全量班级/团队搜索项（管理员/比赛管理员）。 */
+export interface AdminGroupSummary {
+  id: number;
+  name: string;
+  kind: TrainingPlanGroupKind;
+  ownerId: number;
+  allowContest: boolean;
+  memberCount: number;
+  createdAt: number;
 }
 
 export interface TeamMember {
@@ -1279,6 +1772,193 @@ export interface CreateTeamRequest {
 
 export interface CreateTeamResult {
   id: number;
+}
+
+/** Classes：教学班级（后端 teams.kind='class'，与团队路由完全隔离）。 */
+export type ClassRole = 'coach' | 'assistant' | 'member';
+
+/** GET /api/classes 列表项；role 为当前用户在班级中的身份。 */
+export interface ClassSummary {
+  id: number;
+  name: string;
+  ownerId: number;
+  kind: 'class';
+  allowContest: boolean;
+  createdAt: number;
+  memberCount: number;
+  role: ClassRole;
+}
+
+export interface ClassMember {
+  userId: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  role: ClassRole;
+  joinedAt: number;
+}
+
+/** GET /api/classes/:id；members 仅班级成员与管理员可见。 */
+export interface ClassDetail {
+  id: number;
+  name: string;
+  ownerId: number;
+  kind: 'class';
+  allowContest: boolean;
+  createdAt: number;
+  /** 当前用户在班级中的身份；非成员为 null。 */
+  viewerRole: ClassRole | null;
+  members?: ClassMember[];
+}
+
+/** POST /api/admin/classes：仅管理员与比赛管理员可用。 */
+export interface CreateClassRequest {
+  name: string;
+  allowContest?: boolean;
+}
+
+export interface CreateClassResult {
+  id: number;
+}
+
+/** PATCH /api/classes/:id：班级创建者或管理员可修改。 */
+export interface UpdateClassRequest {
+  name?: string;
+  allowContest?: boolean;
+}
+
+export interface AddClassMemberRequest {
+  username: string;
+  role?: ClassRole;
+}
+
+export interface AddClassCoachRequest {
+  username: string;
+}
+
+/** Learning analytics：错题模式（与后端 learning-stats service 对齐）。 */
+export type WrongProblemMode = 'never-ac' | 'latest-wrong';
+
+/** 单个学生在某题上的聚合；bestVerdict 为最好一次提交的评测结果。 */
+export interface StudentProblemStat {
+  problemId: number;
+  title: string;
+  difficulty: number | null;
+  tags: string[];
+  attempts: number;
+  wrongAttempts: number;
+  bestScore: number;
+  bestVerdict: Verdict | null;
+  firstAcAt: number | null;
+  lastSubmitAt: number;
+}
+
+/** 错题列表项：在题目聚合基础上附带最新一次提交的评测结果。 */
+export interface StudentWrongProblem extends StudentProblemStat {
+  lastVerdict: Verdict | null;
+}
+
+export interface StudentTagStat {
+  tag: string;
+  attempts: number;
+  solved: number;
+  totalProblems: number;
+  lastAttemptAt: number;
+}
+
+export interface StudentDailyStat {
+  date: string;
+  submissions: number;
+  acCount: number;
+  points: number;
+  /** 预留字段：当前后端没有活跃时长来源，固定为 0。 */
+  activeSeconds: number;
+}
+
+/** GET /api/students/:id/stats 返回结构。 */
+export interface StudentStats {
+  userId: number;
+  username: string;
+  generatedAt: number;
+  includeContest: boolean;
+  summary: {
+    attemptedProblems: number;
+    solvedProblems: number;
+    totalSubmissions: number;
+    acSubmissions: number;
+    wrongSubmissions: number;
+    firstAcAt: number | null;
+    lastActiveAt: number | null;
+  };
+  problems: StudentProblemStat[];
+  tags: StudentTagStat[];
+  daily: StudentDailyStat[];
+}
+
+/** GET /api/students/:id/wrong-problems 返回结构。 */
+export interface StudentWrongProblems {
+  userId: number;
+  mode: WrongProblemMode;
+  generatedAt: number;
+  includeContest: boolean;
+  problems: StudentWrongProblem[];
+}
+
+/** GET /api/students/:id/submissions 返回的提交摘要；不含源码。 */
+export interface StudentSubmissionSummary {
+  id: number;
+  problemId: number;
+  contestId: number | null;
+  status: SubmissionStatus;
+  verdict: Verdict | null;
+  score: number;
+  createdAt: string;
+}
+
+export interface ClassStudentSummary {
+  userId: number;
+  username: string;
+  attemptedProblems: number;
+  solvedProblems: number;
+  totalSubmissions: number;
+  lastActiveAt: number | null;
+}
+
+export interface ClassWeakTag {
+  tag: string;
+  attempts: number;
+  solved: number;
+  solveRate: number;
+}
+
+export interface ClassInactiveMember {
+  userId: number;
+  username: string;
+  lastActiveAt: number | null;
+}
+
+export interface ClassWrongProblem {
+  problemId: number;
+  title: string;
+  studentCount: number;
+  attempts: number;
+}
+
+/** GET /api/classes/:id/learning-stats 返回结构；仅班级教练与管理员可读。 */
+export interface ClassLearningStats {
+  classId: number;
+  className: string;
+  generatedAt: number;
+  includeContest: boolean;
+  studentCount: number;
+  activeStudentCount: number;
+  completedProblems: number;
+  attemptedProblems: number;
+  totalSubmissions: number;
+  students: ClassStudentSummary[];
+  weakTags: ClassWeakTag[];
+  inactiveMembers: ClassInactiveMember[];
+  topWrongProblems: ClassWrongProblem[];
 }
 
 export interface AddTeamMemberRequest {
@@ -1454,4 +2134,132 @@ export interface TeamContestAwards {
   rows: TeamAwardRow[];
   counts: AwardCounts;
   scope: 'team';
+}
+
+/** Training Plans：训练计划（班级/团队共用的 group）。 */
+export type TrainingPlanGroupKind = 'team' | 'class';
+
+/** 单个训练题目的完成状态（由后端按提交与目标分计算）。 */
+export type TrainingPlanItemStatus = 'completed' | 'pending' | 'overdue';
+
+export interface TrainingPlanProgressSummary {
+  itemCount: number;
+  completedCount: number;
+  lateCount: number;
+  overdueCount: number;
+  allCompleted: boolean;
+}
+
+/** GET /api/training-plans/:id 返回的题目。 */
+export interface TrainingPlanItem {
+  id: number;
+  problemId: number;
+  ordinal: number;
+  targetScore: number;
+  dueAt: number | null;
+  createdAt: number;
+  title: string;
+  type: ProblemType;
+  difficulty: number | null;
+  tags: string[];
+  timeMs: number;
+  memoryMb: number;
+}
+
+/** 当前用户（或成员）在某道训练题上的进度。 */
+export interface TrainingPlanItemProgress {
+  itemId: number;
+  problemId: number;
+  ordinal: number;
+  targetScore: number;
+  dueAt: number | null;
+  bestScore: number | null;
+  accepted: boolean;
+  completed: boolean;
+  completedAt: number | null;
+  late: boolean;
+  status: TrainingPlanItemStatus;
+}
+
+/** GET /api/training-plans 列表项。 */
+export interface TrainingPlanSummary {
+  id: number;
+  groupId: number;
+  groupName: string;
+  groupKind: TrainingPlanGroupKind;
+  /** 目标班级/团队的成员数。 */
+  memberCount: number;
+  title: string;
+  description: string;
+  startsAt: number | null;
+  endsAt: number | null;
+  createdBy: number;
+  createdAt: number;
+  updatedAt: number;
+  itemCount: number;
+  canManage: boolean;
+  myProgress: TrainingPlanProgressSummary;
+}
+
+/** 管理者可见的成员进度；items 与计划题目一一对应。 */
+export interface TrainingPlanMemberProgress extends TrainingPlanProgressSummary {
+  userId: number;
+  username: string;
+  realName: string | null;
+  className: string | null;
+  role: string;
+  items: TrainingPlanItemProgress[];
+}
+
+/** GET /api/training-plans/:id；memberProgress 仅管理者可见。 */
+export interface TrainingPlanDetail extends TrainingPlanSummary {
+  items: TrainingPlanItem[];
+  myItems: TrainingPlanItemProgress[];
+  memberProgress?: TrainingPlanMemberProgress[];
+}
+
+/** GET /api/training-plans/:id/progress（管理者）。 */
+export interface TrainingPlanProgress {
+  planId: number;
+  title: string;
+  items: TrainingPlanItem[];
+  members: TrainingPlanMemberProgress[];
+}
+
+export interface CreateTrainingPlanItemRequest {
+  problemId: number;
+  /** 省略时后端取题目满分。 */
+  targetScore?: number;
+  dueAt?: number | null;
+}
+
+export interface CreateTrainingPlanRequest {
+  groupId: number;
+  title: string;
+  description?: string;
+  startsAt?: number | null;
+  endsAt?: number | null;
+  items?: CreateTrainingPlanItemRequest[];
+}
+
+export interface CreateTrainingPlanResult {
+  id: number;
+}
+
+export interface UpdateTrainingPlanRequest {
+  title?: string;
+  description?: string;
+  startsAt?: number | null;
+  endsAt?: number | null;
+}
+
+export interface AddTrainingPlanItemRequest {
+  problemId: number;
+  /** 省略时后端取题目满分。 */
+  targetScore?: number;
+  dueAt?: number | null;
+}
+
+export interface ReorderTrainingPlanItemsRequest {
+  itemIds: number[];
 }

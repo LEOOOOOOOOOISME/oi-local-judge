@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ApiError } from '../api/client';
 import {
+  allowsIndividualSelfRegistration,
   allowsSelfRegistration,
   canCancelAcceptedRegistration,
   describeRegistrationError,
@@ -50,6 +51,26 @@ describe('allowsSelfRegistration', () => {
     expect(allowsSelfRegistration('manual')).toBe(false);
     expect(allowsSelfRegistration('open')).toBe(true);
     expect(allowsSelfRegistration('approval')).toBe(true);
+  });
+});
+
+describe('allowsIndividualSelfRegistration', () => {
+  it('keeps individual registration for individual and both contests', () => {
+    expect(allowsIndividualSelfRegistration('open', 'individual')).toBe(true);
+    expect(allowsIndividualSelfRegistration('approval', 'individual')).toBe(true);
+    expect(allowsIndividualSelfRegistration('open', 'both')).toBe(true);
+    expect(allowsIndividualSelfRegistration('approval', 'both')).toBe(true);
+  });
+
+  it('rejects individual registration for team-only contests', () => {
+    expect(allowsIndividualSelfRegistration('open', 'team')).toBe(false);
+    expect(allowsIndividualSelfRegistration('approval', 'team')).toBe(false);
+  });
+
+  it('keeps manual contests on administrator imports', () => {
+    expect(allowsIndividualSelfRegistration('manual', 'individual')).toBe(false);
+    expect(allowsIndividualSelfRegistration('manual', 'team')).toBe(false);
+    expect(allowsIndividualSelfRegistration('manual', 'both')).toBe(false);
   });
 });
 
@@ -136,5 +157,11 @@ describe('describeRegistrationError', () => {
     expect(
       describeRegistrationError(new ApiError(400, 'x', 'INVALID_REGISTRATION_WINDOW')),
     ).toBe('报名开始时间必须早于截止时间');
+  });
+
+  it('maps the team-only rejection to an actionable message', () => {
+    expect(
+      describeRegistrationError(new ApiError(403, 'x', 'TEAM_REGISTRATION_REQUIRED')),
+    ).toBe('本场比赛仅限团队报名，请由队长完成团队报名');
   });
 });

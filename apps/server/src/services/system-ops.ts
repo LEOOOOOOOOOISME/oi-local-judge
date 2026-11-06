@@ -37,12 +37,38 @@ export interface DiagnosticsReport {
   queue: { queued: number; running: number; failed: number };
 }
 
+/** How a backup was triggered; recorded in the backup manifest. */
+export type BackupKind = 'manual' | 'auto' | 'pre-restore' | 'pre-upgrade';
+
 export interface BackupEntry {
   id: string;
   path: string;
   createdAt: number;
   sizeBytes: number;
+  /** Backups written before `kind` existed are reported as `manual`. */
+  kind: BackupKind;
   manifest: Record<string, unknown>;
+}
+
+/** Automatic backups are kept to the newest N; older automatic ones are pruned. */
+export const AUTO_BACKUP_KEEP = 7;
+/** Minimum spacing between automatic backups (24 hours). */
+export const AUTO_BACKUP_MIN_INTERVAL_MS = 24 * 60 * 60 * 1000;
+
+export interface AutoBackupResult {
+  created: boolean;
+  skipped: boolean;
+  /** Number of automatic backups removed by retention. */
+  pruned: number;
+  id?: string;
+}
+
+export interface AutoBackupOptions {
+  /**
+   * Verification hook. Defaults to {@link verifyBackup}; tests inject a failure
+   * to prove that pruning is skipped when the fresh backup is not valid.
+   */
+  verify?: (entry: BackupEntry) => void;
 }
 
 /** A restore is only staged: it is applied by the next server start. */
@@ -260,6 +286,7 @@ export function createBackup(
   db: DatabaseSync,
   config: Config,
   now: number = Date.now(),
+  kind: BackupKind = 'manual',
 ): BackupEntry {
   const dataRoot = resolve(config.dataDir);
   const databaseFile = join(dataRoot, 'db', DATABASE_FILE_NAME);
@@ -297,6 +324,7 @@ export function createBackup(
     const manifest = {
       id,
       createdAt: now,
+      kind,
       version: appVersion(),
       source: dataRoot,
       entries,
@@ -309,6 +337,7 @@ export function createBackup(
       path: backupDir,
       createdAt: now,
       sizeBytes: directorySize(backupDir),
+      kind,
       manifest: manifest as unknown as Record<string, unknown>,
     };
   } catch (error) {
@@ -338,6 +367,7 @@ export function listBackups(config: Config): BackupEntry[] {
         path: backupDir,
         createdAt,
         sizeBytes: directorySize(backupDir),
+        kind: normalizeBackupKind(manifest.kind),
         manifest,
       });
     } catch {
@@ -346,6 +376,88 @@ export function listBackups(config: Config): BackupEntry[] {
   }
   entries.sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
   return entries;
+}
+
+/** Normalizes a manifest kind; backups written before `kind` existed are manual. */
+function normalizeBackupKind(value: unknown): BackupKind {
+  return value === 'auto' || value === 'pre-restore' || value === 'pre-upgrade'
+    ? value
+    : 'manual';
+}
+
+/**
+ * Proves a backup is restorable: its manifest must be readable and agree with
+ * the directory id, and the database file must be present. Throws otherwise.
+ */
+export function verifyBackup(entry: BackupEntry): void {
+  if (!existsSync(entry.path)) {
+    throw new Error(`备份校验失败：备份目录不存在（${entry.id}）`);
+  }
+  const manifestPath = join(entry.path, 'manifest.json');
+  if (!existsSync(manifestPath)) {
+    throw new Error(`备份校验失败：缺少清单文件（${entry.id}）`);
+  }
+  let manifest: unknown;
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`备份校验失败：清单无法解析（${entry.id}）：${describeError(error)}`);
+  }
+  if (!isPlainObject(manifest)) {
+    throw new Error(`备份校验失败：清单格式错误（${entry.id}）`);
+  }
+  if (manifest.id !== undefined && manifest.id !== entry.id) {
+    throw new Error(`备份校验失败：清单 ID 与备份目录不一致（${entry.id}）`);
+  }
+  if (!existsSync(join(entry.path, 'db', DATABASE_FILE_NAME))) {
+    throw new Error(`备份校验失败：缺少数据库文件（${entry.id}）`);
+  }
+}
+
+/**
+ * Creates an automatic backup unless the newest automatic backup is younger
+ * than 24 hours, then keeps only the newest {@link AUTO_BACKUP_KEEP} automatic
+ * backups. Manual and pre-restore backups are never pruned.
+ *
+ * The new backup is verified before anything is deleted, so a broken copy can
+ * never cause older (still valid) automatic backups to be removed.
+ */
+export function runAutoBackup(
+  db: DatabaseSync,
+  config: Config,
+  now: number = Date.now(),
+  options: AutoBackupOptions = {},
+): AutoBackupResult {
+  const latest = listBackups(config).find((entry) => entry.kind === 'auto');
+  // A latest timestamp in the future (clock moved backwards) also means skip.
+  if (latest && now - latest.createdAt < AUTO_BACKUP_MIN_INTERVAL_MS) {
+    return { created: false, skipped: true, pruned: 0 };
+  }
+
+  const entry = createBackup(db, config, now, 'auto');
+  (options.verify ?? verifyBackup)(entry);
+  return { created: true, skipped: false, pruned: pruneAutoBackups(config), id: entry.id };
+}
+
+/**
+ * Deletes automatic backups beyond `keep` (newest first). Only manifests whose
+ * kind is `auto` are considered, so manual and pre-restore backups always
+ * survive retention.
+ */
+export function pruneAutoBackups(config: Config, keep: number = AUTO_BACKUP_KEEP): number {
+  const backupsRoot = resolve(config.dataDir, BACKUP_DIR_NAME);
+  const keepCount = Math.max(0, Math.floor(keep));
+  const autoBackups = listBackups(config).filter((entry) => entry.kind === 'auto');
+  let pruned = 0;
+  for (const entry of autoBackups.slice(keepCount)) {
+    // listBackups builds `path` from a directory entry, but re-check containment
+    // before a recursive delete as defence in depth.
+    if (!isContainedPath(entry.path, backupsRoot)) continue;
+    if (basename(entry.path) !== entry.id) continue;
+    rmSync(entry.path, { recursive: true, force: true });
+    pruned += 1;
+  }
+  return pruned;
 }
 
 /** Builds a filesystem-safe, sortable backup id; disambiguates same-millisecond runs. */
@@ -612,7 +724,8 @@ function directorySize(directory: string): number {
   return total;
 }
 
-function appVersion(): string {
+/** Reads the running app version from package.json (used by update checks). */
+export function appVersion(): string {
   const candidates = [
     join(process.cwd(), 'package.json'),
     join(process.cwd(), 'apps', 'server', 'package.json'),

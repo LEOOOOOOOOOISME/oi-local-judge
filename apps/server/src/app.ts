@@ -10,9 +10,11 @@ import { registerAuthRoutes } from './http/auth.js';
 import { registerProblemRoutes } from './http/problems.js';
 import { registerProblemShareRoutes } from './http/problem-shares.js';
 import { registerAdminProblemRoutes } from './http/admin-problems.js';
+import { registerAdminProblemCategoryRoutes } from './http/admin-problem-categories.js';
 import { registerAdminToolRoutes } from './http/admin-tools.js';
 import { registerAdminAuthoringRoutes } from './http/admin-authoring.js';
 import { registerAdminBatchRoutes } from './http/admin-batch.js';
+import { registerAdminBodyParsers } from './http/admin-body-parser.js';
 import { registerAdminUserRoutes } from './http/admin-users.js';
 import { registerCommunityRoutes } from './http/community.js';
 import { registerContestRoutes } from './http/contests.js';
@@ -24,13 +26,29 @@ import { registerAdminRankingRoutes } from './http/admin-ranking.js';
 import { registerAdminJudgeRoutes } from './http/admin-judge.js';
 import { registerHackRoutes } from './http/hacks.js';
 import { registerTeamRoutes } from './http/teams.js';
+import { registerAdminTeamRoutes } from './http/admin-teams.js';
+import { registerClassRoutes } from './http/classes.js';
+import { registerLearningStatsRoutes } from './http/learning-stats.js';
 import { registerProblemSetRoutes } from './http/problem-sets.js';
+import { registerTrainingPlanRoutes } from './http/training-plans.js';
 import { recordAudit } from './storage/repos/audit.js';
 import { createHub, type Hub } from './realtime/hub.js';
 import { authenticateRequest, requireAuth, requireRole } from './security/auth.js';
 import { migrate } from './storage/migrate.js';
 import { openDatabase } from './storage/db.js';
 import { repairLegacyTestcasePaths } from './services/problems.js';
+import {
+  recordRequest,
+  startEventLoopMonitor,
+  stopEventLoopMonitor,
+} from './services/metrics.js';
+
+declare module 'fastify' {
+  interface FastifyRequest {
+    /** High-resolution request start, used by the local runtime metrics. */
+    metricsStartedAt?: bigint;
+  }
+}
 
 export interface AppOptions {
   logger?: boolean;
@@ -48,6 +66,24 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   const hub = opts.hub ?? createHub();
 
   const app = Fastify({ logger: opts.logger ?? false });
+  startEventLoopMonitor();
+  // Local runtime metrics: the start timestamp lives on the request, and only
+  // the path (never the query string) is retained by the collector.
+  app.addHook('onRequest', async (request) => {
+    request.metricsStartedAt = process.hrtime.bigint();
+  });
+  app.addHook('onResponse', async (request, reply) => {
+    const startedAt = request.metricsStartedAt;
+    const durationMs = startedAt
+      ? Number(process.hrtime.bigint() - startedAt) / 1_000_000
+      : reply.elapsedTime;
+    recordRequest({
+      method: request.method,
+      url: request.url,
+      statusCode: reply.statusCode,
+      durationMs,
+    });
+  });
   app.addHook('onResponse', async (request, reply) => {
     if (!['POST', 'PUT', 'PATCH', 'DELETE'].includes(request.method)) return;
     if (!request.url.startsWith('/api/admin')) return;
@@ -59,11 +95,9 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
       ip: request.ip,
     });
   });
-  app.addContentTypeParser(
-    ['application/octet-stream', 'application/zip'],
-    { parseAs: 'buffer', bodyLimit: 80 * 1024 * 1024 },
-    (_request, body, done) => done(null, body),
-  );
+  // Raw admin uploads: the batch ZIP endpoint streams, everything else stays
+  // buffered (10 GiB P0 limit) so existing problem/asset routes are unchanged.
+  registerAdminBodyParsers(app);
   await app.register(websocket);
   await app.register(healthRoutes);
 
@@ -78,6 +112,11 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     db,
     config,
     adminGuard: requireRole(['admin', 'setter'], { db, config }),
+  });
+  registerAdminProblemCategoryRoutes(app, {
+    db,
+    adminGuard: requireRole(['admin', 'setter'], { db, config }),
+    manageGuard: requireRole(['admin'], { db, config }),
   });
   registerAdminToolRoutes(app, {
     db,
@@ -139,7 +178,19 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   });
   registerSubmissionRoutes(app, { db, config });
   registerTeamRoutes(app, { db, config, auth });
+  registerAdminTeamRoutes(app, {
+    db,
+    adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
+  });
+  registerClassRoutes(app, {
+    db,
+    config,
+    auth,
+    adminGuard: requireRole(['admin', 'contestmanager'], { db, config }),
+  });
+  registerLearningStatsRoutes(app, { db, config, auth });
   registerProblemSetRoutes(app, { db, config, auth });
+  registerTrainingPlanRoutes(app, { db, config, auth });
 
   const webDist = join(process.cwd(), 'apps/web/dist');
   if (existsSync(webDist)) {
@@ -198,6 +249,7 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
   });
 
   app.addHook('onClose', async () => {
+    stopEventLoopMonitor();
     if (ownsDb) db.close();
   });
 

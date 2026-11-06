@@ -1,0 +1,84 @@
+/* Classes：教学班级列表与详情页 */
+
+.class-name-link {
+  font-weight: 600;
+}
+
+.class-create-tip {
+  margin-top: -4px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.class-empty {
+  padding: 18px 0;
+  text-align: center;
+}
+
+.class-empty .muted {
+  margin-top: 4px;
+  font-size: 12px;
+}
+
+.class-member-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 500;
+}
+
+.class-self-tag {
+  margin-inline-end: 0;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.class-detail-descriptions .ant-descriptions-item-label {
+  color: var(--text-3);
+}
+
+.class-detail-descriptions .ant-descriptions-item-content {
+  color: var(--text);
+}
+
+/* 班级设置弹窗：左侧危险操作、右侧取消/保存。 */
+.class-settings-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 教练工作台骨架：统计占位与训练/错题 Tab */
+.class-workbench-note {
+  margin-bottom: 12px;
+  color: var(--text-3);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.class-workbench-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 8px;
+}
+
+.class-workbench-stats .ant-statistic-title {
+  color: var(--text-3);
+  font-size: 12px;
+}
+
+.class-workbench-stats .ant-statistic-content {
+  font-size: 20px;
+}
+
+.class-workbench-tabs {
+  margin-top: 4px;
+}
+
+@media (max-width: 720px) {
+  .class-workbench-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}

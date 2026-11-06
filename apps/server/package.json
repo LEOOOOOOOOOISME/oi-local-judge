@@ -1,6 +1,6 @@
 {
   "name": "@oij/server",
-  "version": "1.1.0-rc.6",
+  "version": "1.1.0-rc.8",
   "private": true,
   "type": "module",
   "exports": {
@@ -9,6 +9,7 @@
   "dependencies": {
     "@fastify/websocket": "^11.0.0",
     "@oij/shared": "*",
+    "exceljs": "^4.4.0",
     "fastify": "^5.0.0"
   },
   "devDependencies": {

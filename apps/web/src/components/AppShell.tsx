@@ -76,11 +76,20 @@ export function AppShell() {
                 <NavLink to="/problem-sets" className={navClass}>
                   题单
                 </NavLink>
+                <NavLink to="/training-plans" className={navClass}>
+                  训练
+                </NavLink>
                 <NavLink to="/teams" className={navClass}>
                   团队
                 </NavLink>
+                <NavLink to="/classes" className={navClass}>
+                  班级
+                </NavLink>
                 <NavLink to="/records" className={navClass}>
                   我的记录
+                </NavLink>
+                <NavLink to={`/students/${user.id}/learning`} className={navClass}>
+                  我的学习
                 </NavLink>
                 <NavLink to="/messages" className={navClass}>
                   消息

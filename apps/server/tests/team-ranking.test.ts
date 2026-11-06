@@ -8,6 +8,7 @@ import { registerContestRoutes } from '../src/http/contests.js';
 import { getTeamRanking } from '../src/services/team-ranking.js';
 import { insertContestTeamRegistration } from '../src/storage/repos/contest-teams.js';
 import { createContest } from '../src/storage/repos/contests.js';
+import { createHack } from '../src/storage/repos/hacks.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import { createSubmission } from '../src/storage/repos/submissions.js';
 import { insertTeam, insertTeamMember } from '../src/storage/repos/teams.js';
@@ -76,17 +77,32 @@ function setup(): Ctx {
 
 function makeContest(
   ctx: Ctx,
-  input: { mode?: string; freezeAt?: number | null } = {},
+  input: {
+    mode?: string;
+    freezeAt?: number | null;
+    startAt?: number;
+    endAt?: number;
+  } = {},
 ): number {
   return createContest(ctx.db, {
     name: `Team Ranking ${input.mode ?? 'oi'}`,
     mode: input.mode ?? 'oi',
     teamMode: 'team',
-    startAt: 0,
-    endAt: 10_000,
+    startAt: input.startAt ?? 0,
+    endAt: input.endAt ?? 10_000,
     freezeAt: input.freezeAt ?? null,
     problemIds: [ctx.p1, ctx.p2],
   });
+}
+
+function setRankingRule(
+  ctx: Ctx,
+  contestId: number,
+  rule: Record<string, unknown>,
+): void {
+  ctx.db
+    .prepare('UPDATE contests SET ranking_rule_json = ? WHERE id = ?')
+    .run(JSON.stringify(rule), contestId);
 }
 
 function makeTeam(
@@ -155,6 +171,33 @@ function addSubmission(
       input.hackedAt ?? null,
       id,
     );
+  return id;
+}
+
+function addHack(
+  ctx: Ctx,
+  input: {
+    contestId: number;
+    problemId: number;
+    hackerId: number;
+    targetSubmissionId: number;
+    teamId?: number | null;
+    status?: string;
+    createdAt?: number;
+  },
+): number {
+  const id = createHack(ctx.db, {
+    contestId: input.contestId,
+    problemId: input.problemId,
+    hackerId: input.hackerId,
+    targetSubmissionId: input.targetSubmissionId,
+    teamId: input.teamId ?? null,
+    inputPath: 'hacks/h.in',
+  });
+  const createdAt = input.createdAt ?? 100;
+  ctx.db
+    .prepare('UPDATE contest_hacks SET status = ?, created_at = ?, judged_at = ? WHERE id = ?')
+    .run(input.status ?? 'success', createdAt, createdAt, id);
   return id;
 }
 
@@ -268,6 +311,564 @@ describe('team ranking service', () => {
       totalScore: 150,
       solved: 1,
     });
+  });
+
+  it('counts only the students of a class in memberCount', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const classId = insertTeam(ctx.db, {
+      name: 'Class Alpha',
+      ownerId: ctx.users.alice,
+      kind: 'class',
+      createdAt: 1,
+    });
+    insertTeamMember(ctx.db, {
+      teamId: classId,
+      userId: ctx.users.alice,
+      role: 'coach',
+      joinedAt: 1,
+    });
+    insertTeamMember(ctx.db, {
+      teamId: classId,
+      userId: ctx.users.bob,
+      role: 'member',
+      joinedAt: 1,
+    });
+    insertTeamMember(ctx.db, {
+      teamId: classId,
+      userId: ctx.users.carol,
+      role: 'assistant',
+      joinedAt: 1,
+    });
+    registerTeam(ctx, contestId, classId);
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.bob,
+      teamId: classId,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 100,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({
+      teamId: classId,
+      teamName: 'Class Alpha',
+      memberCount: 1,
+      totalScore: 100,
+      solved: 1,
+    });
+  });
+
+  it('scores ACM teams by the union of problems solved by different members', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    // Alice solves p1 after 1 minute, Bob solves p2 after 2 minutes.
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 60_000,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p2,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 120_000,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({
+      solved: 2,
+      totalScore: 2,
+      penalty: 3,
+      lastAcAt: 120_000,
+    });
+    expect(row.cells).toEqual([
+      { problemId: ctx.p1, score: 1, verdict: 'AC', attempts: 1, firstAcAt: 60_000 },
+      { problemId: ctx.p2, score: 1, verdict: 'AC', attempts: 1, firstAcAt: 120_000 },
+    ]);
+  });
+
+  it('adds every team-member failure before the first AC to the ACM penalty', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'WA',
+      score: 0,
+      createdAt: 60_000,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'WA',
+      score: 0,
+      createdAt: 120_000,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 180_000,
+    });
+    // Wrong submissions after the first team AC must not add penalty.
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'WA',
+      score: 0,
+      createdAt: 240_000,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row.solved).toBe(1);
+    expect(row.penalty).toBe(3 + 2 * 20);
+    expect(row.cells[0]).toMatchObject({
+      problemId: ctx.p1,
+      score: 1,
+      verdict: 'AC',
+      attempts: 4,
+      firstAcAt: 180_000,
+    });
+  });
+
+  it('counts repeated ACs on the same problem only once for a team', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    for (const [userId, createdAt] of [
+      [ctx.users.alice, 60_000],
+      [ctx.users.bob, 120_000],
+      [ctx.users.alice, 180_000],
+    ] as const) {
+      addSubmission(ctx, {
+        contestId,
+        problemId: ctx.p1,
+        userId,
+        teamId: alpha,
+        verdict: 'AC',
+        score: 100,
+        createdAt,
+      });
+    }
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row.solved).toBe(1);
+    expect(row.penalty).toBe(1);
+    expect(row.cells[0]).toMatchObject({ attempts: 3, firstAcAt: 60_000 });
+  });
+
+  it('hides ACM team submissions created after freeze_at', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      freezeAt: 1000,
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 500,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p2,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 1500,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row.solved).toBe(1);
+    expect(row.cells[1]).toMatchObject({
+      problemId: ctx.p2,
+      score: 0,
+      verdict: null,
+      firstAcAt: null,
+    });
+  });
+
+  it('scores CF-like teams with the shared CF formula', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 100 * 60 * 1000,
+    });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5 },
+    });
+    const alpha = makeTeam(ctx, {
+      name: 'Alpha',
+      ownerId: ctx.users.alice,
+      memberIds: [ctx.users.bob],
+    });
+    registerTeam(ctx, contestId, alpha);
+
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+    addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p2,
+      userId: ctx.users.bob,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 50 * 60 * 1000,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row.solved).toBe(2);
+    expect(row.totalScore).toBe(175);
+    expect(row.penalty).toBe(50);
+    expect(row.cells.map((cell) => cell.score)).toEqual([100, 75]);
+  });
+
+  it('adds successful CF-like team hacks, subtracts failed ones and ignores individual hacks', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 100 * 60 * 1000,
+    });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5, hackPoints: 100, failedHackPenalty: 50 },
+    });
+    // Beta is created first so it has the lower team id and wins the
+    // pre-hack tie-break; Alpha's hack must flip the order.
+    const beta = makeTeam(ctx, { name: 'Beta', ownerId: ctx.users.carol });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, beta);
+    registerTeam(ctx, contestId, alpha);
+
+    const alphaSubmission = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+    const betaSubmission = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.carol,
+      teamId: beta,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+
+    const before = getTeamRanking(ctx.db, contestId)!;
+    expect(before.rows.map((row) => [row.teamName, row.rank, row.totalScore])).toEqual([
+      ['Beta', 1, 100],
+      ['Alpha', 1, 100],
+    ]);
+
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: betaSubmission,
+      teamId: alpha,
+      status: 'success',
+    });
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: betaSubmission,
+      teamId: alpha,
+      status: 'failed',
+    });
+    // Bob represents no team: his success must not reach any team row.
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.bob,
+      targetSubmissionId: alphaSubmission,
+      teamId: null,
+      status: 'success',
+    });
+
+    const after = getTeamRanking(ctx.db, contestId)!;
+    expect(after.rows.map((row) => row.teamName)).toEqual(['Alpha', 'Beta']);
+    expect(after.rows[0]).toMatchObject({
+      rank: 1,
+      teamId: alpha,
+      totalScore: 150,
+      hackScore: 50,
+      solved: 1,
+    });
+    expect(after.rows[1]).toMatchObject({
+      rank: 2,
+      teamId: beta,
+      totalScore: 100,
+      hackScore: 0,
+      solved: 1,
+    });
+  });
+
+  it('treats promoted hacks as successful CF-like team hacks', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, { startAt: 0, endAt: 100 * 60 * 1000 });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5 },
+    });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'promoted',
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 200, hackScore: 100, solved: 1 });
+  });
+
+  it('hides team hacks created after freeze_at', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      freezeAt: 1000,
+      startAt: 0,
+      endAt: 100 * 60 * 1000,
+    });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5, hackPoints: 100, failedHackPenalty: 50 },
+    });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+
+    // Visible: created before freeze_at.
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'success',
+      createdAt: 500,
+    });
+    // Hidden: both are created after freeze_at, so they must not change the
+    // team's hack score (without the filter this would be 100 - 50 + 100).
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'failed',
+      createdAt: 1500,
+    });
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'success',
+      createdAt: 1600,
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 200, hackScore: 100, solved: 1 });
+  });
+
+  it('ignores legacy hacks whose team attribution is null', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, { startAt: 0, endAt: 100 * 60 * 1000 });
+    setRankingRule(ctx, contestId, {
+      preset: 'cf-like',
+      tie: 'same-rank',
+      cfLike: { decay: 0.5 },
+    });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 0,
+    });
+
+    // Simulates a row created before contest_hacks.team_id existed: no value
+    // for the column, so it reads back as NULL.
+    ctx.db
+      .prepare(
+        `INSERT INTO contest_hacks
+           (contest_id, problem_id, hacker_id, target_submission_id, input_path, status, created_at)
+         VALUES (?, ?, ?, ?, ?, 'success', 100)`,
+      )
+      .run(contestId, ctx.p1, ctx.users.alice, submissionId, 'hacks/legacy.in');
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 100, hackScore: 0 });
+  });
+
+  it('does not add hack scores to OI team rankings', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx);
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 100,
+    });
+
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'success',
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 100, hackScore: 0, solved: 1 });
+  });
+
+  it('does not add hack scores to ACM team rankings', () => {
+    const ctx = setup();
+    const contestId = makeContest(ctx, {
+      mode: 'acm',
+      startAt: 0,
+      endAt: 2 * 60 * 60 * 1000,
+    });
+    const alpha = makeTeam(ctx, { name: 'Alpha', ownerId: ctx.users.alice });
+    registerTeam(ctx, contestId, alpha);
+    const submissionId = addSubmission(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      userId: ctx.users.alice,
+      teamId: alpha,
+      verdict: 'AC',
+      score: 100,
+      createdAt: 60_000,
+    });
+
+    addHack(ctx, {
+      contestId,
+      problemId: ctx.p1,
+      hackerId: ctx.users.alice,
+      targetSubmissionId: submissionId,
+      teamId: alpha,
+      status: 'success',
+    });
+
+    const row = getTeamRanking(ctx.db, contestId)!.rows[0]!;
+    expect(row).toMatchObject({ totalScore: 1, hackScore: 0, solved: 1, penalty: 1 });
   });
 
   it('ignores hacked, post-freeze, non-contest and unfinished submissions', () => {
@@ -453,7 +1054,14 @@ describe('team ranking service', () => {
     expect(response.statusCode).toBe(200);
     const body = response.json() as {
       ok: boolean;
-      data: Array<{ teamName: string; memberCount: number; totalScore: number; rank: number }>;
+      data: Array<{
+        teamName: string;
+        memberCount: number;
+        totalScore: number;
+        solved: number;
+        penalty: number;
+        rank: number;
+      }>;
     };
     expect(body.ok).toBe(true);
     expect(body.data).toEqual([
@@ -461,6 +1069,8 @@ describe('team ranking service', () => {
         teamName: 'Alpha',
         memberCount: 2,
         totalScore: 100,
+        solved: 1,
+        penalty: 0,
         rank: 1,
       }),
     ]);

@@ -24,7 +24,15 @@ import dayjs from 'dayjs';
 import type { Dayjs } from 'dayjs';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { ApiError, apiDelete, apiGet, apiPatch, apiPost, apiPut } from '../api/client';
+import {
+  ApiError,
+  apiDelete,
+  apiGet,
+  apiPatch,
+  apiPost,
+  apiPut,
+  downloadApiFile,
+} from '../api/client';
 import type {
   AdminUser,
   AwardConfig,
@@ -35,6 +43,7 @@ import type {
   ContestParticipant,
   ContestParticipantImportResult,
   ContestRankingRuleConfig,
+  ContestReport,
   ContestLockRecord,
   ContestRegistration,
   HackAuditItem,
@@ -43,13 +52,13 @@ import type {
   RegistrationStatus,
   TeamMode,
   TeamRegistration,
-  TeamSummary,
   UpdateContestRequest,
 } from '../api/types';
 import { useAuth } from '../auth/AuthContext';
 import { useContestAnnouncements } from '../components/ContestAnnouncements';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
+import { TeamSearchSelect } from '../components/TeamSearchSelect';
 import { formatDateTime } from '../utils/format';
 import {
   computeAwardCounts,
@@ -57,7 +66,7 @@ import {
 } from '../utils/awards';
 import { fetchOfficialRanking, presetLabel } from '../utils/officialRanking';
 import {
-  findTeamByIdOrName,
+  parseTeamIdInput,
   resolveTeamMode,
   TEAM_MODE_OPTIONS,
   teamModeLabel,
@@ -146,6 +155,7 @@ export function AdminContestConsolePage() {
   const [addingParticipants, setAddingParticipants] = useState(false);
   const [removingUserId, setRemovingUserId] = useState<number | null>(null);
   const [teamIdentifier, setTeamIdentifier] = useState('');
+  const [selectedTeamId, setSelectedTeamId] = useState<number | null>(null);
   const [addingTeam, setAddingTeam] = useState(false);
   const [removingTeamId, setRemovingTeamId] = useState<number | null>(null);
   const [extraDraft, setExtraDraft] = useState<Record<number, number>>({});
@@ -168,6 +178,11 @@ export function AdminContestConsolePage() {
   const [importingCsv, setImportingCsv] = useState(false);
   const [csvResult, setCsvResult] = useState<ContestParticipantImportResult | null>(null);
   const [csvError, setCsvError] = useState<string | null>(null);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportLoading, setReportLoading] = useState(false);
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [report, setReport] = useState<ContestReport | null>(null);
+  const [downloadingReport, setDownloadingReport] = useState(false);
   const [rankingPreset, setRankingPreset] = useState('oi');
   const [rankingTie, setRankingTie] = useState<'same-rank' | 'none'>('same-rank');
   const [rankingDecay, setRankingDecay] = useState(0.5);
@@ -216,11 +231,6 @@ export function AdminContestConsolePage() {
     queryFn: () => apiGet<TeamRegistration[]>(`/api/contests/${contestId}/teams`),
     enabled: validId,
     staleTime: 10_000,
-  });
-  const myTeamsQuery = useQuery({
-    queryKey: ['teams'],
-    queryFn: () => apiGet<TeamSummary[]>('/api/teams'),
-    staleTime: 30_000,
   });
   const classStatsQuery = useQuery({
     queryKey: ['admin-class-stats', contestId],
@@ -293,25 +303,8 @@ export function AdminContestConsolePage() {
     registrationFilter === 'all'
       ? registrations
       : registrations.filter((row) => row.status === registrationFilter);
-  // 后端没有“列出全部团队”的接口：名称解析只在当前管理员可见团队 + 已报名团队内进行，
-  // 其余情况由管理员直接输入团队 ID（提交后后端校验）。
-  const knownTeams = useMemo(() => {
-    const byId = new Map<number, TeamSummary>();
-    for (const team of myTeamsQuery.data ?? []) byId.set(team.id, team);
-    for (const registration of contestTeamsQuery.data ?? []) {
-      if (byId.has(registration.teamId)) continue;
-      byId.set(registration.teamId, {
-        id: registration.teamId,
-        name: registration.name,
-        ownerId: registration.ownerId,
-        createdAt: registration.registeredAt,
-        memberCount: registration.members.length,
-        role: 'member',
-      });
-    }
-    return [...byId.values()];
-  }, [myTeamsQuery.data, contestTeamsQuery.data]);
   const archived = Boolean(contest?.archived_at) || contest?.status === 'archived';
+  const canExportReport = user?.role === 'admin' || user?.role === 'contestmanager';
   const officialFrozenUntil =
     contest?.official_frozen_until ?? officialQuery.data?.officialFrozenUntil ?? null;
   const officialFrozen = officialFrozenUntil !== null && officialFrozenUntil > Date.now();
@@ -597,16 +590,9 @@ export function AdminContestConsolePage() {
   };
 
   const addTeamRegistration = async () => {
-    const raw = teamIdentifier.trim();
-    if (raw === '') {
-      message.error('请输入团队 ID 或团队名称');
-      return;
-    }
-    const known = findTeamByIdOrName(knownTeams, raw);
-    // 未知的纯数字直接交给后端校验；未知名称无法解析（后端没有全量团队搜索接口）。
-    const teamId = known?.id ?? (/^\d+$/.test(raw) ? Number(raw) : null);
+    const teamId = selectedTeamId ?? parseTeamIdInput(teamIdentifier);
     if (teamId === null) {
-      message.error('未找到该团队；请检查团队名称，或直接输入团队 ID');
+      message.error('请从搜索结果选择团队，或直接输入团队 ID');
       return;
     }
     setAddingTeam(true);
@@ -614,6 +600,7 @@ export function AdminContestConsolePage() {
       await apiPost<null>(`/api/admin/contests/${contestId}/teams`, { teamId });
       message.success('团队已报名');
       setTeamIdentifier('');
+      setSelectedTeamId(null);
       void queryClient.invalidateQueries({ queryKey: ['admin-contest-teams', contestId] });
       void queryClient.invalidateQueries({ queryKey: ['contest-teams', contestId] });
       void queryClient.invalidateQueries({ queryKey: ['team-ranking', contestId] });
@@ -875,6 +862,37 @@ export function AdminContestConsolePage() {
       }
     } finally {
       setPublishingAnnouncement(false);
+    }
+  };
+
+  const openReport = async () => {
+    setReportOpen(true);
+    setReportLoading(true);
+    setReportError(null);
+    try {
+      // 预览只取前 200 行，CSV 导出始终是完整成绩。
+      setReport(
+        await apiGet<ContestReport>(`/api/admin/contests/${contestId}/report?top=200`),
+      );
+    } catch (error) {
+      setReportError(error instanceof Error ? error.message : '加载成绩报告失败');
+    } finally {
+      setReportLoading(false);
+    }
+  };
+
+  const downloadReportCsv = async () => {
+    setDownloadingReport(true);
+    try {
+      await downloadApiFile(
+        `/api/admin/contests/${contestId}/report?format=csv`,
+        `contest-${contestId}-report.csv`,
+      );
+      message.success('成绩报告 CSV 已开始下载');
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '下载成绩报告失败');
+    } finally {
+      setDownloadingReport(false);
     }
   };
 
@@ -1463,6 +1481,12 @@ export function AdminContestConsolePage() {
             <Link to={`/contest/${contest.id}/ranking`}>
               <Button>榜单</Button>
             </Link>
+            <Link to={`/contest/${contest.id}/statistics`}>
+              <Button>统计</Button>
+            </Link>
+            {canExportReport ? (
+              <Button onClick={() => void openReport()}>导出成绩报告</Button>
+            ) : null}
             {archived || contest.mode !== 'oi' ? (
               <Button disabled>批量导入</Button>
             ) : (
@@ -2109,24 +2133,36 @@ export function AdminContestConsolePage() {
               />
             ) : null}
             <Space wrap>
+              <TeamSearchSelect
+                value={selectedTeamId}
+                onChange={setSelectedTeamId}
+                enabled={teamRegistrationEnabled}
+                allowIdInput
+                placeholder="搜索团队名称（支持纯数字 ID）"
+                disabled={!teamRegistrationEnabled}
+                style={{ width: 320 }}
+              />
               <Input
-                placeholder="团队 ID 或团队名称"
+                placeholder="或手动输入团队 ID"
                 value={teamIdentifier}
                 disabled={!teamRegistrationEnabled}
                 onChange={(event) => setTeamIdentifier(event.target.value)}
                 onPressEnter={() => void addTeamRegistration()}
-                style={{ width: 280 }}
+                style={{ width: 180 }}
               />
               <Button
                 type="primary"
                 loading={addingTeam}
-                disabled={!teamRegistrationEnabled || teamIdentifier.trim() === ''}
+                disabled={
+                  !teamRegistrationEnabled ||
+                  (selectedTeamId === null && teamIdentifier.trim() === '')
+                }
                 onClick={() => void addTeamRegistration()}
               >
                 添加团队
               </Button>
               <span className="muted">
-                支持精确团队名；不在当前可见团队列表中的团队请直接输入团队 ID。
+                可按团队名搜索任意团队；也可直接输入团队 ID（提交后由后端校验）。
               </span>
             </Space>
             {contestTeamsQuery.isPending ? (
@@ -2299,6 +2335,63 @@ export function AdminContestConsolePage() {
                 </div>
               }
             />
+          ) : null}
+        </div>
+      </Modal>
+
+      <Modal
+        title="比赛成绩报告"
+        open={reportOpen}
+        onCancel={() => setReportOpen(false)}
+        width={900}
+        footer={
+          <Space>
+            <Button onClick={() => setReportOpen(false)}>关闭</Button>
+            <Button loading={reportLoading} onClick={() => void openReport()}>
+              刷新预览
+            </Button>
+            <Button
+              type="primary"
+              loading={downloadingReport}
+              disabled={!report}
+              onClick={() => void downloadReportCsv()}
+            >
+              下载 CSV
+            </Button>
+          </Space>
+        }
+      >
+        <div className="stack">
+          <Alert
+            type="info"
+            showIcon
+            message="CSV 包含比赛信息、参与者/提交统计、题目统计、个人成绩与团队成绩（团队赛）。"
+            description="个人成绩只包含正式榜可见选手，隐藏选手不会导出；JSON 预览最多显示前 200 行，CSV 为完整成绩。"
+          />
+          {reportError ? <Alert type="error" showIcon message={reportError} /> : null}
+          {reportLoading ? (
+            <div className="inline-loading">
+              <Spin />
+            </div>
+          ) : report ? (
+            <>
+              <Space wrap size={[8, 8]}>
+                <Tag>参赛者 {report.participants.total}</Tag>
+                <Tag color="green">已通过 {report.participants.accepted}</Tag>
+                <Tag>已签到 {report.participants.checkedIn}</Tag>
+                <Tag>提交 {report.submissions.total}</Tag>
+                <Tag>榜单 {report.rankingTotal} 人</Tag>
+                {report.teamStats ? (
+                  <Tag color="purple">团队 {report.teamStats.teamCount}</Tag>
+                ) : null}
+              </Space>
+              <Input.TextArea
+                readOnly
+                value={JSON.stringify(report, null, 2)}
+                autoSize={{ minRows: 10, maxRows: 18 }}
+                style={{ fontFamily: 'monospace', fontSize: 12 }}
+              />
+            </>
           ) : null}
         </div>
       </Modal>
