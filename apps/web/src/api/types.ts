@@ -263,6 +263,109 @@ export interface BatchRunResult {
   errors: BatchFailureItem[];
 }
 
+/**
+ * P1 异步批量的任务状态：`importing` 由后台导入持有，之后按持久化的
+ * batch_items/submissions 推导为 queued → judging → finished。
+ * `running` 仅由旧同步接口返回，保留在联合类型里兼容。
+ */
+export type BatchJobStatus =
+  | 'importing'
+  | 'queued'
+  | 'judging'
+  | 'running'
+  | 'finished'
+  | 'failed'
+  | 'canceled';
+
+/** POST /api/admin/batch/uploads 返回的流式上传结果。 */
+export interface BatchUploadStreamResult {
+  uploadId: string;
+  originalName: string | null;
+  status: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
+/** GET /api/admin/batch/uploads/:id/preview 的无效学生项。 */
+export interface BatchPreviewInvalidStudent {
+  student: string;
+  reason: string;
+  sourcePath: string;
+}
+
+/** GET /api/admin/batch/uploads/:id/preview 的重复学生-题目项。 */
+export interface BatchPreviewDuplicate {
+  student: string;
+  problemFolder: string;
+  problemId: number | null;
+  sourcePath: string;
+}
+
+/** 预览中的逐文件失败项（空源码、超大源码等）。 */
+export interface BatchPreviewFailure {
+  student: string;
+  sourcePath: string;
+  problemId: number | null;
+  status: BatchImportStatus;
+  errorCode: string;
+  errorMessage: string;
+}
+
+/** 扫描阶段跳过的 zip 条目（不安全路径、超大文件、读取失败）。 */
+export interface BatchPreviewSkippedEntry {
+  path: string;
+  reason: string;
+  message?: string;
+}
+
+/** GET /api/admin/batch/uploads/:id/preview 的返回结构。 */
+export interface BatchPreview {
+  uploadId: string;
+  originalName: string | null;
+  status: string;
+  sizeBytes: number;
+  sha256: string;
+  entryCount: number;
+  totalUncompressedBytes: number;
+  studentLevel: number;
+  problemLevel: number;
+  treeSample: string[];
+  maxDepth: number;
+  /** 去重后的学生数量。 */
+  students: number;
+  studentSample: string[];
+  problemFolders: string[];
+  invalidStudents: BatchPreviewInvalidStudent[];
+  duplicates: BatchPreviewDuplicate[];
+  duplicateCount: number;
+  /** 结构上有效的源码数（尚未要求题目映射）。 */
+  validCount: number;
+  totalFiles: number;
+  skipped: BatchPreviewSkippedEntry[];
+  failures: BatchPreviewFailure[];
+}
+
+/** GET /api/admin/batch/:id 的进度块。 */
+export interface BatchProgress {
+  total: number;
+  imported: number;
+  skipped: number;
+  errors: number;
+  judged: number;
+  percent: number;
+  /** 与任务状态一致：importing/queued/judging/finished/failed/canceled。 */
+  phase: string;
+  /** 导入阶段的分条进度；非导入阶段为 null。 */
+  import: { processed: number; totalCandidates: number } | null;
+}
+
+/** POST /api/admin/batch/uploads/:id/run 返回 202。 */
+export interface BatchAsyncRunResult {
+  jobId: number;
+  id: number;
+  status: BatchJobStatus;
+}
+
 export interface BatchResultItem {
   id: number;
   student: string;
@@ -284,7 +387,11 @@ export interface BatchJob {
   id: number;
   problemId: number;
   multiProblem?: boolean;
-  status: 'running' | 'finished' | 'failed';
+  status: BatchJobStatus;
+  /** 数据库中的原始任务状态（异步批次可能是 importing，而 status 已推导）。 */
+  jobStatus?: string;
+  mode?: 'async' | 'sync' | string;
+  uploadId?: string | null;
   studentLevel: number;
   offset: number;
   limit: number;
@@ -298,6 +405,7 @@ export interface BatchJob {
   averageScore: number;
   distinctStudentCount: number;
   distinctProblemCount: number;
+  progress?: BatchProgress | null;
   skipped: BatchFailureItem[];
   errors: BatchFailureItem[];
   items: BatchResultItem[];
