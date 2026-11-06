@@ -235,20 +235,45 @@ export interface BatchRunItem {
   problemTitle?: string | null;
 }
 
+export type BatchImportStatus = 'imported' | 'skipped' | 'error';
+export type BatchItemStatus = SubmissionStatus | 'missing' | 'skipped' | 'error';
+
+/** P0：逐文件导入失败/无效学生文件夹的摘要。 */
+export interface BatchFailureItem {
+  id: number;
+  student: string;
+  sourcePath: string;
+  problemId: number | null;
+  errorCode: string | null;
+  errorMessage: string | null;
+}
+
 export interface BatchRunResult {
   id: number;
+  status: 'running' | 'finished' | 'failed';
   count: number;
+  total: number;
+  importedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  duplicateCount: number;
   items: BatchRunItem[];
   multiProblem?: boolean;
+  skipped: BatchFailureItem[];
+  errors: BatchFailureItem[];
 }
 
 export interface BatchResultItem {
+  id: number;
   student: string;
-  problemId: number;
+  problemId: number | null;
   problemTitle: string | null;
   sourcePath: string;
   submissionId: number | null;
-  status: SubmissionStatus | 'missing';
+  importStatus: BatchImportStatus | null;
+  status: BatchItemStatus;
+  errorCode: string | null;
+  errorMessage: string | null;
   verdict: Verdict | null;
   score: number;
   timeMs: number;
@@ -259,8 +284,22 @@ export interface BatchJob {
   id: number;
   problemId: number;
   multiProblem?: boolean;
-  status: 'running' | 'finished';
+  status: 'running' | 'finished' | 'failed';
   studentLevel: number;
+  offset: number;
+  limit: number;
+  total: number;
+  count: number;
+  importedCount: number;
+  skippedCount: number;
+  errorCount: number;
+  judgedCount: number;
+  acCount: number;
+  averageScore: number;
+  distinctStudentCount: number;
+  distinctProblemCount: number;
+  skipped: BatchFailureItem[];
+  errors: BatchFailureItem[];
   items: BatchResultItem[];
 }
 
