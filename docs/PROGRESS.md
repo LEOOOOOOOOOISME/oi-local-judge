@@ -2,6 +2,28 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-06 / Round 143（人工验收阻塞登记）
+
+### 人工报告问题（未修复）
+
+- Electron 安装包/便携包运行后：
+  - 没有窗口
+  - 没有托盘
+  - 没有明显报错
+  - 网页托管没有启动
+  - 浏览器访问不到 LAN 地址
+- 影响：打包后的桌面端不可用，阻塞安装包验收、rc.7 和 4C/8G 验收。
+- 已写入 `aim.md` 的 P0 阻塞章节。
+- 待排查：
+  - asar/资源内 `apps/server/dist/cli.js`
+  - `apps/web/dist/index.html`
+  - `ojrunner.exe` / `ojinteract.exe`
+  - utilityProcess/cwd/appRoot
+  - 端口 8787、健康检查
+  - 单实例/`--hidden`/托盘
+  - 静默退出
+- 验收：窗口或托盘 + `/api/health` 200 + LAN 可访问。
+
 ## 2026-11-06 / Round 142（批量映射 UI + P1001 题号 + Windows 部署）
 
 ### 本轮提交

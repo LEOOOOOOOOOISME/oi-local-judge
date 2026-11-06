@@ -490,7 +490,69 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - [ ] 统计页/打印页完整 E2E
 - [ ] PDF 分页/中文/图表实测
 
-## 4.6 运维 / 发布
+## 4.6 Electron 包启动阻塞（人工验收，P0）
+
+### 现象
+
+人工运行 Electron 安装包/便携包后：
+
+```text
+- 没有窗口
+- 没有托盘
+- 没有明显报错
+- 网页托管没有启动
+- 浏览器访问不到 LAN 地址
+```
+
+### 影响
+
+- 打包后的桌面端不可用
+- 局域网 OJ 无法从 Electron 启动
+- 阻塞安装包验收、rc.7 发布、4C/8G 验收
+
+### 状态
+
+**未修复。** 当前只有开发态构建/测试通过，未完成打包态运行时验证。
+
+### 需要优先排查
+
+1. 打包后 `apps/server/dist/cli.js` 是否在 `app.asar` / `resources/app` 中
+2. `utilityProcess` 启动路径、`cwd`、`appRoot` 是否正确
+3. `apps/web/dist/index.html` 是否随包
+4. `native/runner/out/ojrunner.exe`、`native/interact/out/ojinteract.exe` 是否存在
+5. 端口 8787 是否被占用；服务是否异常退出
+6. 是否被单实例锁/`--hidden`/托盘逻辑隐藏
+7. 是否因 `window-all-closed` / `before-quit` 静默退出
+8. 安装包/便携包日志、进程树、`/api/health` 实际状态
+
+### 复现与验收
+
+```text
+1. 运行安装包/portable exe
+2. 检查进程树（Electron + node server）
+3. 检查 8787 端口监听
+4. 访问 http://127.0.0.1:8787/api/health
+5. 检查 userData/logs
+6. 确认窗口或托盘出现
+```
+
+验收标准：
+
+- 启动后出现窗口或托盘
+- 服务进程启动
+- `/api/health` 返回 200
+- 浏览器可通过 LAN 地址访问
+- 无静默退出
+
+### 相关文件
+
+- `apps/desktop/src/main.ts`
+- `electron-builder.yml`
+- `tools/release/build-release.mjs`
+- `tools/release/build-portable.mjs`
+- `apps/server/src/cli.ts`
+
+## 4.7 运维 / 发布
 
 - [ ] Windows 服务化（当前只有托盘/自启）
 - [ ] 自动下载/安装升级（当前检查 + 手动安装）
@@ -503,7 +565,7 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - [ ] 监控告警（当前只本地指标页）
 - [ ] 日志轮转
 
-## 4.7 LemonLime 对齐
+## 4.8 LemonLime 对齐
 
 已参考但未完全实现：
 
@@ -552,15 +614,23 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 ## 6. 下一阶段建议
 
-### 第一优先：批量 P1
+### 第一优先：Electron 包启动（P0）
 
-1. 流式上传/解压
-2. 后台导入
-3. 分批事务
-4. 映射工作区
-5. 5000×4 实测
+1. 复现安装包/portable 启动无窗口、无网页
+2. 检查 asar 内 server/web/native 资源
+3. 修 utilityProcess/cwd/appRoot
+4. 确认 8787 健康检查
+5. 验收：窗口/托盘 + `/api/health` + LAN 访问
 
-### 第二优先：统计收尾
+### 第二优先：批量收尾
+
+1. Excel/HTML 导出
+2. 学生×题目矩阵
+3. 5000×4 实测
+4. 导入 resume
+5. 题目搜索后端 scope
+
+### 第三优先：统计收尾
 
 1. 5000+ 服务端分页
 2. 班级/训练复用
@@ -568,13 +638,13 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 4. 性能实测
 5. E2E
 
-### 第三优先：题号 + 附件
+### 第四优先：题目附件
 
-1. P1001 分类迁移
-2. 管理员题号管理
-3. 附件上传/下载
+1. `problem_attachments`
+2. 上传/下载/删除/替换
+3. 权限/大小限制
 
-### 第四优先：运维/发布
+### 第五优先：运维/发布
 
 1. Windows 服务化
 2. 升级安装/回滚
