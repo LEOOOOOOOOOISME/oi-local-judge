@@ -28,7 +28,7 @@ import {
 import { useQuery } from '@tanstack/react-query';
 import { apiGet, apiPost, apiUploadWithProgress, downloadApiFile } from '../api/client';
 import type {
-  AdminProblemSummary,
+  AdminProblemPickerItem,
   BatchAsyncRunResult,
   BatchExportFormat,
   BatchFailureItem,
@@ -51,7 +51,6 @@ import {
   batchStatusLabel,
   describeBatchError,
   estimateSubmissions,
-  filterProblems,
   isBatchActive,
   levelExample,
   MAX_BATCH_ZIP_BYTES,
@@ -88,6 +87,7 @@ const ERROR_CODE_LABEL: Record<string, string> = {
   UNSAFE_PATH: 'zip 路径不安全',
   EXTRACT_FAILED: '源码解压失败',
   BATCH_IMPORT_INTERRUPTED: '服务重启导致导入中断',
+  BATCH_RESUME_UPLOAD_MISSING: '服务重启后无法恢复（上传文件已丢失）',
 };
 
 function statusLabel(status: BatchItemStatus): string {
@@ -136,7 +136,7 @@ function decodeFileName(value: string | null | undefined): string {
   }
 }
 
-function problemOptionLabel(problem: AdminProblemSummary): string {
+function problemOptionLabel(problem: AdminProblemPickerItem): string {
   const scope = problemScope(problem);
   const scopeLabel = scope === 'personal' ? '个人' : scope === 'team' ? '团队' : '公共';
   const tags = (problem.tags ?? []).slice(0, 3).join(',');
@@ -205,11 +205,25 @@ export function AdminBatchPage() {
   const [exportingFormat, setExportingFormat] = useState<BatchExportFormat | null>(null);
   const [canceling, setCanceling] = useState(false);
 
+  // 全量题目目录用于映射校验/数字自动匹配；选项列表按后端 scope 查询。
   const problemsQuery = useQuery({
-    queryKey: ['admin-problems'],
-    queryFn: () => apiGet<AdminProblemSummary[]>('/api/admin/problems'),
+    queryKey: ['admin-problem-picker', 'all'],
+    queryFn: () =>
+      apiGet<AdminProblemPickerItem[]>('/api/admin/problems/picker?scope=all&limit=500'),
     staleTime: 30_000,
   });
+  const scopedProblemsQuery = useQuery({
+    queryKey: ['admin-problem-picker', scope],
+    queryFn: () =>
+      apiGet<AdminProblemPickerItem[]>(
+        `/api/admin/problems/picker?scope=${scope}&limit=500`,
+      ),
+    enabled: scope !== 'all',
+    staleTime: 30_000,
+  });
+  const problemsError = problemsQuery.isError || scopedProblemsQuery.isError;
+  const problemsPending =
+    problemsQuery.isPending || (scope !== 'all' && scopedProblemsQuery.isPending);
 
   const previewQuery = useQuery({
     queryKey: [
@@ -280,14 +294,13 @@ export function AdminBatchPage() {
     [preview, multiProblem, folders, problemMap],
   );
 
-  const scopedProblems = useMemo(
-    () => filterProblems(problems, { scope, limit: 500 }),
-    [problems, scope],
-  );
-  const problemOptions = useMemo(
-    () => scopedProblems.map((problem) => ({ value: problem.id, label: problemOptionLabel(problem) })),
-    [scopedProblems],
-  );
+  const problemOptions = useMemo(() => {
+    const options = scope === 'all' ? problems : (scopedProblemsQuery.data ?? []);
+    return options.map((problem) => ({
+      value: problem.id,
+      label: problemOptionLabel(problem),
+    }));
+  }, [problems, scopedProblemsQuery.data, scope]);
 
   const mappedProblemIds = useMemo(() => {
     if (!multiProblem) return singleProblemId === undefined ? [] : [singleProblemId];
@@ -335,7 +348,7 @@ export function AdminBatchPage() {
     !uploading &&
     !starting &&
     !jobActive &&
-    !problemsQuery.isError &&
+    !problemsError &&
     preview.validCount > 0 &&
     (multiProblem ? folders.length > 0 && mapping.complete : singleProblemId !== undefined);
 
@@ -1034,7 +1047,7 @@ export function AdminBatchPage() {
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description="先上传 zip 并完成目录解析。"
           />
-        ) : problemsQuery.isError ? (
+        ) : problemsError ? (
           <Alert
             className="batch-alert"
             type="error"
@@ -1069,7 +1082,7 @@ export function AdminBatchPage() {
                   options={problemOptions}
                   onChange={(values: number[]) => setOrderedSelection(values)}
                   style={{ width: '100%' }}
-                  loading={problemsQuery.isPending}
+                  loading={problemsPending}
                 />
                 <Space wrap>
                   <Button
@@ -1142,7 +1155,7 @@ export function AdminBatchPage() {
                         onChange={(value: number | undefined) =>
                           setProblemMap((previous) => ({ ...previous, [folder]: value }))
                         }
-                        loading={problemsQuery.isPending}
+                        loading={problemsPending}
                         style={{ flex: 1, minWidth: 220 }}
                       />
                       {selected === undefined ? (
@@ -1220,12 +1233,12 @@ export function AdminBatchPage() {
               <Select
                 showSearch
                 optionFilterProp="label"
-                placeholder={problemsQuery.isPending ? '正在加载题目…' : '搜索并选择题目'}
+                placeholder={problemsPending ? '正在加载题目…' : '搜索并选择题目'}
                 value={singleProblemId}
                 options={problemOptions}
                 onChange={(value: number) => setSingleProblemId(value)}
                 style={{ width: '100%' }}
-                loading={problemsQuery.isPending}
+                loading={problemsPending}
               />
             </div>
             <span className="muted batch-search-hint">{problemSearchHint}</span>
