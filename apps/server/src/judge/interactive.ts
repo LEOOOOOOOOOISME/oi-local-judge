@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { judgeChildEnv } from './isolation.js';
 
 export interface InteractiveRunOptions {
   runner: string;
@@ -60,6 +61,7 @@ export function runInteractive(options: InteractiveRunOptions): Promise<Interact
     };
     const child = spawn(options.runner, args, {
       cwd: options.workdir,
+      env: judgeChildEnv(process.env, options.workdir),
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

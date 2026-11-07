@@ -1,4 +1,11 @@
 const base = process.env.OIJ_BASE ?? 'http://127.0.0.1:8790';
+const adminPassword = process.env.OIJ_ADMIN_PASSWORD;
+if (!adminPassword) {
+  console.error(
+    'Set OIJ_ADMIN_PASSWORD (the one-time password from the server log) before running this smoke test.',
+  );
+  process.exit(2);
+}
 
 async function request(path, options = {}) {
   const res = await fetch(base + path, options);
@@ -17,7 +24,7 @@ const login = await request('/api/auth/login', {
   headers: { 'content-type': 'application/json' },
   body: JSON.stringify({
     username: process.env.OIJ_ADMIN_USERNAME ?? 'admin',
-    password: process.env.OIJ_ADMIN_PASSWORD ?? 'admin123',
+    password: adminPassword,
   }),
 });
 if (login.status !== 200) {

@@ -21,11 +21,12 @@ let app: Awaited<ReturnType<typeof buildApp>>;
 let scheduler: SchedulerHandle;
 let problemId = 0;
 let contestId = 0;
+let bootstrapAdminPassword = '';
 
 beforeAll(async () => {
   ensureDataDirs(dir);
   migrate(db);
-  ensureAdmin(db, config);
+  bootstrapAdminPassword = ensureAdmin(db, config)!.password!;
   problemId = importProblemDirectory({
     db,
     config,
@@ -52,10 +53,26 @@ describe('backend e2e', () => {
     const login = await app.inject({
       method: 'POST',
       url: '/api/auth/login',
-      payload: { username: config.adminUsername, password: config.adminPassword },
+      payload: { username: config.adminUsername, password: bootstrapAdminPassword },
     });
     expect(login.statusCode).toBe(200);
-    const cookie = String(login.headers['set-cookie']).split(';')[0];
+    expect((login.json() as { data: { mustChangePassword: boolean } }).data.mustChangePassword).toBe(
+      true,
+    );
+    const loginCookie = String(login.headers['set-cookie']).split(';')[0];
+
+    // The bootstrap password is one-time: replace it before using the API.
+    const changed = await app.inject({
+      method: 'POST',
+      url: '/api/auth/change-password',
+      headers: { cookie: loginCookie },
+      payload: {
+        currentPassword: bootstrapAdminPassword,
+        newPassword: 'e2e-Admin-Password-2026',
+      },
+    });
+    expect(changed.statusCode).toBe(200);
+    const cookie = String(changed.headers['set-cookie']).split(';')[0];
 
     const submit = await app.inject({
       method: 'POST',

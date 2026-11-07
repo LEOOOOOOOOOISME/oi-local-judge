@@ -506,7 +506,8 @@ function Start-OijServer {
     [Parameter(Mandatory = $true)][string]$DataDir,
     [Parameter(Mandatory = $true)][int]$Port,
     [Parameter(Mandatory = $true)][string]$NodePath,
-    [string]$LogDir
+    [string]$LogDir,
+    [string]$HostAddress = '127.0.0.1'
   )
   $cliPath = Join-Path $AppDir 'apps\server\dist\cli.js'
   if (-not $LogDir) {
@@ -522,7 +523,7 @@ function Start-OijServer {
   }
   try {
     $env:OIJ_PORT = [string]$Port
-    $env:OIJ_HOST = '0.0.0.0'
+    $env:OIJ_HOST = $HostAddress
     $env:OIJ_DATA_DIR = $DataDir
     $env:OIJ_RUNNER = Join-Path $AppDir 'native\runner\out\ojrunner.exe'
     $env:OIJ_INTERACT_RUNNER = Join-Path $AppDir 'native\interact\out\ojinteract.exe'

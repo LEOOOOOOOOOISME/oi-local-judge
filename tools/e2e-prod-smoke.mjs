@@ -3,6 +3,14 @@
 import { chromium } from '@playwright/test';
 
 const base = process.env.OIJ_BASE ?? 'http://127.0.0.1:8790';
+const adminUsername = process.env.OIJ_ADMIN_USERNAME ?? 'admin';
+const adminPassword = process.env.OIJ_ADMIN_PASSWORD;
+if (!adminPassword) {
+  console.error(
+    'Set OIJ_ADMIN_PASSWORD (the one-time password from the server log) before running this smoke test.',
+  );
+  process.exit(2);
+}
 const browser = await chromium.launch({ channel: 'msedge', headless: true });
 const page = await browser.newPage({ viewport: { width: 1366, height: 768 } });
 const errors = [];
@@ -12,8 +20,8 @@ page.on('console', (msg) => {
 });
 
 await page.goto(`${base}/login`, { waitUntil: 'networkidle' });
-await page.getByPlaceholder('用户名').fill('admin');
-await page.getByPlaceholder('密码').fill('admin123');
+await page.getByPlaceholder('用户名').fill(adminUsername);
+await page.getByPlaceholder('密码').fill(adminPassword);
 await page.getByRole('button', { name: /登录/ }).click();
 await page.waitForURL('**/contests', { timeout: 10_000 });
 const title = await page.title();

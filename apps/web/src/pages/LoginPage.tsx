@@ -28,9 +28,9 @@ export function LoginPage() {
     setSubmitting(true);
     setError(null);
     try {
-      await login(values.username.trim(), values.password);
+      const result = await login(values.username.trim(), values.password);
       message.success('登录成功');
-      navigate(next, { replace: true });
+      navigate(result.mustChangePassword ? '/change-password' : next, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : '登录失败，请稍后重试');
     } finally {
@@ -92,11 +92,9 @@ export function LoginPage() {
                 登录
               </Button>
             </Form>
-            {import.meta.env.DEV ? (
-              <div className="login-hint">
-                开发环境默认账号：<code>admin</code> / <code>admin123</code>
-              </div>
-            ) : null}
+            <div className="login-hint">
+              首次安装的管理员密码由安装程序/启动日志提供，首次登录后必须修改。
+            </div>
           </>
         )}
       </Card>

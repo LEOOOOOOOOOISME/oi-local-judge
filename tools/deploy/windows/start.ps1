@@ -65,6 +65,12 @@ if (-not $logDir) {
   $logDir = Join-Path $dataDir 'logs'
 }
 $url = 'http://127.0.0.1:{0}/' -f $port
+# Older install states have no host field; loopback is the safe default.
+$hostAddress = if ($state.PSObject.Properties['host'] -and $state.host) {
+  [string]$state.host
+} else {
+  '127.0.0.1'
+}
 $cliPath = Join-Path $appDir 'apps\server\dist\cli.js'
 
 if (-not (Test-Path -LiteralPath $cliPath -PathType Leaf)) {
@@ -117,7 +123,7 @@ if ($DryRun) {
 }
 
 Write-Host ("[..] starting OiJudge on port {0}" -f $port)
-$serverProcess = Start-OijServer -AppDir $appDir -DataDir $dataDir -Port $port -NodePath $nodePath -LogDir $logDir
+$serverProcess = Start-OijServer -AppDir $appDir -DataDir $dataDir -Port $port -NodePath $nodePath -LogDir $logDir -HostAddress $hostAddress
 if (-not (Wait-OijHealth -Port $port -TimeoutSeconds 30)) {
   Show-OijLogTail -LogDir $logDir -Lines 25
   Stop-OijDeployment -ExitCode $OijExitHealthCheck -Message (

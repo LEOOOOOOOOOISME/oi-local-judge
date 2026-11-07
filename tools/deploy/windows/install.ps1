@@ -31,8 +31,13 @@
   %LOCALAPPDATA%\OiJudge\runtime. It survives reinstall and upgrade.
 
 .PARAMETER Port
-  TCP port for the web UI and API. Default: 8787. The port is exposed on all
-  interfaces (0.0.0.0) for classroom LAN access.
+  TCP port for the web UI and API. Default: 8787. The server listens on
+  127.0.0.1 by default; pass -Lan to expose it on all interfaces.
+
+.PARAMETER Lan
+  Listen on 0.0.0.0 and create the inbound Windows Firewall rule so other
+  classroom machines can reach the OJ. Without this switch the server is only
+  reachable from this machine (127.0.0.1).
 
 .PARAMETER NoFirewall
   Do not create the inbound Windows Firewall rule. The firewall rule is the
@@ -72,6 +77,7 @@ param(
   [string]$DeployDir,
   [string]$DataDir,
   [int]$Port = 8787,
+  [switch]$Lan,
   [switch]$NoFirewall,
   [switch]$NoShortcut,
   [switch]$NoAutostart,
@@ -184,7 +190,9 @@ if ($resolvedMode -eq 'link') {
 
 # --- Elevation -----------------------------------------------------------
 $administrator = Test-OijAdministrator
-$firewallRequested = -not $NoFirewall
+# A loopback-only install needs no firewall exception (and no elevation).
+$firewallRequested = (-not $NoFirewall) -and $Lan
+$hostAddress = if ($Lan) { '0.0.0.0' } else { '127.0.0.1' }
 $predictedExitCode = $OijExitSuccess
 if ($firewallRequested -and -not $administrator) {
   if ($DryRun) {
@@ -454,6 +462,7 @@ $state = [ordered]@{
   appDir = $appTarget
   dataDir = $DataDir
   port = $Port
+  host = $hostAddress
   url = ('http://127.0.0.1:{0}/' -f $Port)
   linkMode = $resolvedMode
   nodePath = $nodePath
@@ -497,7 +506,7 @@ if ($DryRun) {
   exit $OijExitSuccess
 }
 
-$serverProcess = Start-OijServer -AppDir $appTarget -DataDir $DataDir -Port $Port -NodePath $nodePath -LogDir $logDir
+$serverProcess = Start-OijServer -AppDir $appTarget -DataDir $DataDir -Port $Port -NodePath $nodePath -LogDir $logDir -HostAddress $hostAddress
 if (-not (Wait-OijHealth -Port $Port -TimeoutSeconds 30)) {
   Show-OijLogTail -LogDir $logDir -Lines 25
   $healthMessage = (
@@ -517,7 +526,11 @@ $uninstallCommand = 'powershell -ExecutionPolicy Bypass -File "{0}" -DeployDir "
 Write-Host ''
 Write-OijOk ("OiJudge is deployed to {0}" -f $DeployDir)
 Write-Host ("  URL:        http://127.0.0.1:{0}/" -f $Port)
-Write-Host ("  LAN:        http://<this-machine-ip>:{0}/" -f $Port)
+if ($Lan) {
+  Write-Host ("  LAN:        http://<this-machine-ip>:{0}/ (enabled by -Lan)" -f $Port)
+} else {
+  Write-Host '  LAN:        disabled (loopback only; re-run install.ps1 -Lan to expose it)'
+}
 Write-Host ("  Data:       {0}" -f $DataDir)
 Write-Host ("  Logs:       {0}" -f $logDir)
 if ($shortcutPath -and -not $NoShortcut) {
@@ -538,6 +551,8 @@ Write-Host ('  start:     ' + $startCommand)
 Write-Host ('  stop:      ' + $stopCommand)
 Write-Host ('  uninstall: ' + $uninstallCommand)
 Write-Host ''
-Write-Host 'Admin password: the first sign-in uses admin / admin123 unless OIJ_ADMIN_PASSWORD was set. Change it immediately.'
+Write-Host 'Admin account: on first start OiJudge generates a random administrator password.'
+Write-Host ("The one-time password is printed once in {0}." -f (Join-Path $logDir 'server.out.log'))
+Write-Host 'The first login is forced to change that password.'
 
 exit $OijExitSuccess
