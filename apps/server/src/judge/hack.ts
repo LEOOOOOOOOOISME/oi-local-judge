@@ -2,6 +2,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join, relative } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
+import { transaction } from '../storage/db.js';
 import { getAsset } from '../storage/repos/assets.js';
 import { getContest } from '../storage/repos/contests.js';
 import {
@@ -132,16 +133,19 @@ export function promoteHack(db: DatabaseSync, hackId: number): void {
   if (!hack) throw new Error('hack not found');
   const target = getSubmission(db, hack.target_submission_id);
   if (!target) throw new Error('hack target not found');
-  if (target.hacked_at === null) {
-    markSubmissionHacked(db, target.id, hack.hacker_id, hackId);
-    recomputeOfficialAfterHack(db, hack.contest_id, target.user_id, target.problem_id, target.id);
-  }
-  freezeOfficialAfterHack(db, hack.contest_id);
-  updateHack(db, hackId, {
-    status: 'promoted',
-    verdict: hack.verdict ?? 'AC',
-    message: hack.message || 'promoted by administrator',
+  transaction(db, () => {
+    if (target.hacked_at === null) {
+      markSubmissionHacked(db, target.id, hack.hacker_id, hackId);
+      recomputeOfficialAfterHack(db, hack.contest_id, target.user_id, target.problem_id, target.id);
+    }
+    freezeOfficialAfterHack(db, hack.contest_id);
+    updateHack(db, hackId, {
+      status: 'promoted',
+      verdict: hack.verdict ?? 'AC',
+      message: hack.message || 'promoted by administrator',
+    });
   });
+  invalidateOfficialRanking(db, hack.contest_id);
 }
 
 export function revertHack(db: DatabaseSync, hackId: number): void {
@@ -150,13 +154,16 @@ export function revertHack(db: DatabaseSync, hackId: number): void {
   const target = getSubmission(db, hack.target_submission_id);
   if (!target) throw new Error('hack target not found');
   if (target.hack_id !== hack.id) throw new Error('target was not hacked by this record');
-  clearSubmissionHacked(db, target.id);
-  recomputeOfficialCell(db, hack.contest_id, target.user_id, target.problem_id);
-  updateHack(db, hackId, {
-    status: 'reverted',
-    verdict: hack.verdict,
-    message: 'reverted by administrator',
+  transaction(db, () => {
+    clearSubmissionHacked(db, target.id);
+    recomputeOfficialCell(db, hack.contest_id, target.user_id, target.problem_id);
+    updateHack(db, hackId, {
+      status: 'reverted',
+      verdict: hack.verdict,
+      message: 'reverted by administrator',
+    });
   });
+  invalidateOfficialRanking(db, hack.contest_id);
 }
 
 export async function judgeHack(
@@ -318,14 +325,17 @@ export async function judgeHack(
       });
       return;
     }
-    markSubmissionHacked(db, target.id, hack.hacker_id, hackId);
-    recomputeOfficialAfterHack(db, hack.contest_id, target.user_id, target.problem_id, target.id);
-    freezeOfficialAfterHack(db, hack.contest_id);
-    updateHack(db, hackId, {
-      status: 'success',
-      verdict: result.verdict,
-      message: result.message || `target ${result.verdict}`,
+    transaction(db, () => {
+      markSubmissionHacked(db, target.id, hack.hacker_id, hackId);
+      recomputeOfficialAfterHack(db, hack.contest_id, target.user_id, target.problem_id, target.id);
+      freezeOfficialAfterHack(db, hack.contest_id);
+      updateHack(db, hackId, {
+        status: 'success',
+        verdict: result.verdict,
+        message: result.message || `target ${result.verdict}`,
+      });
     });
+    invalidateOfficialRanking(db, hack.contest_id);
   } catch (err) {
     updateHack(db, hackId, {
       status: 'unjudgeable',

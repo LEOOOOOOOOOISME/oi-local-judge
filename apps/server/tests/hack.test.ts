@@ -194,6 +194,17 @@ describe('contest hack', () => {
     expect(ranking?.rows.find((row) => row.userId === targetId)?.hackedCount).toBe(1);
     expect(ranking?.rows.find((row) => row.userId === hackerId)?.successfulHacks).toBe(1);
     expect(getContest(db, contestId)!.official_frozen_until).toBeGreaterThan(Date.now());
+
+    // A failure while updating the hack record must roll back the submission
+    // flag and official score too.
+    db.exec(
+      "CREATE TRIGGER fail_hack_update BEFORE UPDATE ON contest_hacks BEGIN SELECT RAISE(ABORT, 'injected'); END;",
+    );
+    expect(() => revertHack(db, hackId)).toThrow(/injected/);
+    expect(getSubmission(db, targetSubmissionId)!.hacked_at).not.toBeNull();
+    expect(getOfficialScore(db, contestId, targetId, problemId)?.score).toBe(0);
+    db.exec('DROP TRIGGER fail_hack_update');
+
     revertHack(db, hackId);
     expect(getSubmission(db, targetSubmissionId)!.hacked_at).toBeNull();
     expect(getOfficialScore(db, contestId, targetId, problemId)?.score).toBe(100);
