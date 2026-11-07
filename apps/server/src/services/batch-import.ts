@@ -7,11 +7,12 @@ import { hashPassword } from '../security/password.js';
 import { transaction } from '../storage/db.js';
 import {
   addBatchItem,
+  findImportingBatchJob,
   getBatchItemStats,
   getBatchJob,
   listBatchItems,
   listImportingBatchJobs,
-  setBatchStatus,
+  listPendingImportJobs,
   updateBatchJob,
   type BatchJobRow,
 } from '../storage/repos/batches.js';
@@ -141,16 +142,28 @@ function failJob(db: DatabaseSync, batchId: number, error: unknown): void {
       : error instanceof BatchImportCanceledError
         ? 'BATCH_CANCELED'
         : 'BATCH_IMPORT_FAILED';
-  setBatchStatus(db, batchId, 'failed');
+  const now = Date.now();
+  updateBatchJob(db, batchId, {
+    status: 'failed',
+    phase: 'failed',
+    heartbeatAt: now,
+    etaSeconds: 0,
+  });
   setJobMeta(db, batchId, {
     error: { code, message },
-    finishedAt: Date.now(),
+    finishedAt: now,
   });
 }
 
 function cancelJob(db: DatabaseSync, batchId: number): void {
-  setBatchStatus(db, batchId, 'canceled');
-  setJobMeta(db, batchId, { canceledAt: Date.now() });
+  const now = Date.now();
+  updateBatchJob(db, batchId, {
+    status: 'canceled',
+    phase: 'canceled',
+    heartbeatAt: now,
+    etaSeconds: 0,
+  });
+  setJobMeta(db, batchId, { canceledAt: now, finishedAt: now });
 }
 
 function yieldToEventLoop(): Promise<void> {
@@ -159,6 +172,106 @@ function yieldToEventLoop(): Promise<void> {
 
 export function isBatchImportActive(batchId: number): boolean {
   return activeImports.has(batchId);
+}
+
+export interface BatchEtaInput {
+  phase: string;
+  processed?: number;
+  total?: number;
+  judged?: number;
+  imported?: number;
+  startedAt?: number | null;
+  now?: number;
+}
+
+/**
+ * Rough remaining seconds for the monitor. Parsing has no ETA yet; importing
+ * uses the processed-source rate and judging uses the judged-submission rate.
+ * Terminal phases return 0, unknown phases return null.
+ */
+export function estimateBatchEta(input: BatchEtaInput): number | null {
+  const phase = input.phase;
+  if (phase === 'finished' || phase === 'failed' || phase === 'canceled') return 0;
+  const now = input.now ?? Date.now();
+  const startedAt = input.startedAt ?? null;
+  if (startedAt === null || now <= startedAt) return null;
+  const elapsed = now - startedAt;
+  if (phase === 'parsing' || phase === 'importing') {
+    const total = Math.max(0, input.total ?? 0);
+    const processed = Math.max(0, input.processed ?? 0);
+    if (total <= 0) return null;
+    if (processed >= total) return 0;
+    if (processed <= 0) return null;
+    const rate = processed / elapsed;
+    if (!Number.isFinite(rate) || rate <= 0) return null;
+    return Math.max(0, Math.ceil((total - processed) / rate / 1000));
+  }
+  if (phase === 'queued' || phase === 'judging') {
+    const imported = Math.max(0, input.imported ?? 0);
+    const judged = Math.max(0, input.judged ?? 0);
+    const remaining = imported - judged;
+    if (imported <= 0) return null;
+    if (remaining <= 0) return 0;
+    if (judged <= 0) return null;
+    const rate = judged / elapsed;
+    if (!Number.isFinite(rate) || rate <= 0) return null;
+    return Math.max(0, Math.ceil(remaining / rate / 1000));
+  }
+  return null;
+}
+
+function importInputFromJob(job: BatchJobRow): BatchImportInput {
+  return {
+    batchId: job.id,
+    uploadId: job.upload_id ?? '',
+    studentLevel: Math.max(1, Math.floor(job.student_level || 1)),
+    problemLevel: Math.max(0, Math.floor(job.problem_level ?? 0)),
+    problemId: job.problem_id,
+    problemMap: parseProblemMap(job.problem_map_json),
+    language: 'cpp17',
+  };
+}
+
+/**
+ * Single-flight importer: at most one async import runs at a time. Waiting jobs
+ * are persisted as `status=queued, phase=uploaded`; this starts the oldest one
+ * when the slot is free. Called when a job is created and after every import
+ * finishes (success, failure or cancel).
+ */
+export function scheduleNextBatchImport(options: BatchImportOptions): number | null {
+  if (activeImports.size > 0) return null;
+  // A persisted importing row without an in-process control belongs to startup
+  // recovery; do not race a second import past it.
+  if (findImportingBatchJob(options.db)) return null;
+  for (const job of listPendingImportJobs(options.db)) {
+    if (activeImports.has(job.id)) continue;
+    if (!job.upload_id) {
+      markResumeFailed(options.db, job.id, 'BATCH_RESUME_UPLOAD_MISSING', 'upload id is missing');
+      continue;
+    }
+    const upload = getBatchUpload(options.db, job.upload_id);
+    if (!upload) {
+      markResumeFailed(
+        options.db,
+        job.id,
+        'BATCH_RESUME_UPLOAD_MISSING',
+        `upload ${job.upload_id} no longer exists`,
+      );
+      continue;
+    }
+    if (!existsSync(join(options.config.dataDir, upload.zip_path))) {
+      markResumeFailed(
+        options.db,
+        job.id,
+        'BATCH_RESUME_UPLOAD_MISSING',
+        `archive ${upload.zip_path} no longer exists`,
+      );
+      continue;
+    }
+    startBatchImport(options, importInputFromJob(job));
+    return job.id;
+  }
+  return null;
 }
 
 /**
@@ -185,6 +298,17 @@ export function startBatchImport(
   if (activeImports.has(input.batchId)) return;
   const control: ImportControl = { canceled: false };
   activeImports.set(input.batchId, control);
+  // Promote synchronously so the run/list response and the single-flight slot
+  // agree before the first setImmediate tick.
+  const existing = getBatchJob(options.db, input.batchId);
+  const now = Date.now();
+  updateBatchJob(options.db, input.batchId, {
+    status: 'importing',
+    phase: 'parsing',
+    startedAt: existing?.started_at ?? now,
+    heartbeatAt: now,
+    etaSeconds: null,
+  });
   setImmediate(() => {
     void runBatchImport(options, input, control)
       .catch((error: unknown) => {
@@ -199,6 +323,13 @@ export function startBatchImport(
       .finally(() => {
         if (activeImports.get(input.batchId) === control) {
           activeImports.delete(input.batchId);
+        }
+        try {
+          // Free slot: promote the oldest queued import. A failure here must
+          // never mask the finished job's own result.
+          scheduleNextBatchImport(options);
+        } catch {
+          // ignore
         }
       });
   });
@@ -227,7 +358,14 @@ async function runBatchImport(
       cancelJob(db, input.batchId);
       return;
     }
-    setBatchStatus(db, input.batchId, 'importing');
+    const importStartedAt = job.started_at ?? Date.now();
+    updateBatchJob(db, input.batchId, {
+      status: 'importing',
+      phase: 'parsing',
+      startedAt: importStartedAt,
+      heartbeatAt: Date.now(),
+      etaSeconds: null,
+    });
     // A resumed import re-plans the same immutable upload. Every source path
     // already recorded (imported, skipped or error) is final, so a restart
     // never duplicates a submission or a failure row.
@@ -367,6 +505,16 @@ async function runBatchImport(
       existingPaths.has(candidate.path),
     ).length;
     let processed = 0;
+    updateBatchJob(db, input.batchId, {
+      phase: 'importing',
+      heartbeatAt: Date.now(),
+      etaSeconds: estimateBatchEta({
+        phase: 'importing',
+        processed: alreadyProcessed,
+        total: totalCandidates,
+        startedAt: importStartedAt,
+      }),
+    });
 
     for (let offset = 0; offset < ordered.length; offset += chunkSize) {
       if (control.canceled) break;
@@ -455,14 +603,27 @@ async function runBatchImport(
 
       processed += chunk.length;
       const stats = getBatchItemStats(db, input.batchId);
+      const processedTotal = alreadyProcessed + processed;
+      const now = Date.now();
+      updateBatchJob(db, input.batchId, {
+        phase: 'importing',
+        heartbeatAt: now,
+        etaSeconds: estimateBatchEta({
+          phase: 'importing',
+          processed: processedTotal,
+          total: totalCandidates,
+          startedAt: importStartedAt,
+          now,
+        }),
+      });
       setJobMeta(db, input.batchId, {
         progress: {
-          processed: alreadyProcessed + processed,
+          processed: processedTotal,
           totalCandidates,
           imported: stats.imported,
           skipped: stats.skipped,
           errors: stats.errors,
-          updatedAt: Date.now(),
+          updatedAt: now,
         },
       });
       await yieldToEventLoop();
@@ -475,7 +636,13 @@ async function runBatchImport(
 
     const stats = getBatchItemStats(db, input.batchId);
     const status = stats.imported <= 0 ? 'failed' : 'queued';
-    setBatchStatus(db, input.batchId, status);
+    const finishedAt = Date.now();
+    updateBatchJob(db, input.batchId, {
+      status,
+      phase: status === 'failed' ? 'failed' : 'queued',
+      heartbeatAt: finishedAt,
+      etaSeconds: status === 'failed' ? 0 : null,
+    });
     setJobMeta(db, input.batchId, {
       progress: {
         processed: alreadyProcessed + processed,
@@ -483,9 +650,9 @@ async function runBatchImport(
         imported: stats.imported,
         skipped: stats.skipped,
         errors: stats.errors,
-        updatedAt: Date.now(),
+        updatedAt: finishedAt,
       },
-      importedAt: Date.now(),
+      importedAt: finishedAt,
     });
   } catch (error) {
     if (control.canceled || error instanceof BatchImportCanceledError) {
@@ -541,10 +708,16 @@ function markResumeFailed(
   code: string,
   message: string,
 ): void {
-  setBatchStatus(db, batchId, 'failed');
+  const now = Date.now();
+  updateBatchJob(db, batchId, {
+    status: 'failed',
+    phase: 'failed',
+    heartbeatAt: now,
+    etaSeconds: 0,
+  });
   setJobMeta(db, batchId, {
     error: { code, message },
-    resumeFailedAt: Date.now(),
+    resumeFailedAt: now,
   });
 }
 
@@ -553,8 +726,12 @@ export function recoverInterruptedBatchImports(
   options: BatchRecoveryOptions,
 ): number {
   const jobs = listImportingBatchJobs(db);
+  let started = false;
   for (const job of jobs) {
-    if (isBatchImportActive(job.id)) continue;
+    if (isBatchImportActive(job.id)) {
+      started = true;
+      continue;
+    }
     if (!job.upload_id) {
       markResumeFailed(db, job.id, 'BATCH_RESUME_UPLOAD_MISSING', 'upload id is missing');
       continue;
@@ -578,6 +755,20 @@ export function recoverInterruptedBatchImports(
       );
       continue;
     }
+    if (started) {
+      // Single-flight: only the first interrupted import resumes now; the rest
+      // wait as pending imports and start as soon as the slot is free.
+      const now = Date.now();
+      updateBatchJob(db, job.id, {
+        status: 'queued',
+        phase: 'uploaded',
+        heartbeatAt: now,
+        etaSeconds: null,
+      });
+      setJobMeta(db, job.id, { resumeRequestedAt: now, requeuedAt: now });
+      continue;
+    }
+    started = true;
     setJobMeta(db, job.id, { resumeRequestedAt: Date.now() });
     startBatchImport(
       {
@@ -586,16 +777,16 @@ export function recoverInterruptedBatchImports(
         maxSourceBytes: options.maxSourceBytes,
         chunkSize: options.chunkSize,
       },
-      {
-        batchId: job.id,
-        uploadId: job.upload_id,
-        studentLevel: Math.max(1, Math.floor(job.student_level || 1)),
-        problemLevel: Math.max(0, Math.floor(job.problem_level ?? 0)),
-        problemId: job.problem_id,
-        problemMap: parseProblemMap(job.problem_map_json),
-        language: 'cpp17',
-      },
+      importInputFromJob(job),
     );
   }
+  // Also promote previously queued imports (e.g. a crash left jobs waiting for
+  // the single-flight slot) when no import is active.
+  scheduleNextBatchImport({
+    db,
+    config: options.config,
+    maxSourceBytes: options.maxSourceBytes,
+    chunkSize: options.chunkSize,
+  });
   return jobs.length;
 }

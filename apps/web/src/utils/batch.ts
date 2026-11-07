@@ -287,6 +287,63 @@ export function batchStatusColor(status: BatchJobStatus | string): string {
   }
 }
 
+/** Terminal phases may be deleted from the monitor. */
+export function isBatchTerminal(status: string | null | undefined): boolean {
+  return status === 'finished' || status === 'failed' || status === 'canceled';
+}
+
+/** User-facing phase label (uploaded/parsing/... from the persisted job). */
+export function batchPhaseLabel(phase: string | null | undefined): string {
+  switch (phase) {
+    case 'uploaded':
+      return '已上传，等待导入';
+    case 'parsing':
+      return '解析 ZIP';
+    case 'importing':
+      return '导入中';
+    case 'queued':
+      return '排队中';
+    case 'judging':
+      return '评测中';
+    case 'finished':
+      return '已完成';
+    case 'failed':
+      return '失败';
+    case 'canceled':
+      return '已取消';
+    default:
+      return phase || '未知';
+  }
+}
+
+/** Remaining-time label; null means unknown, 0 means done. */
+export function formatEta(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return '—';
+  if (seconds <= 0) return '已完成';
+  if (seconds < 60) return `约 ${Math.ceil(seconds)} 秒`;
+  if (seconds < 3600) {
+    const minutes = Math.floor(seconds / 60);
+    const rest = Math.round(seconds % 60);
+    return `约 ${minutes} 分${rest > 0 ? ` ${rest} 秒` : ''}`;
+  }
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+  return `约 ${hours} 小时${minutes > 0 ? ` ${minutes} 分` : ''}`;
+}
+
+/** Relative heartbeat label used by the batch monitor. */
+export function formatHeartbeat(
+  timestamp: number | null | undefined,
+  now = Date.now(),
+): string {
+  if (!timestamp) return '—';
+  const diff = Math.max(0, now - timestamp);
+  if (diff < 1000) return '刚刚';
+  if (diff < 60_000) return `${Math.floor(diff / 1000)} 秒前`;
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟前`;
+  return new Date(timestamp).toLocaleString('zh-CN', { hour12: false });
+}
+
 const BATCH_ERROR_MESSAGES: Record<string, string> = {
   BAD_ZIP: '无法解析 zip 文件',
   EMPTY_BODY: '上传内容为空',
@@ -302,6 +359,8 @@ const BATCH_ERROR_MESSAGES: Record<string, string> = {
   BATCH_ALREADY_RUNNING: '该上传已有未完成的批次，请等待完成或先取消',
   NOT_STANDALONE_BATCH: '比赛批次由比赛管理，不能在批量评测页取消',
   CANNOT_CANCEL: '批次已结束，无法取消',
+  JOB_NOT_TERMINAL: '仅已完成 / 失败 / 已取消的任务可以删除',
+  INVALID_STATUS: '任务状态筛选无效',
   BAD_PROBLEM_MAP: '题目映射包含不存在的题目，请刷新题目列表后重试',
   PROBLEM_NOT_FOUND: '题目不存在或已被删除',
   BAD_REQUEST: '请求参数有误',
