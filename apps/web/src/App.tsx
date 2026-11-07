@@ -205,6 +205,14 @@ export function AppRoutes() {
           }
         />
         <Route
+          path="/admin/batch/:jobId"
+          element={
+            <AdminRoute>
+              <AdminBatchPage />
+            </AdminRoute>
+          }
+        />
+        <Route
           path="/admin/contests"
           element={
             <ContestAdminRoute>

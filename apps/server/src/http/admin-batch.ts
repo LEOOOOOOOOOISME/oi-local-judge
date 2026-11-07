@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, normalize } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
 import { unzipSync } from 'fflate';
@@ -12,32 +12,40 @@ import { MAX_SOURCE_BYTES_ADMIN, submitSource } from '../services/submissions.js
 import { getProblem, resolveProblemReference } from '../storage/repos/problems.js';
 import {
   addBatchItem,
+  BATCH_TERMINAL_STATUSES,
+  countBatchJobsForUpload,
   createBatchJob,
+  deleteBatchJobRows,
   findUnfinishedBatchJobForUpload,
   getBatchItemStats,
   getBatchJob,
+  getBatchJobWithCounts,
   listBatchItemFailures,
   listBatchItemsPage,
+  listBatchJobsPage,
   listBatchSubmissionIds,
-  setBatchStatus,
   updateBatchJob,
   type BatchItemImportStatus,
   type BatchItemRow,
   type BatchItemStats,
+  type BatchJobListRow,
   type BatchJobRow,
 } from '../storage/repos/batches.js';
 import {
   createBatchUpload,
+  deleteBatchUpload,
   getBatchUpload,
   updateBatchUploadScan,
 } from '../storage/repos/batch-uploads.js';
+import { recordAudit } from '../storage/repos/audit.js';
 import { getSubmission } from '../storage/repos/submissions.js';
 import type { UserRow } from '../storage/repos/users.js';import {
   batchUsername,
   classifySubmitError,
   ensureBatchUser,
+  estimateBatchEta,
   isBatchImportActive,
-  startBatchImport,
+  scheduleNextBatchImport,
   cancelBatchImport,
 } from '../services/batch-import.js';
 import {
@@ -151,83 +159,215 @@ function parseImportStatus(value: string | undefined): BatchItemImportStatus | n
     : null;
 }
 
-/**
- * Status of a streaming async import. `importing` is owned by the background
- * job; afterwards the phase is derived from persisted batch_items/submissions
- * so a restart or a missed status write can never strand a job.
- */
-function resolveAsyncBatchStatus(
-  job: { status: string },
-  stats: BatchItemStats,
-  importActive: boolean,
-): string {
-  if (job.status === 'canceled') return 'canceled';
-  if (job.status === 'failed') return 'failed';
-  if (job.status === 'importing') {
-    if (importActive) return 'importing';
-    return stats.imported > 0 ? 'queued' : 'failed';
-  }
-  if (stats.imported <= 0) return 'failed';
-  if (stats.done >= stats.imported) return 'finished';
-  if (stats.done > 0) return 'judging';
-  return 'queued';
+/** Default/maximum page size of the persisted batch job monitor. */
+const JOB_LIST_DEFAULT_LIMIT = 20;
+const JOB_LIST_MAX_LIMIT = 200;
+const JOB_STATUS_VALUES = new Set([
+  'uploaded',
+  'parsing',
+  'importing',
+  'queued',
+  'judging',
+  'finished',
+  'failed',
+  'canceled',
+  'running',
+]);
+
+function parseJobListLimit(value: string | undefined): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return JOB_LIST_DEFAULT_LIMIT;
+  return Math.min(JOB_LIST_MAX_LIMIT, Math.max(1, Math.floor(parsed)));
 }
 
-function importProgressFromMeta(
-  job: BatchJobRow | null,
-): { processed: number; totalCandidates: number } | null {
-  if (!job) return null;
-  try {
-    const meta = JSON.parse(job.meta_json) as {
-      progress?: { processed?: number; totalCandidates?: number };
-    };
-    const progress = meta.progress;
-    if (!progress || typeof progress.processed !== 'number') return null;
-    return {
-      processed: progress.processed,
-      totalCandidates: Number(progress.totalCandidates ?? 0),
-    };
-  } catch {
-    return null;
-  }
+function parseJobStatus(value: string | undefined): string | null | undefined {
+  const status = value?.trim().toLowerCase();
+  if (!status || status === 'all') return null;
+  if (!JOB_STATUS_VALUES.has(status)) return undefined;
+  return status;
 }
 
-function buildProgress(
-  stats: BatchItemStats,
-  status: string,
-  job: BatchJobRow | null,
-): {
+interface JobCounts {
   total: number;
   imported: number;
   skipped: number;
-  errors: number;
+  failed: number;
   judged: number;
-  percent: number;
+  queued: number;
+}
+
+export interface BatchJobSummary {
+  id: number;
+  status: string;
   phase: string;
-  import: { processed: number; totalCandidates: number } | null;
-} {
-  const imported = importProgressFromMeta(job);
-  let percent = 0;
-  if (status === 'importing' && imported) {
-    percent =
-      imported.totalCandidates > 0
-        ? Math.min(99, Math.round((imported.processed / imported.totalCandidates) * 100))
-        : 0;
-  } else if (stats.imported > 0) {
-    percent = Math.min(100, Math.round((stats.done / stats.imported) * 100));
-  } else if (status === 'finished') {
-    percent = 100;
+  total: number;
+  imported: number;
+  judged: number;
+  queued: number;
+  failed: number;
+  skipped: number;
+  percent: number;
+  eta: number | null;
+  heartbeat: number | null;
+  startedAt: number | null;
+  updatedAt: number | null;
+  createdAt: number;
+  problemId: number;
+  mode: string | null;
+  uploadId: string | null;
+  canDelete: boolean;
+  error: { code: string; message: string } | null;
+}
+
+function readJobMeta(job: { meta_json: string }): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(job.meta_json) as unknown;
+    return parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
   }
+}
+
+/**
+ * Derives the user-visible status/phase from persisted fields and aggregate
+ * counters. `uploaded` means the job is waiting for the single-flight importer;
+ * `queued` after importing means the submissions are waiting for the judge.
+ */
+function resolveJobState(
+  job: { status: string; phase: string },
+  counts: JobCounts,
+  importActive: boolean,
+): { status: string; phase: string } {
+  if (job.status === 'canceled') return { status: 'canceled', phase: 'canceled' };
+  if (job.status === 'failed') return { status: 'failed', phase: 'failed' };
+  if (job.status === 'finished' || job.phase === 'finished') {
+    return { status: 'finished', phase: 'finished' };
+  }
+  if (
+    importActive ||
+    job.status === 'importing' ||
+    job.phase === 'parsing' ||
+    job.phase === 'importing'
+  ) {
+    return {
+      status: 'importing',
+      phase: job.phase === 'parsing' ? 'parsing' : 'importing',
+    };
+  }
+  if (job.status === 'queued' && job.phase === 'uploaded') {
+    return { status: 'queued', phase: 'uploaded' };
+  }
+  if (counts.imported <= 0) return { status: 'failed', phase: 'failed' };
+  if (counts.judged >= counts.imported) return { status: 'finished', phase: 'finished' };
+  if (counts.judged > 0) return { status: 'judging', phase: 'judging' };
+  return { status: 'queued', phase: 'queued' };
+}
+
+function summarizeJob(
+  job: BatchJobRow,
+  counts: JobCounts,
+  importActive: boolean,
+): BatchJobSummary {
+  const state = resolveJobState(job, counts, importActive);
+  const meta = readJobMeta(job);
+  const progress = meta.progress as
+    | { processed?: number; totalCandidates?: number }
+    | undefined;
+  let percent = 0;
+  if (state.status === 'finished') {
+    percent = 100;
+  } else if (state.status === 'importing') {
+    const total = Number(progress?.totalCandidates ?? 0);
+    const processed = Number(progress?.processed ?? 0);
+    percent =
+      total > 0 ? Math.min(99, Math.round((processed / total) * 100)) : 0;
+  } else if (counts.imported > 0) {
+    percent = Math.min(100, Math.round((counts.judged / counts.imported) * 100));
+  }
+  const eta = estimateBatchEta({
+    phase: state.phase,
+    processed: Number(progress?.processed ?? 0),
+    total: Number(progress?.totalCandidates ?? 0),
+    judged: counts.judged,
+    imported: counts.imported,
+    startedAt: job.started_at,
+  });
+  const errorMeta = meta.error as { code?: unknown; message?: unknown } | undefined;
+  return {
+    id: job.id,
+    status: state.status,
+    phase: state.phase,
+    total: counts.total,
+    imported: counts.imported,
+    judged: counts.judged,
+    queued: counts.queued,
+    failed: counts.failed,
+    skipped: counts.skipped,
+    percent,
+    eta,
+    heartbeat: job.heartbeat_at ?? job.updated_at ?? job.created_at,
+    startedAt: job.started_at,
+    updatedAt: job.updated_at ?? job.created_at,
+    createdAt: job.created_at,
+    problemId: job.problem_id,
+    mode: job.mode,
+    uploadId: job.upload_id,
+    canDelete: BATCH_TERMINAL_STATUSES.has(state.status),
+    error:
+      errorMeta && typeof errorMeta.code === 'string'
+        ? {
+            code: errorMeta.code,
+            message: typeof errorMeta.message === 'string' ? errorMeta.message : '',
+          }
+        : null,
+  };
+}
+
+function jobCountsFromRow(row: BatchJobListRow): JobCounts {
+  return {
+    total: row.total,
+    imported: row.imported,
+    skipped: row.skipped,
+    failed: row.failed,
+    judged: row.judged,
+    queued: row.queued,
+  };
+}
+
+function jobCountsFromStats(stats: BatchItemStats): JobCounts {
   return {
     total: stats.total,
     imported: stats.imported,
     skipped: stats.skipped,
-    errors: stats.errors,
+    failed: stats.errors,
     judged: stats.done,
-    percent,
-    phase: status,
-    import: imported,
+    queued: Math.max(0, stats.imported - stats.done),
   };
+}
+
+/** Persists derived monitor fields on the row so refresh/restart can restore it. */
+function refreshStoredJob(
+  db: DatabaseSync,
+  job: BatchJobRow,
+  summary: BatchJobSummary,
+): void {
+  const now = Date.now();
+  const shouldTouch =
+    summary.status === 'importing' ||
+    summary.status === 'judging' ||
+    summary.status === 'queued';
+  const heartbeat = shouldTouch ? now : job.heartbeat_at;
+  const statusChanged = job.status !== summary.status;
+  const phaseChanged = job.phase !== summary.phase;
+  const etaChanged = job.eta_seconds !== summary.eta;
+  const staleHeartbeat = shouldTouch && now - (job.heartbeat_at ?? 0) > 1000;
+  if (!statusChanged && !phaseChanged && !etaChanged && !staleHeartbeat) return;
+  updateBatchJob(db, job.id, {
+    status: summary.status,
+    phase: summary.phase,
+    etaSeconds: summary.eta,
+    heartbeatAt: heartbeat,
+  });
 }
 
 
@@ -496,7 +636,6 @@ export function registerAdminBatchRoutes(
     const studentLevel = Math.max(1, Math.floor(Number(body.studentLevel ?? 1) || 1));
     const problemLevel = Math.max(0, Math.floor(Number(body.problemLevel ?? 0) || 0));
     const multiProblem = problemLevel > 0;
-    const language = body.language ?? 'cpp17';
     const problemId = Number(body.problemId);
     if (!multiProblem && !Number.isInteger(problemId)) {
       return reply
@@ -532,24 +671,25 @@ export function registerAdminBatchRoutes(
       problemLevel: multiProblem ? problemLevel : null,
       problemMap,
       createdBy: request.user?.id ?? null,
-      status: 'importing',
+      status: 'queued',
+      phase: 'uploaded',
       uploadId: upload.upload_id,
     });
-    startBatchImport(
-      { db: options.db, config: options.config, maxSourceBytes },
-      {
-        batchId,
-        uploadId: upload.upload_id,
-        studentLevel,
-        problemLevel,
-        problemId,
-        problemMap,
-        language,
-      },
-    );
+    // Single-flight importer: if another import owns the slot this job stays
+    // queued (phase uploaded) and is promoted when the slot frees up.
+    scheduleNextBatchImport({
+      db: options.db,
+      config: options.config,
+      maxSourceBytes,
+    });
+    const current = getBatchJob(options.db, batchId);
     return reply.code(202).send({
       ok: true,
-      data: { jobId: batchId, id: batchId, status: 'importing' },
+      data: {
+        jobId: batchId,
+        id: batchId,
+        status: current?.status === 'importing' ? 'importing' : 'queued',
+      },
     });
   });
 
@@ -567,8 +707,12 @@ export function registerAdminBatchRoutes(
         });
       }
       if (job.mode === 'async' && !isBatchImportActive(id) && job.status !== 'importing') {
-        const status = resolveAsyncBatchStatus(job, getBatchItemStats(options.db, id), false);
-        if (status === 'finished') {
+        const state = resolveJobState(
+          job,
+          jobCountsFromStats(getBatchItemStats(options.db, id)),
+          false,
+        );
+        if (state.status === 'finished') {
           return reply.code(409).send({
             ok: false,
             error: { code: 'CANNOT_CANCEL', message: 'batch already finished' },
@@ -576,8 +720,11 @@ export function registerAdminBatchRoutes(
         }
       }
       cancelBatchImport(id);
-      setBatchStatus(options.db, id, 'canceled');
       updateBatchJob(options.db, id, {
+        status: 'canceled',
+        phase: 'canceled',
+        heartbeatAt: Date.now(),
+        etaSeconds: 0,
         meta: { ...readMetaForJob(options.db, id), canceledAt: Date.now() },
       });
       const submissionIds = listBatchSubmissionIds(options.db, id);
@@ -596,6 +743,105 @@ export function registerAdminBatchRoutes(
         }
       }
       return { ok: true, data: { id, status: 'canceled', canceled } };
+    },
+  );
+
+  // -------------------------------------------------------------------------
+  // Persisted batch job monitor: paginated list, aggregate detail, deletion.
+  // -------------------------------------------------------------------------
+  app.get<{
+    Querystring: { offset?: string; limit?: string; status?: string };
+  }>('/api/admin/batch/jobs', { preHandler: guard }, async (request, reply) => {
+    const status = parseJobStatus(request.query.status);
+    if (status === undefined) {
+      return reply.code(400).send({
+        ok: false,
+        error: { code: 'INVALID_STATUS', message: 'unknown batch status' },
+      });
+    }
+    const offset = parseOffset(request.query.offset);
+    const limit = parseJobListLimit(request.query.limit);
+    const { items, total } = listBatchJobsPage(options.db, offset, limit, status);
+    return {
+      ok: true,
+      data: {
+        items: items.map((row) =>
+          summarizeJob(row, jobCountsFromRow(row), isBatchImportActive(row.id)),
+        ),
+        total,
+        offset,
+        limit,
+      },
+    };
+  });
+
+  app.get<{ Params: { id: string } }>(
+    '/api/admin/batch/jobs/:id',
+    { preHandler: guard },
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      const row = getBatchJobWithCounts(options.db, id);
+      if (!row) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      const summary = summarizeJob(row, jobCountsFromRow(row), isBatchImportActive(row.id));
+      // Contest batches keep their own lifecycle; standalone jobs persist the
+      // derived phase/heartbeat so a refresh or restart restores the monitor.
+      if (row.contest_id === null) refreshStoredJob(options.db, row, summary);
+      return { ok: true, data: summary };
+    },
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    '/api/admin/batch/jobs/:id',
+    { preHandler: guard },
+    async (request, reply) => {
+      const id = Number(request.params.id);
+      const job = getBatchJob(options.db, id);
+      if (!job) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      if (job.contest_id !== null) {
+        return reply.code(400).send({
+          ok: false,
+          error: {
+            code: 'NOT_STANDALONE_BATCH',
+            message: 'contest batches are owned by the contest',
+          },
+        });
+      }
+      const stats = getBatchItemStats(options.db, id);
+      const summary = summarizeJob(
+        job,
+        jobCountsFromStats(stats),
+        isBatchImportActive(id),
+      );
+      if (!summary.canDelete) {
+        return reply.code(409).send({
+          ok: false,
+          error: {
+            code: 'JOB_NOT_TERMINAL',
+            message: 'only finished, failed or canceled jobs can be deleted',
+          },
+        });
+      }
+      const upload = job.upload_id ? getBatchUpload(options.db, job.upload_id) : null;
+      deleteBatchJobRows(options.db, id);
+      // The archive is only useful to this job family. Remove it when no other
+      // job references the upload; submissions, judge tasks and problems stay.
+      if (upload && countBatchJobsForUpload(options.db, upload.upload_id) === 0) {
+        rmSync(join(options.config.dataDir, upload.zip_path), { force: true });
+        deleteBatchUpload(options.db, upload.upload_id);
+      }
+      recordAudit(options.db, {
+        actorId: request.user?.id ?? null,
+        action: 'batch.job.delete',
+        targetType: 'batch_job',
+        targetId: id,
+        detail: {
+          uploadId: job.upload_id,
+          total: summary.total,
+          phase: summary.phase,
+        },
+        ip: request.ip,
+      });
+      return { ok: true, data: { id, deleted: true } };
     },
   );
 
@@ -785,6 +1031,8 @@ export function registerAdminBatchRoutes(
       problemMap: Object.fromEntries(problemMap),
       createdBy: request.user?.id ?? null,
       status: 'running',
+      phase: 'importing',
+      startedAt: Date.now(),
     });
 
     for (const failure of failures) addFailureItem(options.db, batchId, failure);
@@ -862,7 +1110,13 @@ export function registerAdminBatchRoutes(
 
     const stats = getBatchItemStats(options.db, batchId);
     const status = resolveBatchStatus(stats);
-    setBatchStatus(options.db, batchId, status);
+    updateBatchJob(options.db, batchId, {
+      status,
+      phase:
+        status === 'finished' ? 'finished' : status === 'failed' ? 'failed' : 'queued',
+      heartbeatAt: Date.now(),
+      etaSeconds: status === 'finished' || status === 'failed' ? 0 : null,
+    });
     return reply.code(201).send({
       ok: true,
       data: {
@@ -949,21 +1203,44 @@ export function registerAdminBatchRoutes(
     const limit = parseLimit(request.query.limit);
     const itemStatus = parseImportStatus(request.query.status);
     const stats = getBatchItemStats(options.db, id);
-    // Contest batch jobs (contest_id != null) own their lifecycle; never rewrite
-    // draft/ready/published statuses from the standalone batch progress route.
-    let status: string;
+    const importActive = isBatchImportActive(id);
+    const summary = summarizeJob(job, jobCountsFromStats(stats), importActive);
+    // Contest batch jobs (contest_id != null) own their lifecycle; never
+    // rewrite draft/ready/published statuses from the standalone monitor.
+    let status = summary.status;
+    let phase = summary.phase;
     if (job.contest_id !== null) {
       status = job.status;
+      phase = job.phase || job.status;
     } else if (job.mode === 'async') {
-      status = resolveAsyncBatchStatus(job, stats, isBatchImportActive(id));
-      // Do not clobber `importing` while the background job still owns it.
-      if ((job.status !== 'importing' || !isBatchImportActive(id)) && job.status !== status) {
-        setBatchStatus(options.db, id, status);
-      }
+      // Persist the derived monitor state so refresh/restart can restore it.
+      refreshStoredJob(options.db, job, summary);
     } else {
+      // Legacy synchronous P0 jobs keep their historical running/finished
+      // status contract; only the phase is new.
       status = resolveBatchStatus(stats);
-      if (job.status !== status) setBatchStatus(options.db, id, status);
+      phase =
+        status === 'finished' ? 'finished' : status === 'failed' ? 'failed' : 'queued';
+      if (job.status !== status) {
+        updateBatchJob(options.db, id, {
+          status,
+          phase,
+          heartbeatAt: Date.now(),
+          etaSeconds: status === 'finished' || status === 'failed' ? 0 : null,
+        });
+      }
     }
+    const meta = readJobMeta(job);
+    const progressMeta = meta.progress as
+      | { processed?: number; totalCandidates?: number }
+      | undefined;
+    const importProgress =
+      progressMeta && typeof progressMeta.processed === 'number'
+        ? {
+            processed: progressMeta.processed,
+            totalCandidates: Number(progressMeta.totalCandidates ?? 0),
+          }
+        : null;
     const items = listBatchItemsPage(options.db, id, offset, limit, itemStatus).map((item) => {
       const submission = item.submission_id
         ? getSubmission(options.db, item.submission_id)
@@ -1007,6 +1284,11 @@ export function registerAdminBatchRoutes(
         uploadId: job.upload_id,
         status,
         jobStatus: job.status,
+        phase,
+        eta: summary.eta,
+        heartbeat: summary.heartbeat,
+        startedAt: summary.startedAt,
+        updatedAt: summary.updatedAt,
         studentLevel: job.student_level,
         offset,
         limit,
@@ -1015,12 +1297,28 @@ export function registerAdminBatchRoutes(
         importedCount: stats.imported,
         skippedCount: stats.skipped,
         errorCount: stats.errors,
+        failedCount: summary.failed,
+        queuedCount: summary.queued,
         judgedCount: stats.done,
         acCount: stats.acCount,
         averageScore: stats.imported > 0 ? stats.scoreSum / stats.imported : 0,
         distinctStudentCount: stats.distinctStudents,
         distinctProblemCount: stats.distinctProblems,
-        progress: buildProgress(stats, status, job),
+        progress: {
+          total: summary.total,
+          imported: summary.imported,
+          skipped: summary.skipped,
+          errors: summary.failed,
+          judged: summary.judged,
+          queued: summary.queued,
+          percent: summary.percent,
+          phase: summary.phase,
+          eta: summary.eta,
+          heartbeat: summary.heartbeat,
+          startedAt: summary.startedAt,
+          updatedAt: summary.updatedAt,
+          import: importProgress,
+        },
         items,
         skipped: listBatchItemFailures(options.db, id, 'skipped', REPORT_LIMIT).map(
           toFailureDto,
