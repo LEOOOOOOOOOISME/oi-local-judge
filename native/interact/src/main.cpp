@@ -47,6 +47,7 @@ struct Result {
   unsigned int interactorExit = 0;
   unsigned int contestantExit = 0;
   bool timedOut = false;
+  bool cpuTimedOut = false;
   long long cpuMs = 0;
   long long wallMs = 0;
   long long peakMemKb = 0;
@@ -229,9 +230,9 @@ void emit(const Result& r) {
   char buf[256];
   std::snprintf(buf, sizeof(buf),
                 ",\"interactorExit\":%u,\"contestantExit\":%u,\"timedOut\":%s,"
-                "\"cpuMs\":%lld,\"wallMs\":%lld,\"peakMemKb\":%lld",
-                r.interactorExit, r.contestantExit, r.timedOut ? "true" : "false", r.cpuMs,
-                r.wallMs, r.peakMemKb);
+                "\"cpuTimedOut\":%s,\"cpuMs\":%lld,\"wallMs\":%lld,\"peakMemKb\":%lld",
+                r.interactorExit, r.contestantExit, r.timedOut ? "true" : "false",
+                r.cpuTimedOut ? "true" : "false", r.cpuMs, r.wallMs, r.peakMemKb);
   s += buf;
   if (!r.verdict.empty()) s += ",\"verdict\":\"" + jsonEscape(r.verdict) + "\"";
   s += "}\n";
@@ -275,9 +276,14 @@ int main() {
   JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
   limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE |
                                             JOB_OBJECT_LIMIT_ACTIVE_PROCESS |
-                                            JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+                                            JOB_OBJECT_LIMIT_PROCESS_MEMORY |
+                                            JOB_OBJECT_LIMIT_JOB_TIME;
   limits.BasicLimitInformation.ActiveProcessLimit = 2;
   limits.ProcessMemoryLimit = static_cast<SIZE_T>(opt.memoryMb) * 1024ULL * 1024ULL;
+  // The interactor and the contestant share one CPU budget. Allow each side
+  // the nominal time limit, so the job total is at most 2x timeMs.
+  const long long cpuBudgetMs = static_cast<long long>(opt.timeMs) * 2LL;
+  limits.BasicLimitInformation.PerJobUserTimeLimit.QuadPart = cpuBudgetMs * 10000LL;
   if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
     out.error = "SetInformationJobObject failed: " + describeWin32Error(GetLastError());
     CloseHandle(job);
@@ -398,7 +404,19 @@ int main() {
     out.peakMemKb = static_cast<long long>(accounting.PeakProcessMemoryUsed / 1024ULL);
   }
 
-  if (out.timedOut) {
+  JOBOBJECT_BASIC_ACCOUNTING_INFORMATION jobAccounting{};
+  if (QueryInformationJobObject(job, JobObjectBasicAccountingInformation, &jobAccounting,
+                                sizeof(jobAccounting), nullptr)) {
+    const long long usedCpuMs = static_cast<long long>(jobAccounting.TotalUserTime.QuadPart / 10000LL);
+    if (usedCpuMs >= cpuBudgetMs) {
+      out.cpuTimedOut = true;
+      TerminateJobObject(job, 1);
+      WaitForSingleObject(interactor.hProcess, 5000);
+      WaitForSingleObject(contestant.hProcess, 5000);
+    }
+  }
+
+  if (out.timedOut || out.cpuTimedOut) {
     out.verdict = "TLE";
   } else if (out.interactorExit == 0 && out.contestantExit == 0) {
     out.verdict = "AC";

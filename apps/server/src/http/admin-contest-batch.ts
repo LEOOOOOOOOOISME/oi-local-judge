@@ -62,6 +62,33 @@ export function applyOfficialMode(
   return current.score;
 }
 
+function betterVerdict(current: string | null, incoming: string | null): string | null {
+  if (!current) return incoming;
+  if (!incoming) return current;
+  if (current === 'AC') return current;
+  if (incoming === 'AC') return incoming;
+  return current;
+}
+
+/**
+ * Keeps the official verdict consistent with the chosen score merge mode.
+ * In merge mode an equal score must never downgrade AC to WA: the previous
+ * verdict wins unless the incoming submission upgrades it to AC.
+ */
+export function computeAfterVerdict(
+  mode: BatchMode,
+  current: { score: number; verdict: string } | null,
+  batchScore: number,
+  batchVerdict: string | null,
+): string | null {
+  if (!current) return batchVerdict;
+  if (mode === 'overwrite') return batchVerdict;
+  if (mode === 'fill') return current.verdict;
+  if (batchScore > current.score) return batchVerdict;
+  if (batchScore < current.score) return current.verdict;
+  return betterVerdict(current.verdict, batchVerdict);
+}
+
 function refreshBatchStatus(db: DatabaseSync, batchId: number): void {
   const job = getBatchJob(db, batchId);
   if (!job) return;
@@ -213,7 +240,10 @@ export function registerContestBatchRoutes(
         continue;
       }
       const key = `${user.id}:${problemId}`;
-      if (sources.has(key)) continue;
+      if (sources.has(key)) {
+        ignoredFiles.push(relative);
+        continue;
+      }
       sources.set(key, {
         path: relative,
         code: Buffer.from(content).toString('utf8'),
@@ -355,6 +385,9 @@ export function registerContestBatchRoutes(
         ? official.get(`${item.user_id}:${item.problem_id}`) ?? null
         : null;
       const batchScore = submission?.score ?? 0;
+      const batchVerdict = submission?.verdict ?? null;
+      const afterScore = applyOfficialMode(mode, current, batchScore);
+      const afterVerdict = computeAfterVerdict(mode, current, batchScore, batchVerdict);
       return {
         student: item.student,
         userId: item.user_id,
@@ -363,8 +396,10 @@ export function registerContestBatchRoutes(
         currentScore: current?.score ?? 0,
         currentVerdict: current?.verdict ?? null,
         batchScore,
-        batchVerdict: submission?.verdict ?? null,
-        afterScore: applyOfficialMode(mode, current, batchScore),
+        batchVerdict,
+        afterScore,
+        afterVerdict,
+        verdictChanged: afterVerdict !== (current?.verdict ?? null),
       };
     });
     return {
@@ -373,7 +408,7 @@ export function registerContestBatchRoutes(
         mode,
         rows,
         changed: rows.filter(
-          (row) => row.afterScore !== row.currentScore,
+          (row) => row.afterScore !== row.currentScore || row.verdictChanged,
         ).length,
       },
     };
@@ -425,7 +460,8 @@ export function registerContestBatchRoutes(
         addParticipant(options.db, contestId, item.user_id);
         const current = getOfficialScore(options.db, contestId, item.user_id, item.problem_id);
         const afterScore = applyOfficialMode(mode, current, submission.score);
-        const afterVerdict = afterScore === submission.score ? (submission.verdict ?? 'WA') : current!.verdict;
+        const afterVerdict =
+          computeAfterVerdict(mode, current, submission.score, submission.verdict ?? 'WA') ?? 'WA';
         upsertOfficialScore(options.db, {
           contestId,
           userId: item.user_id,
@@ -475,6 +511,16 @@ export function registerContestBatchRoutes(
       const batchId = Number(request.params.batchId);
       const loaded = loadContestBatch(options.db, contestId, batchId);
       if (!loaded) return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
+      if (loaded.job.status === 'published') {
+        return reply
+          .code(409)
+          .send({ ok: false, error: { code: 'BATCH_PUBLISHED', status: loaded.job.status } });
+      }
+      if (!['draft', 'ready', 'failed'].includes(loaded.job.status)) {
+        return reply
+          .code(409)
+          .send({ ok: false, error: { code: 'BATCH_NOT_DISCARDABLE', status: loaded.job.status } });
+      }
       updateBatchJob(options.db, batchId, { status: 'discarded' });
       return { ok: true, data: null };
     },
