@@ -23,14 +23,14 @@ afterAll(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function createInteractiveProblem() {
+function createInteractiveProblem(timeMs = 2000) {
   mkdirSync(join(root, 'data'), { recursive: true });
   writeFileSync(join(root, 'data', '1.in'), '7\n');
   writeFileSync(join(root, 'data', '1.out'), '8\n');
   const problemId = createProblem(db, {
     title: 'Interactive',
     type: 'interactive',
-    timeMs: 2000,
+    timeMs,
     memoryMb: 128,
     testcases: [{ inputPath: 'data/1.in', outputPath: 'data/1.out', points: 100 }],
   });
@@ -67,6 +67,18 @@ describe('interactive judging', () => {
     expect(submission.verdict).toBe('AC');
     expect(submission.score).toBe(100);
     expect(getTestResults(db, id)[0].verdict).toBe('AC');
+  }, 40_000);
+
+  it('kills an interactive process tree that exceeds the CPU budget', async () => {
+    const problemId = createInteractiveProblem(100);
+    const code = readFileSync(
+      join(process.cwd(), 'tests/fixtures/interactive/contestant-busy.cpp'),
+      'utf8',
+    );
+    const { id } = submitSource({ db, config }, { userId, problemId, language: 'cpp17', code });
+    await judgeSubmission({ db, config, submissionId: id });
+    const submission = getSubmission(db, id)!;
+    expect(submission.verdict).toBe('TLE');
   }, 40_000);
 
   it('marks a wrong interactor exchange as WA', async () => {
