@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { applyOfficialMode } from '../src/http/admin-contest-batch.js';
+import { applyOfficialMode, computeAfterVerdict } from '../src/http/admin-contest-batch.js';
 import { buildApp } from '../src/app.js';
 import { ensureDataDirs, loadConfig } from '../src/config.js';
 import { startScheduler, type SchedulerHandle } from '../src/judge/scheduler.js';
@@ -117,12 +117,23 @@ describe('official score batch modes', () => {
     expect(applyOfficialMode('fill', { score: 100, verdict: 'AC' }, 40)).toBe(100);
     expect(applyOfficialMode('fill', null, 40)).toBe(40);
   });
+
+  it('never downgrades AC to WA when merge scores are equal', () => {
+    expect(computeAfterVerdict('merge', { score: 100, verdict: 'AC' }, 100, 'WA')).toBe('AC');
+    expect(computeAfterVerdict('merge', { score: 100, verdict: 'WA' }, 100, 'AC')).toBe('AC');
+    expect(computeAfterVerdict('merge', { score: 80, verdict: 'WA' }, 100, 'AC')).toBe('AC');
+    expect(computeAfterVerdict('merge', { score: 100, verdict: 'AC' }, 80, 'WA')).toBe('AC');
+    expect(computeAfterVerdict('merge', null, 100, 'WA')).toBe('WA');
+    expect(computeAfterVerdict('fill', { score: 100, verdict: 'AC' }, 100, 'WA')).toBe('AC');
+    expect(computeAfterVerdict('overwrite', { score: 100, verdict: 'AC' }, 100, 'WA')).toBe('WA');
+  });
 });
 
 describe('contest batch draft/preview/publish', () => {
   it('drafts, previews and publishes multi-problem scores', async () => {
     const uploaded = await uploadBatch({
       [`alice/${plusId}/main.cpp`]: new TextEncoder().encode(plusCode),
+      [`alice/${plusId}/zzz-extra.cpp`]: new TextEncoder().encode(plusCode),
       [`alice/${minusId}/main.cpp`]: new TextEncoder().encode(minusCode),
       [`bob/${plusId}/main.cpp`]: new TextEncoder().encode(wrongCode),
       [`Unknown/${plusId}/main.cpp`]: new TextEncoder().encode(plusCode),
@@ -137,6 +148,15 @@ describe('contest batch draft/preview/publish', () => {
     expect(uploadData.data.unresolvedProblems).toContain('not-a-problem');
 
     const batchId = uploadData.data.id;
+    const detail = await app.inject({
+      method: 'GET',
+      url: `/api/admin/contests/${contestId}/batches/${batchId}`,
+      headers: { cookie },
+    });
+    expect(detail.statusCode, detail.body).toBe(200);
+    const detailMeta = (detail.json() as { data: { meta: { ignoredFiles: string[] } } }).data.meta;
+    expect(detailMeta.ignoredFiles).toContain(`alice/${plusId}/zzz-extra.cpp`);
+
     const ready = await waitReady(batchId);
     expect(ready?.data.status).toBe('ready');
 
@@ -159,6 +179,19 @@ describe('contest batch draft/preview/publish', () => {
     });
     expect(published.statusCode, published.body).toBe(200);
     expect((published.json() as { data: { published: number } }).data.published).toBe(3);
+
+    const discardPublished = await app.inject({
+      method: 'POST',
+      url: `/api/admin/contests/${contestId}/batches/${batchId}/discard`,
+      headers: { cookie },
+    });
+    expect(discardPublished.statusCode, discardPublished.body).toBe(409);
+    const afterDiscard = await app.inject({
+      method: 'GET',
+      url: `/api/admin/contests/${contestId}/batches/${batchId}`,
+      headers: { cookie },
+    });
+    expect((afterDiscard.json() as { data: { status: string } }).data.status).toBe('published');
 
     const ranking = await app.inject({
       method: 'GET',
