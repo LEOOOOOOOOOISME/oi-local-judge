@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { judgeChildEnv } from './isolation.js';
 
 export interface ValidatorRunOptions {
   validator: string;
@@ -31,6 +32,7 @@ export function runValidator(options: ValidatorRunOptions): Promise<ValidatorRun
     };
     const child = spawn(options.validator, [], {
       cwd: options.workdir,
+      env: judgeChildEnv(process.env, options.workdir),
       windowsHide: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });

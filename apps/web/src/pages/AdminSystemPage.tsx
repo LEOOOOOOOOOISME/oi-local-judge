@@ -789,12 +789,12 @@ function SettingsPanel() {
                 extra={
                   overridden.has('host')
                     ? '该项被环境变量 OIJ_HOST 覆盖，不可在此修改'
-                    : undefined
+                    : '默认 127.0.0.1（仅本机）。填写 0.0.0.0 才会开放局域网访问，需重启生效。'
                 }
               >
                 <Input
                   disabled={overridden.has('host')}
-                  placeholder="0.0.0.0"
+                  placeholder="127.0.0.1"
                   maxLength={255}
                 />
               </Form.Item>

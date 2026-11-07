@@ -6,6 +6,7 @@ CREATE TABLE IF NOT EXISTS users(
   id INTEGER PRIMARY KEY, username TEXT NOT NULL UNIQUE, password_hash TEXT NOT NULL,
   real_name TEXT, class_name TEXT, role TEXT NOT NULL DEFAULT 'contestant',
   status TEXT NOT NULL DEFAULT 'active', session_version INTEGER NOT NULL DEFAULT 0,
+  must_change_password INTEGER NOT NULL DEFAULT 0,
   created_at INTEGER NOT NULL
 );
 CREATE TABLE IF NOT EXISTS problem_categories(
@@ -350,6 +351,9 @@ CREATE TABLE IF NOT EXISTS student_daily_stats(
 export function migrate(db: DatabaseSync): void {
   db.exec('CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, applied_at INTEGER NOT NULL)');
   db.exec(SCHEMA);
+  // Added after the initial release: existing installations must force a
+  // password change for the old admin/admin123 default (bootstrap.ts).
+  ensureColumn(db, 'users', 'must_change_password', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn(db, 'problems', 'samples_json', "TEXT NOT NULL DEFAULT '[]'");
   ensureColumn(db, 'problems', 'output_mb', 'INTEGER NOT NULL DEFAULT 64');
   ensureColumn(db, 'problems', 'checker_mode', "TEXT NOT NULL DEFAULT 'builtin'");

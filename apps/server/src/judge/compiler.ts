@@ -5,6 +5,7 @@
 // executable is removed on failure so callers never reuse a stale binary.
 import { spawn, type ChildProcess } from 'node:child_process';
 import { unlink } from 'node:fs/promises';
+import { judgeChildEnv } from './isolation.js';
 
 export const COMPILER_OUTPUT_LIMIT = 64 * 1024;
 export const DEFAULT_COMPILE_TIMEOUT_MS = 15_000;
@@ -77,6 +78,7 @@ function runCompiler(
 
     const child = spawn(gxx, args, {
       cwd: workdir,
+      env: judgeChildEnv(process.env, workdir),
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

@@ -7,13 +7,14 @@
 //    are ignored. SPJ is not wired in yet (checker.ts remains Phase 0 code).
 //  - Compile error -> verdict CE. Pipeline/internal errors -> failed + SE.
 //  - Temporary files live under <dataDir>/tmp and are always removed.
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 
 import { WS_EVENTS, type TestResultDto, type Verdict } from '@oij/shared';
 
 import type { Config } from '../config.js';
+import { createJudgeWorkdir } from './isolation.js';
 import { transaction } from '../storage/db.js';
 import {
   getProblem,
@@ -552,9 +553,7 @@ async function judgeSubmissionInternal(options: JudgeSubmissionOptions): Promise
       markSubmissionFailed(db, submissionId, events, 'problem has no enabled testcases');
       return;
     }
-    const tmpRoot = join(config.dataDir, 'tmp');
-    mkdirSync(tmpRoot, { recursive: true });
-    const workdir = mkdtempSync(join(tmpRoot, `answer-${submissionId}-`));
+    const workdir = createJudgeWorkdir(config.dataDir, `answer-${submissionId}-`);
     try {
       throwIfCanceled(signal);
       setSubmissionStatus(db, submissionId, 'running');
@@ -619,9 +618,7 @@ async function judgeSubmissionInternal(options: JudgeSubmissionOptions): Promise
       markSubmissionFailed(db, submissionId, events, 'interactive problem has no interactor source');
       return;
     }
-    const tmpRoot = join(config.dataDir, 'tmp');
-    mkdirSync(tmpRoot, { recursive: true });
-    const workdir = mkdtempSync(join(tmpRoot, `interactive-${submissionId}-`));
+    const workdir = createJudgeWorkdir(config.dataDir, `interactive-${submissionId}-`);
     try {
       setSubmissionStatus(db, submissionId, 'compiling');
       const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
@@ -721,9 +718,7 @@ async function judgeSubmissionInternal(options: JudgeSubmissionOptions): Promise
   }
   const subtasks = getSubtasks(db, problem.id);
 
-  const tmpRoot = join(config.dataDir, 'tmp');
-  mkdirSync(tmpRoot, { recursive: true });
-  const workdir = mkdtempSync(join(tmpRoot, `sub-${submissionId}-`));
+  const workdir = createJudgeWorkdir(config.dataDir, `sub-${submissionId}-`);
 
   try {
     const sourcePath = resolveDataPath(config.dataDir, submission.source_path);

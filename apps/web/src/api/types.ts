@@ -8,15 +8,20 @@ export interface User {
   realName: string | null;
   className: string | null;
   role: Role;
+  /** True while a bootstrap/admin-reset password must be replaced. */
+  mustChangePassword?: boolean;
 }
 
 export interface MeResult {
   user: User;
   permissions: string[];
+  mustChangePassword?: boolean;
 }
 
 export interface LoginResult {
   user: User;
+  permissions?: string[];
+  mustChangePassword?: boolean;
 }
 
 export type Verdict =

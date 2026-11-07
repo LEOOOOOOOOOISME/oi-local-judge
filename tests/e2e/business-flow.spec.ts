@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { startTestServer, type TestServer } from './server-harness';
+import {
+  E2E_ADMIN_PASSWORD,
+  E2E_ADMIN_USERNAME,
+  startTestServer,
+  type TestServer,
+} from './server-harness';
 
 /**
  * 业务流程验收：管理员建班 → 添加学生 → 学生登录看到班级。
@@ -11,8 +16,8 @@ import { startTestServer, type TestServer } from './server-harness';
 
 const PORT = 8900;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = 'admin123';
+const ADMIN_USERNAME = E2E_ADMIN_USERNAME;
+const ADMIN_PASSWORD = E2E_ADMIN_PASSWORD;
 const STUDENT_USERNAME = 'e2e_student';
 const STUDENT_PASSWORD = 'student123';
 const CLASS_NAME = 'E2E 班级';
