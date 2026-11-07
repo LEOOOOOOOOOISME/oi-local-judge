@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { judgeChildEnv } from './isolation.js';
 
 export interface GeneratorRunOptions {
   generator: string;
@@ -35,6 +36,7 @@ export function runGenerator(options: GeneratorRunOptions): Promise<GeneratorRun
     };
     const child = spawn(options.generator, [String(options.seed)], {
       cwd: options.workdir,
+      env: judgeChildEnv(process.env, options.workdir),
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

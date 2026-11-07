@@ -11,6 +11,7 @@ export interface UserRow {
   role: Role;
   status: string;
   session_version: number;
+  must_change_password: number;
   created_at: number;
 }
 
@@ -20,13 +21,16 @@ export interface CreateUserInput {
   realName?: string | null;
   className?: string | null;
   role?: Role;
+  /** Set for bootstrap/reset passwords that the user must replace on first login. */
+  mustChangePassword?: boolean;
 }
 
 export function createUser(db: DatabaseSync, input: CreateUserInput): number {
   const result = db
     .prepare(
-      `INSERT INTO users(username, password_hash, real_name, class_name, role, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO users(
+         username, password_hash, real_name, class_name, role, must_change_password, created_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.username,
@@ -34,6 +38,7 @@ export function createUser(db: DatabaseSync, input: CreateUserInput): number {
       input.realName ?? null,
       input.className ?? null,
       input.role ?? 'contestant',
+      input.mustChangePassword ? 1 : 0,
       Date.now(),
     );
   return Number(result.lastInsertRowid);
@@ -49,6 +54,34 @@ export function getUserById(db: DatabaseSync, id: number): UserRow | null {
 
 export function bumpSessionVersion(db: DatabaseSync, userId: number): void {
   db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').run(userId);
+}
+
+/** Only marks/unmarks the forced-change flag; session invalidation is separate. */
+export function setMustChangePassword(
+  db: DatabaseSync,
+  userId: number,
+  required: boolean,
+): void {
+  db.prepare('UPDATE users SET must_change_password = ? WHERE id = ?').run(
+    required ? 1 : 0,
+    userId,
+  );
+}
+
+/**
+ * Replaces a password, clears the forced-change flag and increments
+ * session_version so every token signed with the old password is rejected.
+ */
+export function setUserPasswordAndClearFlag(
+  db: DatabaseSync,
+  userId: number,
+  passwordHash: string,
+): void {
+  db.prepare(
+    `UPDATE users
+        SET password_hash = ?, must_change_password = 0, session_version = session_version + 1
+      WHERE id = ?`,
+  ).run(passwordHash, userId);
 }
 
 export function listUsers(

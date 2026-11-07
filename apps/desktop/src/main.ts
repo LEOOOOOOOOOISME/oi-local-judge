@@ -11,6 +11,10 @@ import {
 import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import {
+  formatInitialAdminNotice,
+  type InitialAdminNotice,
+} from './first-run.js';
 
 /**
  * Embedded 16x16 PNG for the tray icon: a blue rounded square with a white
@@ -47,6 +51,8 @@ let win: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let serverProcess: ReturnType<typeof utilityProcess.fork> | null = null;
 let serverPort: number | null = null;
+/** True only when the embedded server listens on a non-loopback interface. */
+let serverLanEnabled = false;
 let settings: DesktopSettings = { ...DEFAULT_SETTINGS };
 /**
  * Set as soon as quitting starts. BrowserWindow's `close` handler uses it to
@@ -83,8 +89,9 @@ function lanAddress(): string | null {
   return null;
 }
 
-/** `http://<lan-ip>:<port>/` once the server is up, otherwise null. */
+/** `http://<lan-ip>:<port>/` once the server is up and LAN access is enabled. */
 function lanUrl(): string | null {
+  if (!serverLanEnabled) return null;
   const lan = lanAddress();
   if (!lan || serverPort === null) return null;
   return `http://${lan}:${serverPort}/`;
@@ -203,11 +210,21 @@ function applyLoginItemSettings(openAtLogin: boolean): void {
   }
 }
 
-/** Starts the local judge server and resolves with the port it bound to. */
-async function startServer(root: string): Promise<number> {
+interface ServerReady {
+  port: number;
+  host: string;
+  initialAdmin?: InitialAdminNotice;
+}
+
+/** Starts the local judge server and resolves with its port and boot info. */
+async function startServer(root: string): Promise<ServerReady> {
   // The server resolves data, web assets and native helpers relative to its
   // working directory, so pin it to the application root for both layouts.
   const dataDir = join(app.getPath('userData'), 'runtime');
+  // Loopback by default. LAN sharing is explicit: OIJ_LAN=1 or OIJ_HOST=0.0.0.0
+  // (or a specific interface address) from the launcher/installer.
+  const lanRequested = process.env.OIJ_LAN === '1';
+  const host = process.env.OIJ_HOST ?? (lanRequested ? '0.0.0.0' : '127.0.0.1');
   const child = utilityProcess.fork(serverEntry(root), [], {
     // `pipe` instead of `inherit`: a packaged GUI app has no reliable inherited
     // stdout, and a blocked inherited handle used to make the child hang
@@ -218,7 +235,7 @@ async function startServer(root: string): Promise<number> {
     env: {
       ...process.env,
       OIJ_PORT: '0',
-      OIJ_HOST: '0.0.0.0',
+      OIJ_HOST: host,
       OIJ_DATA_DIR: dataDir,
       OIJ_RUNNER: join(root, 'native/runner/out/ojrunner.exe'),
       OIJ_INTERACT_RUNNER: join(root, 'native/interact/out/ojinteract.exe'),
@@ -246,17 +263,29 @@ async function startServer(root: string): Promise<number> {
   // First launch may be slowed down by antivirus scanning the packaged files;
   // 60 s is deliberately generous, and the failure path reports child output.
   const timeoutMs = Number(process.env.OIJ_SERVER_START_TIMEOUT_MS ?? 60_000);
-  return await new Promise<number>((resolvePort, reject) => {
+  return await new Promise<ServerReady>((resolveReady, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`server start timeout after ${timeoutMs}ms\n${tail()}`)),
       timeoutMs,
     );
-    child.on('message', (msg: { type?: string; port?: number }) => {
-      if (msg?.type === 'ready' && typeof msg.port === 'number') {
-        clearTimeout(timer);
-        resolvePort(msg.port);
-      }
-    });
+    child.on(
+      'message',
+      (msg: {
+        type?: string;
+        port?: number;
+        host?: string;
+        initialAdmin?: InitialAdminNotice;
+      }) => {
+        if (msg?.type === 'ready' && typeof msg.port === 'number') {
+          clearTimeout(timer);
+          resolveReady({
+            port: msg.port,
+            host: typeof msg.host === 'string' ? msg.host : '127.0.0.1',
+            ...(msg.initialAdmin ? { initialAdmin: msg.initialAdmin } : {}),
+          });
+        }
+      },
+    );
     child.on('exit', (code) => {
       if (serverProcess === child) serverProcess = null;
       clearTimeout(timer);
@@ -379,6 +408,34 @@ async function createWindow(port: number): Promise<BrowserWindow> {
   return created;
 }
 
+/**
+ * Shows the one-time bootstrap administrator password. The password is only
+ * available in this process and only on the launch that generated it; it is
+ * never written to disk. A "copy password" button avoids transcription errors.
+ */
+function showInitialAdminNotice(notice: InitialAdminNotice): void {
+  const canCopy = notice.reason === 'created' && Boolean(notice.password);
+  const buttons = canCopy ? ['复制密码', '知道了'] : ['知道了'];
+  const options = {
+    type: 'info' as const,
+    title: 'OiJudge 管理员账号',
+    message: canCopy ? '已生成管理员账号' : '管理员密码需要修改',
+    detail: formatInitialAdminNotice(notice),
+    buttons,
+    defaultId: buttons.length - 1,
+    cancelId: buttons.length - 1,
+    noLink: true,
+  };
+  const shown = win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
+  void shown
+    .then((result) => {
+      if (canCopy && result.response === 0 && notice.password) {
+        clipboard.writeText(notice.password);
+      }
+    })
+    .catch((error) => log(`initial admin dialog failed: ${String(error)}`));
+}
+
 async function bootstrap(): Promise<void> {
   const root = appRoot();
   process.chdir(root);
@@ -389,22 +446,25 @@ async function bootstrap(): Promise<void> {
   // entry) matches the stored preference. Default false never self-starts.
   applyLoginItemSettings(settings.openAtLogin);
 
-  const port = await startServer(root);
-  serverPort = port;
-  log(`server ready on port ${port}`);
-  const lan = lanAddress();
-  if (lan) {
-    const url = `http://${lan}:${port}/`;
-    log(`LAN: ${url}`);
+  const ready = await startServer(root);
+  serverPort = ready.port;
+  serverLanEnabled = ready.host !== '127.0.0.1' && ready.host !== 'localhost';
+  log(`server ready on port ${ready.port} host=${ready.host}`);
+  if (serverLanEnabled) {
+    const lan = lanAddress();
+    if (lan) log(`LAN: http://${lan}:${ready.port}/`);
+  } else {
+    log('LAN disabled (loopback only)');
   }
 
   createTray();
   log(tray ? 'tray ready' : 'tray unavailable; running window-only');
-  win = await createWindow(port);
+  win = await createWindow(ready.port);
   log('main window loaded');
   // `--hidden` (login item) keeps the window on the tray only; a second
   // instance or a failed tray creation still brings it up.
   if (!hiddenStart || pendingShow || !tray) showMainWindow();
+  if (ready.initialAdmin) showInitialAdminNotice(ready.initialAdmin);
   log('startup complete');
 }
 

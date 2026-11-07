@@ -1,5 +1,5 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { transaction } from '../storage/db.js';
@@ -14,6 +14,7 @@ import {
   upsertOfficialScore,
 } from '../storage/repos/official-scores.js';
 import { getProblem, type TestcaseRow } from '../storage/repos/problems.js';
+import { createJudgeWorkdir } from './isolation.js';
 import {
   clearSubmissionHacked,
   getSubmission,
@@ -181,10 +182,9 @@ export async function judgeHack(
     return;
   }
 
-  const tmpRoot = join(config.dataDir, 'tmp');
-  mkdirSync(tmpRoot, { recursive: true });
-  const workdir = mkdtempSync(join(tmpRoot, `hack-${hackId}-`));
-  const relativeWorkdir = relative(config.dataDir, workdir).replace(/\\/g, '/');
+  // Hack inputs/results are ephemeral and may contain answer data, so the
+  // target's code runs in a temp directory outside the data directory.
+  const workdir = createJudgeWorkdir(config.dataDir, `hack-${hackId}-`);
   const inputPath = join(workdir, 'hack.in');
   const answerPath = join(workdir, 'expected.out');
   const stdOutPath = join(workdir, 'std.out');
@@ -302,8 +302,8 @@ export async function judgeHack(
       id: hackId,
       problem_id: problem.id,
       ordinal: 1,
-      input_path: `${relativeWorkdir}/hack.in`,
-      output_path: `${relativeWorkdir}/expected.out`,
+      input_path: inputPath,
+      output_path: answerPath,
       points: 100,
       subtask_id: null,
       depends_on: null,

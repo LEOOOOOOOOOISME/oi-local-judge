@@ -10,8 +10,10 @@ import {
   createUser,
   getUserById,
   getUserByUsername,
+  setUserPasswordAndClearFlag,
   type UserRow,
 } from '../storage/repos/users.js';
+import { LEGACY_ADMIN_PASSWORD } from './bootstrap.js';
 
 export interface RegisterResult {
   user: UserDto;
@@ -74,11 +76,14 @@ export interface LoginResult {
   user: UserDto;
   token: string;
   permissions: string[];
+  /** True until the bootstrap/admin-reset password has been replaced. */
+  mustChangePassword: boolean;
 }
 
 export interface MeResult {
   user: UserDto;
   permissions: string[];
+  mustChangePassword: boolean;
 }
 
 export function toUserDto(user: UserRow): UserDto {
@@ -114,6 +119,7 @@ export function login(
     user: toUserDto(user),
     token,
     permissions: permissionsForRole(user.role),
+    mustChangePassword: user.must_change_password === 1,
   };
 }
 
@@ -125,6 +131,69 @@ export function me(db: DatabaseSync, userId: number): MeResult | null {
   return {
     user: toUserDto(user),
     permissions: permissionsForRole(user.role),
+    mustChangePassword: user.must_change_password === 1,
+  };
+}
+
+/** Minimum length mirrors account registration. */
+const MIN_PASSWORD_LENGTH = 8;
+const MAX_PASSWORD_LENGTH = 72;
+
+export interface ChangePasswordInput {
+  currentPassword: string;
+  newPassword: string;
+}
+
+export interface ChangePasswordResult extends LoginResult {
+  mustChangePassword: false;
+}
+
+/**
+ * Self-service password change. Used both for the forced first-login change and
+ * for voluntary changes; the old session is invalidated by the version bump and
+ * a fresh token is returned so the user stays signed in.
+ */
+export function changePassword(
+  db: DatabaseSync,
+  config: Config,
+  userId: number,
+  input: ChangePasswordInput,
+): ChangePasswordResult {
+  const user = getUserById(db, userId);
+  if (!user || user.status !== 'active') {
+    throw new AuthInputError('UNAUTHORIZED', 401, 'authentication required');
+  }
+  if (!verifyPassword(input.currentPassword, user.password_hash)) {
+    throw new AuthInputError('INVALID_CREDENTIALS', 401, 'current password is incorrect');
+  }
+  const next = input.newPassword;
+  if (next.length < MIN_PASSWORD_LENGTH || next.length > MAX_PASSWORD_LENGTH) {
+    throw new AuthInputError(
+      'WEAK_PASSWORD',
+      400,
+      `password must be ${MIN_PASSWORD_LENGTH}-${MAX_PASSWORD_LENGTH} characters`,
+    );
+  }
+  if (
+    next === input.currentPassword ||
+    next === LEGACY_ADMIN_PASSWORD ||
+    next.toLowerCase() === user.username.toLowerCase()
+  ) {
+    throw new AuthInputError('WEAK_PASSWORD', 400, 'choose a different, non-default password');
+  }
+
+  setUserPasswordAndClearFlag(db, user.id, hashPassword(next));
+  const updated = getUserById(db, user.id)!;
+  const token = signSession(
+    { userId: updated.id, version: updated.session_version },
+    config.sessionSecret,
+    config.sessionTtlSec,
+  );
+  return {
+    user: toUserDto(updated),
+    token,
+    permissions: permissionsForRole(updated.role),
+    mustChangePassword: false,
   };
 }
 

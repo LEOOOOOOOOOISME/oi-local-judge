@@ -1,5 +1,10 @@
 import { test, expect } from '@playwright/test';
-import { startTestServer, type TestServer } from './server-harness';
+import {
+  E2E_ADMIN_PASSWORD,
+  E2E_ADMIN_USERNAME,
+  startTestServer,
+  type TestServer,
+} from './server-harness';
 
 /**
  * 浏览器验收：不依赖 Electron，直接启动真实 server，用 Chromium 走一遍
@@ -11,8 +16,8 @@ import { startTestServer, type TestServer } from './server-harness';
 
 const PORT = 8899;
 const BASE_URL = `http://127.0.0.1:${PORT}`;
-const ADMIN_USERNAME = 'admin';
-const ADMIN_PASSWORD = 'admin123';
+const ADMIN_USERNAME = E2E_ADMIN_USERNAME;
+const ADMIN_PASSWORD = E2E_ADMIN_PASSWORD;
 
 test.use({ browserName: 'chromium' });
 
