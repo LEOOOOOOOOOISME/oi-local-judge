@@ -3,7 +3,7 @@
 // Guards are preHandler factories so callers pass the database/config once:
 //   app.get('/api/me', { preHandler: requireAuth({ db, config }) }, handler)
 // No third-party cookie/plugin dependency is used.
-import type { preHandlerAsyncHookHandler } from 'fastify';
+import type { FastifyReply, preHandlerAsyncHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { getUserById, type Role, type UserRow } from '../storage/repos/users.js';
@@ -242,6 +242,31 @@ export function authenticateRequest(
   return { user, session };
 }
 
+/**
+ * Endpoints a user must still be able to reach while the forced password
+ * change is pending. Everything else is blocked by the guards below.
+ */
+const PASSWORD_CHANGE_ALLOWED_PATHS = new Set([
+  '/api/auth/change-password',
+  '/api/auth/logout',
+  '/api/me',
+]);
+
+function passwordChangePending(user: UserRow, url: string): boolean {
+  if (user.must_change_password !== 1) return false;
+  return !PASSWORD_CHANGE_ALLOWED_PATHS.has(url.split('?')[0]);
+}
+
+function rejectPasswordChangeRequired(reply: FastifyReply): unknown {
+  return reply.code(403).send({
+    ok: false,
+    error: {
+      code: 'PASSWORD_CHANGE_REQUIRED',
+      message: 'password change required before using this API',
+    },
+  });
+}
+
 export function requireAuth(options: AuthGuardOptions): preHandlerAsyncHookHandler {
   return async (request, reply) => {
     const authenticated = authenticateRequest(request, options);
@@ -250,6 +275,9 @@ export function requireAuth(options: AuthGuardOptions): preHandlerAsyncHookHandl
         ok: false,
         error: { code: 'UNAUTHORIZED', message: 'authentication required' },
       });
+    }
+    if (passwordChangePending(authenticated.user, request.url)) {
+      return rejectPasswordChangeRequired(reply);
     }
     request.user = authenticated.user;
     request.session = authenticated.session;
@@ -268,6 +296,9 @@ export function requireRole(
         ok: false,
         error: { code: 'UNAUTHORIZED', message: 'authentication required' },
       });
+    }
+    if (passwordChangePending(authenticated.user, request.url)) {
+      return rejectPasswordChangeRequired(reply);
     }
     if (!allowed.has(authenticated.user.role)) {
       return reply.code(403).send({

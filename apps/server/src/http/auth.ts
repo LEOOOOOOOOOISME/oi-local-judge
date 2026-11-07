@@ -10,7 +10,7 @@ import {
   serializeClearedSessionCookie,
   serializeSessionCookie,
 } from '../security/auth.js';
-import { AuthInputError, login, logout, me, register } from '../services/auth.js';
+import { AuthInputError, changePassword, login, logout, me, register } from '../services/auth.js';
 import { recordAudit } from '../storage/repos/audit.js';
 
 const loginFailures = new Map<string, number[]>();
@@ -103,7 +103,10 @@ export async function registerAuthRoutes(
 
     reply.header('set-cookie', serializeSessionCookie(result.token, config.sessionTtlSec));
     reply.header('cache-control', 'no-store');
-    return { ok: true, data: { user: result.user } };
+    return {
+      ok: true,
+      data: { user: result.user, mustChangePassword: result.mustChangePassword },
+    };
   });
 
   app.post('/api/auth/register', async (request, reply) => {
@@ -152,6 +155,60 @@ export async function registerAuthRoutes(
       throw err;
     }
   });
+
+  app.post(
+    '/api/auth/change-password',
+    { preHandler: requireAuth({ db, config }) },
+    async (request, reply) => {
+      const body = (request.body ?? {}) as {
+        currentPassword?: unknown;
+        newPassword?: unknown;
+      };
+      const currentPassword =
+        typeof body.currentPassword === 'string' ? body.currentPassword : '';
+      const newPassword = typeof body.newPassword === 'string' ? body.newPassword : '';
+      if (currentPassword === '' || newPassword === '') {
+        return reply.code(400).send({
+          ok: false,
+          error: {
+            code: 'INVALID_INPUT',
+            message: 'currentPassword and newPassword are required',
+          },
+        });
+      }
+      try {
+        const result = changePassword(db, config, request.user!.id, {
+          currentPassword,
+          newPassword,
+        });
+        recordAudit(db, {
+          actorId: result.user.id,
+          action: 'auth.password_changed',
+          targetType: 'user',
+          targetId: result.user.id,
+          ip: request.ip,
+        });
+        reply.header('set-cookie', serializeSessionCookie(result.token, config.sessionTtlSec));
+        reply.header('cache-control', 'no-store');
+        return {
+          ok: true,
+          data: {
+            user: result.user,
+            permissions: result.permissions,
+            mustChangePassword: false,
+          },
+        };
+      } catch (err) {
+        if (err instanceof AuthInputError) {
+          return reply.code(err.status).send({
+            ok: false,
+            error: { code: err.code, message: err.message },
+          });
+        }
+        throw err;
+      }
+    },
+  );
 
   app.post(
     '/api/auth/logout',

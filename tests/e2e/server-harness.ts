@@ -13,6 +13,10 @@ import { join } from 'node:path';
 
 export const SERVER_ENTRY = join(process.cwd(), 'apps/server/dist/cli.js');
 
+/** Fixed E2E administrator, created through OIJ_ADMIN_PASSWORD. */
+export const E2E_ADMIN_USERNAME = 'admin';
+export const E2E_ADMIN_PASSWORD = 'E2e-Admin-Pass-2026';
+
 export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -141,6 +145,8 @@ export async function startTestServer(options: StartTestServerOptions): Promise<
       OIJ_DATA_DIR: dataDir,
       OIJ_HOST: '127.0.0.1',
       OIJ_PORT: String(port),
+      OIJ_ADMIN_USERNAME: E2E_ADMIN_USERNAME,
+      OIJ_ADMIN_PASSWORD: E2E_ADMIN_PASSWORD,
       ...env,
     },
     stdio: ['ignore', 'pipe', 'pipe'],

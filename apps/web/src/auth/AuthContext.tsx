@@ -18,8 +18,9 @@ type AuthStatus = 'loading' | 'authenticated' | 'anonymous';
 interface AuthContextValue {
   user: User | null;
   status: AuthStatus;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<{ mustChangePassword: boolean }>;
   register: (username: string, password: string) => Promise<void>;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<void>;
   logout: () => Promise<void>;
 }
 
@@ -47,7 +48,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     apiGet<MeResult>('/api/me', { skipAuthRedirect: true })
       .then((data) => {
         if (cancelled) return;
-        setUser(data.user);
+        setUser({ ...data.user, mustChangePassword: data.mustChangePassword });
         setStatus('authenticated');
       })
       .catch(() => {
@@ -72,14 +73,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [queryClient, redirectToLogin],
   );
 
+  // 强制改密：除改密页外，任何已登录路由都先跳转到改密页。
+  useEffect(() => {
+    if (status !== 'authenticated' || !user?.mustChangePassword) return;
+    if (locationRef.current.pathname !== '/change-password') {
+      navigate('/change-password', { replace: true });
+    }
+  }, [status, user, navigate]);
+
   const login = useCallback(async (username: string, password: string) => {
     const data = await apiPost<LoginResult>(
       '/api/auth/login',
       { username, password },
       { skipAuthRedirect: true },
     );
-    setUser(data.user);
+    const mustChangePassword = data.mustChangePassword === true;
+    setUser({ ...data.user, mustChangePassword });
     setStatus('authenticated');
+    return { mustChangePassword };
   }, []);
 
   const register = useCallback(async (username: string, password: string) => {
@@ -88,7 +99,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       { username, password },
       { skipAuthRedirect: true },
     );
-    setUser(data.user);
+    setUser({ ...data.user, mustChangePassword: false });
+    setStatus('authenticated');
+  }, []);
+
+  const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
+    const data = await apiPost<LoginResult>(
+      '/api/auth/change-password',
+      { currentPassword, newPassword },
+      { skipAuthRedirect: true },
+    );
+    setUser({ ...data.user, mustChangePassword: false });
     setStatus('authenticated');
   }, []);
 
@@ -104,8 +125,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [queryClient]);
 
   const value = useMemo<AuthContextValue>(
-    () => ({ user, status, login, register, logout }),
-    [user, status, login, register, logout],
+    () => ({ user, status, login, register, changePassword, logout }),
+    [user, status, login, register, changePassword, logout],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

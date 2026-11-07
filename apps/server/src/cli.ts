@@ -36,7 +36,25 @@ try {
 
 const db = openDatabase(join(config.dataDir, 'db', 'oijudge.db'));
 migrate(db);
-ensureAdmin(db, config);
+// The bootstrap password is shown exactly once. Electron receives the same
+// record in the `ready` message and displays it in a dialog; a CLI deployment
+// only sees this banner (and the server log).
+const initialAdmin = ensureAdmin(db, config);
+if (initialAdmin?.reason === 'created' && initialAdmin.password) {
+  console.warn('');
+  console.warn('============================================================');
+  console.warn(' OiJudge 首次启动已生成管理员账号（密码只显示这一次）');
+  console.warn(` 用户名: ${initialAdmin.username}`);
+  console.warn(` 初始密码: ${initialAdmin.password}`);
+  console.warn(' 首次登录后必须立即修改密码。');
+  console.warn('============================================================');
+  console.warn('');
+} else if (initialAdmin?.reason === 'legacy-default') {
+  console.warn(
+    `[security] 管理员 ${initialAdmin.username} 仍在使用默认密码 admin123；` +
+      '已强制要求下次登录时修改密码。',
+  );
+}
 
 const hub = createHub();
 const app = await buildApp({ db, config, hub, logger: true });
@@ -86,7 +104,12 @@ const parentPort = (
     parentPort?: { postMessage(value: unknown): void };
   }
 ).parentPort;
-parentPort?.postMessage({ type: 'ready', port: actualPort });
+parentPort?.postMessage({
+  type: 'ready',
+  port: actualPort,
+  host,
+  ...(initialAdmin ? { initialAdmin } : {}),
+});
 
 async function shutdown() {
   backupScheduler.stop();

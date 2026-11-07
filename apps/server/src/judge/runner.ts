@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { JudgeCanceledError } from './cancellation.js';
+import { judgeChildEnv } from './isolation.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -148,6 +149,9 @@ export async function runSandboxed(o: RunOptions): Promise<RunResult> {
       maxBuffer: 1024 * 1024,
       encoding: 'utf8',
       signal: o.signal,
+      // Never leak the server environment (secrets/data dir) into contestant
+      // code; the native runner passes this environment to the sandboxed child.
+      env: judgeChildEnv(process.env, o.workdir),
     });
     stdout = toText(outcome.stdout);
   } catch (err) {

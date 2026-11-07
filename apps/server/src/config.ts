@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { cpus, homedir } from 'node:os';
 import { join } from 'node:path';
 import { readPersistedSettings } from './services/settings.js';
+import { loadOrCreateSessionSecret } from './services/secrets.js';
 
 export interface Config {
   host: string;
@@ -12,7 +13,8 @@ export interface Config {
   runnerPath: string;
   interactRunnerPath: string;
   adminUsername: string;
-  adminPassword: string;
+  /** Explicit bootstrap password only (OIJ_ADMIN_PASSWORD); never a default. */
+  adminPassword?: string;
   sessionSecret: string;
   sessionTtlSec: number;
 }
@@ -64,8 +66,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // The data directory must be known first so the settings file can be located.
   const persisted = readPersistedSettings(dataDir);
   const defaultConcurrency = Math.min(4, cpus().length);
+  // Loopback by default: a fresh install must not expose the OJ (and its data)
+  // to the LAN until the operator explicitly opts in with OIJ_HOST=0.0.0.0 or
+  // the installer's LAN switch.
+  const host = env.OIJ_HOST ?? persisted.host ?? '127.0.0.1';
   return {
-    host: env.OIJ_HOST ?? persisted.host ?? '0.0.0.0',
+    host,
     port: Number(env.OIJ_PORT ?? persisted.port ?? 8787),
     dataDir,
     judgeConcurrency: Math.max(
@@ -77,8 +83,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     interactRunnerPath:
       env.OIJ_INTERACT_RUNNER ?? join(process.cwd(), 'native/interact/out/ojinteract.exe'),
     adminUsername: env.OIJ_ADMIN_USERNAME ?? 'admin',
-    adminPassword: env.OIJ_ADMIN_PASSWORD ?? 'admin123',
-    sessionSecret: env.OIJ_SESSION_SECRET ?? 'dev-only-change-me',
+    adminPassword: env.OIJ_ADMIN_PASSWORD,
+    // Generated/persisted on first start; the legacy default is migrated.
+    sessionSecret: loadOrCreateSessionSecret(dataDir, env).secret,
     sessionTtlSec: Number(env.OIJ_SESSION_TTL ?? persisted.sessionTtlSec ?? 8 * 3600),
   };
 }

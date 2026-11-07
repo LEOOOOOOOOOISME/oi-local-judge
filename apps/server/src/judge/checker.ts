@@ -10,6 +10,7 @@
 //
 // Timeouts and crashes map to SE; captured output is truncated to 64 KiB.
 import { spawn } from 'node:child_process';
+import { judgeChildEnv } from './isolation.js';
 import { randomUUID } from 'node:crypto';
 import { readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -116,6 +117,7 @@ function runProcess(
     try {
       child = spawn(checker, args, {
         cwd: workdir,
+        env: judgeChildEnv(process.env, workdir),
         windowsHide: true,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
