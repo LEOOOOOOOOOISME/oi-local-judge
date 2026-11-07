@@ -389,6 +389,17 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'batch_jobs', 'meta_json', "TEXT NOT NULL DEFAULT '{}'");
   ensureColumn(db, 'batch_jobs', 'created_by', 'INTEGER');
   ensureColumn(db, 'batch_jobs', 'upload_id', 'TEXT');
+  // Persisted progress/phase so a page refresh or process restart can restore
+  // the batch monitor without relying on in-memory state.
+  ensureColumn(db, 'batch_jobs', 'phase', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, 'batch_jobs', 'started_at', 'INTEGER');
+  ensureColumn(db, 'batch_jobs', 'updated_at', 'INTEGER');
+  ensureColumn(db, 'batch_jobs', 'heartbeat_at', 'INTEGER');
+  ensureColumn(db, 'batch_jobs', 'eta_seconds', 'INTEGER');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_batch_jobs_list ON batch_jobs(contest_id, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_batch_jobs_status ON batch_jobs(status, id DESC);
+  `);
   ensureColumn(db, 'contest_participants', 'hidden_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'registered_at', 'INTEGER');
   ensureColumn(db, 'contest_participants', 'checked_in_at', 'INTEGER');
