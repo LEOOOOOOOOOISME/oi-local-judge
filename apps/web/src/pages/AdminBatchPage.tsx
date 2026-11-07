@@ -16,6 +16,7 @@ import {
 } from 'antd';
 import type { TableColumnsType } from 'antd';
 import {
+  DeleteOutlined,
   DownloadOutlined,
   FileExcelOutlined,
   Html5Outlined,
@@ -25,8 +26,15 @@ import {
   StopOutlined,
   TableOutlined,
 } from '@ant-design/icons';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { apiGet, apiPost, apiUploadWithProgress, downloadApiFile } from '../api/client';
+import {
+  apiDelete,
+  apiGet,
+  apiPost,
+  apiUploadWithProgress,
+  downloadApiFile,
+} from '../api/client';
 import type {
   AdminProblemPickerItem,
   BatchAsyncRunResult,
@@ -35,6 +43,8 @@ import type {
   BatchImportStatus,
   BatchItemStatus,
   BatchJob,
+  BatchJobSummary,
+  BatchJobsPage,
   BatchPreview,
   BatchResultItem,
   BatchUploadStreamResult,
@@ -47,11 +57,15 @@ import {
   BATCH_PROBLEM_SCOPE_OPTIONS,
   applyOrderedMapping,
   autoProblemId,
+  batchPhaseLabel,
   batchStatusColor,
   batchStatusLabel,
   describeBatchError,
   estimateSubmissions,
+  formatEta,
+  formatHeartbeat,
   isBatchActive,
+  isBatchTerminal,
   levelExample,
   MAX_BATCH_ZIP_BYTES,
   problemScope,
@@ -179,6 +193,10 @@ function FailureList({
 
 export function AdminBatchPage() {
   const { message, modal } = App.useApp();
+  const navigate = useNavigate();
+  const { jobId: routeJobIdParam } = useParams<{ jobId?: string }>();
+  const routeJobId = Number(routeJobIdParam);
+  const hasRouteJob = Number.isInteger(routeJobId) && routeJobId > 0;
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -199,11 +217,24 @@ export function AdminBatchPage() {
   const [orderedSelection, setOrderedSelection] = useState<number[]>([]);
   const [starting, setStarting] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
-  const [jobId, setJobId] = useState<number | null>(null);
+  const [jobId, setJobId] = useState<number | null>(hasRouteJob ? routeJobId : null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_PAGE_SIZE);
   const [exportingFormat, setExportingFormat] = useState<BatchExportFormat | null>(null);
   const [canceling, setCanceling] = useState(false);
+  const [deleting, setDeleting] = useState<number | null>(null);
+  // Client-side failure trend: one sample per aggregate poll while watching a
+  // job. The server keeps counts, the UI only needs a short sparkline.
+  const [failureSamples, setFailureSamples] = useState<number[]>([]);
+
+  // Deep link / refresh: /admin/batch/:jobId restores the same monitor.
+  useEffect(() => {
+    if (hasRouteJob) {
+      setJobId(routeJobId);
+      setPage(1);
+      setFailureSamples([]);
+    }
+  }, [hasRouteJob, routeJobId]);
 
   // 全量题目目录用于映射校验/数字自动匹配；选项列表按后端 scope 查询。
   const problemsQuery = useQuery({
@@ -243,12 +274,11 @@ export function AdminBatchPage() {
     staleTime: 5 * 60_000,
   });
 
-  const jobQuery = useQuery({
-    queryKey: ['batch', jobId, page, pageSize],
-    queryFn: () =>
-      apiGet<BatchJob>(
-        `/api/admin/batch/${jobId}?offset=${(page - 1) * pageSize}&limit=${pageSize}`,
-      ),
+  // Every 1s poll only reads aggregate counters; batch item details are fetched
+  // separately and only when those counters change.
+  const jobSummaryQuery = useQuery({
+    queryKey: ['batch-job-summary', jobId],
+    queryFn: () => apiGet<BatchJobSummary>(`/api/admin/batch/jobs/${jobId}`),
     enabled: jobId !== null,
     retry: false,
     refetchInterval: (query) => {
@@ -257,6 +287,34 @@ export function AdminBatchPage() {
       return isBatchActive(data.status) ? 1000 : false;
     },
   });
+  const jobSummary = jobSummaryQuery.data ?? null;
+  const jobQuery = useQuery({
+    queryKey: [
+      'batch',
+      jobId,
+      page,
+      pageSize,
+      jobSummary?.status ?? '',
+      jobSummary?.judged ?? -1,
+      jobSummary?.imported ?? -1,
+      jobSummary?.failed ?? -1,
+    ],
+    queryFn: () =>
+      apiGet<BatchJob>(
+        `/api/admin/batch/${jobId}?offset=${(page - 1) * pageSize}&limit=${pageSize}`,
+      ),
+    enabled: jobId !== null,
+    retry: false,
+    refetchInterval: false,
+  });
+  const recentJobsQuery = useQuery({
+    queryKey: ['batch-jobs', 'recent'],
+    queryFn: () =>
+      apiGet<BatchJobsPage>('/api/admin/batch/jobs?offset=0&limit=20'),
+    retry: false,
+    refetchInterval: 1000,
+  });
+  const recentJobs = recentJobsQuery.data?.items ?? [];
 
   const problems = problemsQuery.data ?? [];
   const problemsById = useMemo(
@@ -340,7 +398,15 @@ export function AdminBatchPage() {
   }, [preview, knownProblemIds]);
 
   const job = jobQuery.data ?? null;
-  const jobActive = job !== null && isBatchActive(job.status);
+  const jobStatus = jobSummary?.status ?? job?.status ?? null;
+  const jobPhase = jobSummary?.phase ?? job?.phase ?? null;
+  const jobActive = jobStatus !== null && isBatchActive(jobStatus);
+  const summaryTotal = jobSummary?.total ?? job?.total ?? 0;
+
+  useEffect(() => {
+    if (!jobSummary) return;
+    setFailureSamples((previous) => [...previous, jobSummary.failed].slice(-30));
+  }, [jobSummary?.id, jobSummary?.failed]);
 
   const canStart =
     upload !== null &&
@@ -501,6 +567,8 @@ export function AdminBatchPage() {
       );
       setJobId(result.jobId);
       setPage(1);
+      setFailureSamples([]);
+      navigate(`/admin/batch/${result.jobId}`);
       message.success('已提交异步批量任务，正在后台导入并评测');
     } catch (error) {
       const description = describeBatchError(error);
@@ -512,14 +580,19 @@ export function AdminBatchPage() {
   };
 
   const cancelBatch = async () => {
-    if (!job) return;
+    const id = jobSummary?.id ?? job?.id;
+    if (!id) return;
     setCanceling(true);
     try {
       await apiPost<{ id: number; status: string; canceled: number }>(
-        `/api/admin/batch/${job.id}/cancel`,
+        `/api/admin/batch/${id}/cancel`,
       );
       message.success('已请求取消批次');
-      await jobQuery.refetch();
+      await Promise.all([
+        jobSummaryQuery.refetch(),
+        jobQuery.refetch(),
+        recentJobsQuery.refetch(),
+      ]);
     } catch (error) {
       message.error(describeBatchError(error));
     } finally {
@@ -528,9 +601,10 @@ export function AdminBatchPage() {
   };
 
   const confirmCancel = () => {
-    if (!job) return;
+    const id = jobSummary?.id ?? job?.id;
+    if (!id) return;
     modal.confirm({
-      title: `取消批次 #${job.id}？`,
+      title: `取消批次 #${id}？`,
       content: '已导入的提交会尽量取消并保留记录；取消后可以重新上传运行。',
       okText: '取消批次',
       okButtonProps: { danger: true },
@@ -539,14 +613,45 @@ export function AdminBatchPage() {
     });
   };
 
+  const deleteBatch = async (id: number) => {
+    setDeleting(id);
+    try {
+      await apiDelete<{ id: number; deleted: boolean }>(`/api/admin/batch/jobs/${id}`);
+      message.success(`任务 #${id} 已删除（提交记录保留）`);
+      if (jobId === id) {
+        setJobId(null);
+        setFailureSamples([]);
+        navigate('/admin/batch');
+      }
+      await recentJobsQuery.refetch();
+    } catch (error) {
+      message.error(describeBatchError(error));
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const confirmDelete = (id: number, status: string) => {
+    if (!isBatchTerminal(status)) return;
+    modal.confirm({
+      title: `删除任务 #${id}？`,
+      content: '只删除批次任务、预览记录与导入明细；已产生的提交和题目不会删除。',
+      okText: '删除任务',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => deleteBatch(id),
+    });
+  };
+
   const exportBatch = async (format: BatchExportFormat) => {
-    if (!job || job.total === 0) return;
+    const id = jobSummary?.id ?? job?.id;
+    if (!id || summaryTotal === 0) return;
     setExportingFormat(format);
     try {
       const request = EXPORT_REQUEST[format];
       await downloadApiFile(
-        `/api/admin/batch/${job.id}/export?${request.query}`,
-        `batch-${job.id}.${request.extension}`,
+        `/api/admin/batch/${id}/export?${request.query}`,
+        `batch-${id}.${request.extension}`,
       );
       message.success(
         format === 'matrix'
@@ -648,6 +753,79 @@ export function AdminBatchPage() {
     },
   ];
 
+  const recentJobColumns: TableColumnsType<BatchJobSummary> = [
+    { title: 'ID', dataIndex: 'id', width: 70 },
+    {
+      title: '阶段',
+      dataIndex: 'phase',
+      width: 140,
+      render: (_value, item) => (
+        <Space size={4}>
+          <Tag color={batchStatusColor(item.status)}>{batchStatusLabel(item.status)}</Tag>
+          <span className="muted">{batchPhaseLabel(item.phase)}</span>
+        </Space>
+      ),
+    },
+    {
+      title: '进度',
+      dataIndex: 'percent',
+      width: 150,
+      render: (value: number) => <Progress percent={value} size="small" />,
+    },
+    {
+      title: '明细',
+      key: 'counts',
+      render: (_value, item) => (
+        <span className="muted">
+          导入 {item.imported}/{item.total} · 评测 {item.judged}/{item.imported} · 失败{' '}
+          {item.failed}
+        </span>
+      ),
+    },
+    {
+      title: 'ETA',
+      dataIndex: 'eta',
+      width: 100,
+      render: (value: number | null) => <span className="muted">{formatEta(value)}</span>,
+    },
+    {
+      title: '心跳',
+      dataIndex: 'heartbeat',
+      width: 100,
+      render: (value: number | null) => (
+        <span className="muted">{formatHeartbeat(value)}</span>
+      ),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 150,
+      render: (_value, item) => (
+        <Space size={4}>
+          <Button
+            size="small"
+            onClick={() => {
+              setJobId(item.id);
+              setPage(1);
+              setFailureSamples([]);
+              navigate(`/admin/batch/${item.id}`);
+            }}
+          >
+            查看
+          </Button>
+          <Button
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            disabled={!item.canDelete}
+            loading={deleting === item.id}
+            onClick={() => confirmDelete(item.id, item.status)}
+          />
+        </Space>
+      ),
+    },
+  ];
+
   const treeRows = useMemo(() => treeSampleRows(preview?.treeSample ?? []), [preview]);
   const example = useMemo(
     () =>
@@ -656,17 +834,25 @@ export function AdminBatchPage() {
         : null,
     [preview],
   );
-  const importProgress = job?.progress?.import ?? null;
-  const progressPercent =
-    job?.progress?.percent ?? (job?.status === 'finished' ? 100 : 0);
+  const importProgress =
+    jobSummary?.phase === 'importing' ? (job?.progress?.import ?? null) : null;
+  const progressPercent = jobSummary?.percent ?? 0;
   const progressStatus =
-    job?.status === 'failed'
+    jobStatus === 'failed'
       ? 'exception'
-      : job?.status === 'finished'
+      : jobStatus === 'finished'
         ? 'success'
         : jobActive
           ? 'active'
           : 'normal';
+  const trendMax = Math.max(1, ...failureSamples);
+  const trendPoints = failureSamples
+    .map((value, index) => {
+      const x = failureSamples.length <= 1 ? 60 : 2 + (index / (failureSamples.length - 1)) * 116;
+      const y = 26 - (value / trendMax) * 22;
+      return `${x.toFixed(1)},${y.toFixed(1)}`;
+    })
+    .join(' ');
 
   const scopeControl = (
     <Segmented
@@ -1333,7 +1519,10 @@ export function AdminBatchPage() {
         title={
           <Space>
             4. 运行结果
-            {job ? <Tag color={batchStatusColor(job.status)}>{batchStatusLabel(job.status)}</Tag> : null}
+            {jobStatus ? (
+              <Tag color={batchStatusColor(jobStatus)}>{batchStatusLabel(jobStatus)}</Tag>
+            ) : null}
+            {jobPhase ? <Tag>{batchPhaseLabel(jobPhase)}</Tag> : null}
           </Space>
         }
         extra={
@@ -1343,7 +1532,7 @@ export function AdminBatchPage() {
               danger
               icon={<StopOutlined />}
               loading={canceling}
-              disabled={!job || !jobActive}
+              disabled={!jobId || !jobActive}
               onClick={confirmCancel}
             >
               取消批次
@@ -1352,7 +1541,7 @@ export function AdminBatchPage() {
               icon={<DownloadOutlined />}
               loading={exportingFormat === 'csv'}
               disabled={
-                !job || jobActive || job.total === 0 || exportingFormat !== null
+                !jobId || jobActive || summaryTotal === 0 || exportingFormat !== null
               }
               onClick={() => void exportBatch('csv')}
             >
@@ -1362,7 +1551,7 @@ export function AdminBatchPage() {
               icon={<TableOutlined />}
               loading={exportingFormat === 'matrix'}
               disabled={
-                !job || jobActive || job.total === 0 || exportingFormat !== null
+                !jobId || jobActive || summaryTotal === 0 || exportingFormat !== null
               }
               onClick={() => void exportBatch('matrix')}
             >
@@ -1372,7 +1561,7 @@ export function AdminBatchPage() {
               icon={<FileExcelOutlined />}
               loading={exportingFormat === 'xlsx'}
               disabled={
-                !job || jobActive || job.total === 0 || exportingFormat !== null
+                !jobId || jobActive || summaryTotal === 0 || exportingFormat !== null
               }
               onClick={() => void exportBatch('xlsx')}
             >
@@ -1382,12 +1571,34 @@ export function AdminBatchPage() {
               icon={<Html5Outlined />}
               loading={exportingFormat === 'html'}
               disabled={
-                !job || jobActive || job.total === 0 || exportingFormat !== null
+                !jobId || jobActive || summaryTotal === 0 || exportingFormat !== null
               }
               onClick={() => void exportBatch('html')}
             >
               导出 HTML
             </Button>
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              loading={deleting === jobId}
+              disabled={!jobSummary?.canDelete || deleting !== null}
+              onClick={() =>
+                jobSummary && confirmDelete(jobSummary.id, jobSummary.status)
+              }
+            >
+              删除任务
+            </Button>
+            {hasRouteJob ? (
+              <Button
+                onClick={() => {
+                  setJobId(null);
+                  setFailureSamples([]);
+                  navigate('/admin/batch');
+                }}
+              >
+                新建任务
+              </Button>
+            ) : null}
           </Space>
         }
       >
@@ -1396,35 +1607,47 @@ export function AdminBatchPage() {
             image={Empty.PRESENTED_IMAGE_SIMPLE}
             description="完成题目映射并开始评测后，这里显示导入进度、分页结果和失败明细。"
           />
-        ) : jobQuery.isPending ? (
-          <PageLoading tip="正在加载批次进度…" />
-        ) : jobQuery.isError ? (
-          <ErrorResult error={jobQuery.error} onRetry={() => void jobQuery.refetch()} />
-        ) : job ? (
+        ) : jobSummaryQuery.isPending ? (
+          <PageLoading tip="正在恢复批次进度…" />
+        ) : jobSummaryQuery.isError ? (
+          <ErrorResult
+            error={jobSummaryQuery.error}
+            onRetry={() => void jobSummaryQuery.refetch()}
+          />
+        ) : jobSummary ? (
           <div>
             <div className="batch-result-meta muted">
-              {job.multiProblem
-                ? `批次 #${job.id} · 多题 · 学生层级 ${job.studentLevel}`
-                : `批次 #${job.id} · 题目 #${job.problemId} · 层级 ${job.studentLevel}`}
-              {job.uploadId ? ` · upload ${job.uploadId.slice(0, 8)}…` : ''}
-              {` · 状态 ${batchStatusLabel(job.status)}`}
+              批次 #{jobSummary.id}
+              {job?.multiProblem
+                ? ` · 多题 · 学生层级 ${job.studentLevel}`
+                : job
+                  ? ` · 题目 #${job.problemId} · 层级 ${job.studentLevel}`
+                  : ''}
+              {jobSummary.uploadId ? ` · upload ${jobSummary.uploadId.slice(0, 8)}…` : ''}
+              {` · 阶段 ${batchPhaseLabel(jobSummary.phase)}`}
+              {` · 心跳 ${formatHeartbeat(jobSummary.heartbeat)}`}
             </div>
+
+            {jobSummary.error ? (
+              <Alert
+                className="batch-alert"
+                type="error"
+                showIcon
+                message={`批次失败：${jobSummary.error.code}`}
+                description={jobSummary.error.message || '导入过程中出现整批级错误'}
+              />
+            ) : null}
 
             <div className="batch-progress">
               <div className="batch-progress-head">
                 <span>
-                  {job.status === 'importing'
-                    ? '导入进度'
-                    : job.status === 'finished'
-                      ? '评测完成'
-                      : isBatchActive(job.status)
-                        ? '评测进度'
-                        : '批次进度'}
+                  阶段：{batchPhaseLabel(jobSummary.phase)}
+                  {jobSummary.phase === 'uploaded' ? '（单飞队列中）' : ''}
                 </span>
                 <span className="muted">
-                  {job.status === 'importing' && importProgress
-                    ? `已处理 ${importProgress.processed} / ${importProgress.totalCandidates} 条源码`
-                    : `已评测 ${job.judgedCount} / ${job.importedCount}`}
+                  {jobSummary.phase === 'importing' && importProgress
+                    ? `已处理 ${importProgress.processed} / ${importProgress.totalCandidates} 条源码 · 已导入 ${jobSummary.imported}/${jobSummary.total}`
+                    : `已评测 ${jobSummary.judged} / ${jobSummary.imported} · 等待评测 ${jobSummary.queued}`}
                 </span>
               </div>
               <Progress
@@ -1432,9 +1655,14 @@ export function AdminBatchPage() {
                 status={progressStatus}
                 strokeWidth={10}
               />
+              <div className="muted batch-eta">
+                预计剩余 {formatEta(jobSummary.eta)} · 心跳{' '}
+                {formatHeartbeat(jobSummary.heartbeat)} · 更新{' '}
+                {formatHeartbeat(jobSummary.updatedAt)}
+              </div>
             </div>
 
-            {job.status === 'failed' ? (
+            {jobStatus === 'failed' ? (
               <Alert
                 className="batch-alert"
                 type="error"
@@ -1442,7 +1670,7 @@ export function AdminBatchPage() {
                 message="批次失败"
                 description="导入过程中出现整批级错误（如 zip 损坏、服务重启）。请重新上传后运行，已写入的逐条失败记录仍可在下方查看。"
               />
-            ) : job.status === 'canceled' ? (
+            ) : jobStatus === 'canceled' ? (
               <Alert
                 className="batch-alert"
                 type="warning"
@@ -1454,59 +1682,75 @@ export function AdminBatchPage() {
 
             <div className="batch-summary">
               <div className="batch-stat">
-                <span className="batch-stat-value">{job.acCount}</span>
-                <span className="muted">{job.multiProblem ? 'AC 数量' : 'AC 人数'}</span>
+                <span className="batch-stat-value">{job?.acCount ?? 0}</span>
+                <span className="muted">{job?.multiProblem ? 'AC 数量' : 'AC 人数'}</span>
               </div>
               <div className="batch-stat">
-                <span className="batch-stat-value">{job.total}</span>
+                <span className="batch-stat-value">{jobSummary.total}</span>
                 <span className="muted">总条目</span>
               </div>
               <div className="batch-stat">
-                <span className="batch-stat-value">{job.importedCount}</span>
+                <span className="batch-stat-value">{jobSummary.imported}</span>
                 <span className="muted">成功导入</span>
               </div>
               <div className="batch-stat">
-                <span className="batch-stat-value">{job.skippedCount}</span>
+                <span className="batch-stat-value">{jobSummary.queued}</span>
+                <span className="muted">等待评测</span>
+              </div>
+              <div className="batch-stat">
+                <span className="batch-stat-value">{jobSummary.skipped}</span>
                 <span className="muted">跳过</span>
               </div>
               <div className="batch-stat">
-                <span className="batch-stat-value">{job.errorCount}</span>
+                <span className="batch-stat-value">{jobSummary.failed}</span>
                 <span className="muted">导入失败</span>
               </div>
-              {job.multiProblem ? (
-                <>
-                  <div className="batch-stat">
-                    <span className="batch-stat-value">{job.distinctStudentCount}</span>
-                    <span className="muted">学生数</span>
-                  </div>
-                  <div className="batch-stat">
-                    <span className="batch-stat-value">{job.distinctProblemCount}</span>
-                    <span className="muted">题目数</span>
-                  </div>
-                </>
-              ) : null}
               <div className="batch-stat">
-                <span className="batch-stat-value">{job.averageScore.toFixed(1)}</span>
+                <span className="batch-stat-value">
+                  {(job?.averageScore ?? 0).toFixed(1)}
+                </span>
                 <span className="muted">平均分</span>
               </div>
             </div>
 
-            {job.skippedCount > 0 ? (
+            <div className="batch-trend">
+              <span className="muted">
+                失败趋势：最近 {failureSamples.length} 次采样
+              </span>
+              <svg width="120" height="28" role="img" aria-label="失败趋势">
+                <line x1="2" y1="26" x2="118" y2="26" stroke="#d8dee4" strokeWidth="1" />
+                {trendPoints ? (
+                  <polyline
+                    points={trendPoints}
+                    fill="none"
+                    stroke="#cf222e"
+                    strokeWidth="2"
+                  />
+                ) : null}
+              </svg>
+              <span className="muted">当前 {jobSummary.failed} 条失败</span>
+            </div>
+
+            {job && job.skippedCount > 0 ? (
               <Alert
                 className="batch-alert"
                 type="warning"
                 showIcon
                 message={`跳过 ${job.skippedCount} 个无效学生文件夹`}
-                description={<FailureList items={job.skipped} total={job.skippedCount} tone="warning" />}
+                description={
+                  <FailureList items={job.skipped} total={job.skippedCount} tone="warning" />
+                }
               />
             ) : null}
-            {job.errorCount > 0 ? (
+            {job && job.errorCount > 0 ? (
               <Alert
                 className="batch-alert"
                 type="error"
                 showIcon
                 message={`${job.errorCount} 条导入失败`}
-                description={<FailureList items={job.errors} total={job.errorCount} tone="error" />}
+                description={
+                  <FailureList items={job.errors} total={job.errorCount} tone="error" />
+                }
               />
             ) : null}
 
@@ -1514,12 +1758,13 @@ export function AdminBatchPage() {
               className="oij-table batch-result-table"
               rowKey={(item) => item.id}
               size="small"
+              loading={jobQuery.isPending || jobQuery.isFetching}
               columns={columns}
-              dataSource={job.items}
+              dataSource={job?.items ?? []}
               pagination={{
                 current: page,
                 pageSize,
-                total: job.total,
+                total: jobSummary.total,
                 showSizeChanger: true,
                 pageSizeOptions: PAGE_SIZE_OPTIONS,
                 showTotal: (total, range) => `${range[0]}-${range[1]} / 共 ${total} 条`,
@@ -1536,6 +1781,23 @@ export function AdminBatchPage() {
             />
           </div>
         ) : null}
+      </Card>
+
+      <Card
+        className="oij-card batch-section"
+        title="最近任务"
+        extra={<span className="muted">永久保留 · 仅终态可删除</span>}
+      >
+        <Table<BatchJobSummary>
+          rowKey="id"
+          size="small"
+          columns={recentJobColumns}
+          dataSource={recentJobs}
+          loading={recentJobsQuery.isPending}
+          pagination={false}
+          scroll={{ x: 900 }}
+          locale={{ emptyText: '暂无批量任务' }}
+        />
       </Card>
     </div>
   );

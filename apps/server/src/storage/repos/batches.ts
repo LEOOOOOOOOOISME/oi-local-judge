@@ -14,7 +14,28 @@ export interface BatchJobRow {
   created_by: number | null;
   /** Upload this job was created from (streaming async imports); NULL for legacy runs. */
   upload_id: string | null;
+  /** uploaded / parsing / importing / queued / judging / finished / failed / canceled. */
+  phase: string;
+  started_at: number | null;
+  updated_at: number | null;
+  heartbeat_at: number | null;
+  eta_seconds: number | null;
 }
+
+/** Aggregate counters used by the job list/monitor without loading batch items. */
+export interface BatchJobCounts {
+  total: number;
+  imported: number;
+  skipped: number;
+  failed: number;
+  judged: number;
+  queued: number;
+}
+
+export interface BatchJobListRow extends BatchJobRow, BatchJobCounts {}
+
+/** Terminal statuses that may be deleted from the monitor. */
+export const BATCH_TERMINAL_STATUSES = new Set(['finished', 'failed', 'canceled']);
 
 export type BatchItemImportStatus = 'imported' | 'skipped' | 'error';
 
@@ -57,20 +78,28 @@ export function createBatchJob(
     meta?: unknown;
     createdBy?: number | null;
     status?: string;
+    phase?: string;
     uploadId?: string | null;
+    createdAt?: number;
+    startedAt?: number | null;
+    heartbeatAt?: number | null;
+    etaSeconds?: number | null;
   },
 ): number {
+  const now = Date.now();
+  const createdAt = input.createdAt ?? now;
   const result = db
     .prepare(
       `INSERT INTO batch_jobs
          (problem_id, student_level, created_at, contest_id, mode, problem_level,
-          problem_map_json, meta_json, created_by, status, upload_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          problem_map_json, meta_json, created_by, status, upload_id, phase,
+          started_at, updated_at, heartbeat_at, eta_seconds)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.problemId,
       input.studentLevel,
-      Date.now(),
+      createdAt,
       input.contestId ?? null,
       input.mode ?? null,
       input.problemLevel ?? null,
@@ -79,8 +108,63 @@ export function createBatchJob(
       input.createdBy ?? null,
       input.status ?? 'running',
       input.uploadId ?? null,
+      input.phase ?? '',
+      input.startedAt ?? null,
+      now,
+      input.heartbeatAt ?? now,
+      input.etaSeconds ?? null,
     );
   return Number(result.lastInsertRowid);
+}
+
+export function updateBatchJob(
+  db: DatabaseSync,
+  id: number,
+  patch: {
+    status?: string;
+    mode?: string | null;
+    meta?: unknown;
+    phase?: string;
+    startedAt?: number | null;
+    heartbeatAt?: number | null;
+    etaSeconds?: number | null;
+    updatedAt?: number | null;
+  },
+): void {
+  const sets: string[] = [];
+  const values: Array<string | number | null> = [];
+  if (patch.status !== undefined) {
+    sets.push('status = ?');
+    values.push(patch.status);
+  }
+  if (patch.mode !== undefined) {
+    sets.push('mode = ?');
+    values.push(patch.mode);
+  }
+  if (patch.meta !== undefined) {
+    sets.push('meta_json = ?');
+    values.push(JSON.stringify(patch.meta));
+  }
+  if (patch.phase !== undefined) {
+    sets.push('phase = ?');
+    values.push(patch.phase);
+  }
+  if (patch.startedAt !== undefined) {
+    sets.push('started_at = ?');
+    values.push(patch.startedAt);
+  }
+  if (patch.heartbeatAt !== undefined) {
+    sets.push('heartbeat_at = ?');
+    values.push(patch.heartbeatAt);
+  }
+  if (patch.etaSeconds !== undefined) {
+    sets.push('eta_seconds = ?');
+    values.push(patch.etaSeconds);
+  }
+  sets.push('updated_at = ?');
+  values.push(patch.updatedAt ?? Date.now());
+  if (sets.length === 1) return;
+  db.prepare(`UPDATE batch_jobs SET ${sets.join(', ')} WHERE id = ?`).run(...values, id);
 }
 
 export function addBatchItem(
@@ -113,29 +197,6 @@ export function addBatchItem(
     input.errorCode ?? null,
     input.errorMessage ?? null,
   );
-}
-
-export function updateBatchJob(
-  db: DatabaseSync,
-  id: number,
-  patch: { status?: string; mode?: string | null; meta?: unknown },
-): void {
-  const sets: string[] = [];
-  const values: Array<string | null> = [];
-  if (patch.status !== undefined) {
-    sets.push('status = ?');
-    values.push(patch.status);
-  }
-  if (patch.mode !== undefined) {
-    sets.push('mode = ?');
-    values.push(patch.mode);
-  }
-  if (patch.meta !== undefined) {
-    sets.push('meta_json = ?');
-    values.push(JSON.stringify(patch.meta));
-  }
-  if (sets.length === 0) return;
-  db.prepare(`UPDATE batch_jobs SET ${sets.join(', ')} WHERE id = ?`).run(...values, id);
 }
 
 export function getBatchJob(db: DatabaseSync, id: number): BatchJobRow | null {
@@ -264,5 +325,136 @@ export function listBatchItemFailures(
 }
 
 export function setBatchStatus(db: DatabaseSync, id: number, status: string): void {
-  db.prepare('UPDATE batch_jobs SET status = ? WHERE id = ?').run(status, id);
+  db.prepare('UPDATE batch_jobs SET status = ?, updated_at = ? WHERE id = ?').run(
+    status,
+    Date.now(),
+    id,
+  );
+}
+
+const BATCH_JOB_COUNTS_SELECT = `
+  (SELECT COUNT(*) FROM batch_items bi WHERE bi.batch_id = bj.id) AS item_total,
+  (SELECT COUNT(*) FROM batch_items bi
+     WHERE bi.batch_id = bj.id
+       AND (bi.status = 'imported' OR (bi.status IS NULL AND bi.submission_id IS NOT NULL))) AS item_imported,
+  (SELECT COUNT(*) FROM batch_items bi
+     WHERE bi.batch_id = bj.id AND bi.status = 'skipped') AS item_skipped,
+  (SELECT COUNT(*) FROM batch_items bi
+     WHERE bi.batch_id = bj.id AND bi.status = 'error') AS item_failed,
+  (SELECT COUNT(*) FROM batch_items bi
+     JOIN submissions s ON s.id = bi.submission_id
+     WHERE bi.batch_id = bj.id AND s.status IN ('finished', 'failed', 'canceled')) AS item_judged,
+  (SELECT COUNT(*) FROM batch_items bi
+     JOIN submissions s ON s.id = bi.submission_id
+     WHERE bi.batch_id = bj.id AND s.status IN ('queued', 'compiling', 'running')) AS item_queued
+`;
+
+interface BatchJobSqlRow extends BatchJobRow {
+  item_total: number;
+  item_imported: number;
+  item_skipped: number;
+  item_failed: number;
+  item_judged: number;
+  item_queued: number;
+}
+
+function mapJobListRow(row: BatchJobSqlRow): BatchJobListRow {
+  return {
+    ...row,
+    total: Number(row.item_total),
+    imported: Number(row.item_imported),
+    skipped: Number(row.item_skipped),
+    failed: Number(row.item_failed),
+    judged: Number(row.item_judged),
+    queued: Number(row.item_queued),
+  };
+}
+
+/**
+ * Standalone batch jobs for the monitor, newest first. Counts come from
+ * correlated aggregate subqueries so a 5000-item batch never loads its items.
+ * Contest-owned batches are excluded: the contest console owns their lifecycle.
+ */
+export function listBatchJobsPage(
+  db: DatabaseSync,
+  offset: number,
+  limit: number,
+  status?: string | null,
+): { items: BatchJobListRow[]; total: number } {
+  const where = ['bj.contest_id IS NULL'];
+  const params: Array<string | number> = [];
+  if (status) {
+    where.push('bj.status = ?');
+    params.push(status);
+  }
+  const clause = where.join(' AND ');
+  const rows = db
+    .prepare(
+      `SELECT bj.*, ${BATCH_JOB_COUNTS_SELECT}
+         FROM batch_jobs bj
+        WHERE ${clause}
+        ORDER BY bj.id DESC
+        LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as unknown as BatchJobSqlRow[];
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) AS n FROM batch_jobs bj WHERE ${clause}`)
+    .get(...params) as unknown as { n: number };
+  return { items: rows.map(mapJobListRow), total: Number(totalRow.n) };
+}
+
+/** One aggregate row for the job monitor; never returns batch item details. */
+export function getBatchJobWithCounts(
+  db: DatabaseSync,
+  id: number,
+): BatchJobListRow | null {
+  const row = db
+    .prepare(
+      `SELECT bj.*, ${BATCH_JOB_COUNTS_SELECT}
+         FROM batch_jobs bj
+        WHERE bj.id = ?`,
+    )
+    .get(id) as unknown as BatchJobSqlRow | undefined;
+  return row ? mapJobListRow(row) : null;
+}
+
+/** Imports waiting for the single-flight importer, oldest first. */
+export function listPendingImportJobs(db: DatabaseSync): BatchJobRow[] {
+  return db
+    .prepare(
+      `SELECT * FROM batch_jobs
+        WHERE mode = 'async' AND status = 'queued' AND phase = 'uploaded'
+          AND upload_id IS NOT NULL
+        ORDER BY id`,
+    )
+    .all() as unknown as BatchJobRow[];
+}
+
+/** Any import currently holding the single-flight importer slot. */
+export function findImportingBatchJob(db: DatabaseSync): BatchJobRow | null {
+  return (
+    (db
+      .prepare(
+        "SELECT * FROM batch_jobs WHERE mode = 'async' AND status = 'importing' ORDER BY id LIMIT 1",
+      )
+      .get() as unknown as BatchJobRow) ?? null
+  );
+}
+
+/**
+ * Deletes one standalone batch job and its items. Submissions, submissions'
+ * judge tasks, problems and users are intentionally kept. The caller removes
+ * the upload archive after checking it is no longer referenced.
+ */
+export function deleteBatchJobRows(db: DatabaseSync, id: number): void {
+  db.prepare('DELETE FROM batch_items WHERE batch_id = ?').run(id);
+  db.prepare('DELETE FROM batch_jobs WHERE id = ?').run(id);
+}
+
+/** Number of jobs still referencing an upload (used before deleting its ZIP). */
+export function countBatchJobsForUpload(db: DatabaseSync, uploadId: string): number {
+  const row = db
+    .prepare('SELECT COUNT(*) AS n FROM batch_jobs WHERE upload_id = ?')
+    .get(uploadId) as unknown as { n: number };
+  return Number(row.n);
 }

@@ -407,9 +407,16 @@ export interface BatchProgress {
   skipped: number;
   errors: number;
   judged: number;
+  /** 导入完成、等待评测的提交数。 */
+  queued?: number;
   percent: number;
-  /** 与任务状态一致：importing/queued/judging/finished/failed/canceled。 */
+  /** uploaded/parsing/importing/queued/judging/finished/failed/canceled。 */
   phase: string;
+  /** 估算剩余秒数；未知为 null，终态为 0。 */
+  eta?: number | null;
+  heartbeat?: number | null;
+  startedAt?: number | null;
+  updatedAt?: number | null;
   /** 导入阶段的分条进度；非导入阶段为 null。 */
   import: { processed: number; totalCandidates: number } | null;
 }
@@ -445,6 +452,13 @@ export interface BatchJob {
   status: BatchJobStatus;
   /** 数据库中的原始任务状态（异步批次可能是 importing，而 status 已推导）。 */
   jobStatus?: string;
+  phase?: string;
+  eta?: number | null;
+  heartbeat?: number | null;
+  startedAt?: number | null;
+  updatedAt?: number | null;
+  queuedCount?: number;
+  failedCount?: number;
   mode?: 'async' | 'sync' | string;
   uploadId?: string | null;
   studentLevel: number;
@@ -464,6 +478,38 @@ export interface BatchJob {
   skipped: BatchFailureItem[];
   errors: BatchFailureItem[];
   items: BatchResultItem[];
+}
+
+/** GET /api/admin/batch/jobs 与 /jobs/:id 的持久化进度摘要。 */
+export interface BatchJobSummary {
+  id: number;
+  status: BatchJobStatus;
+  phase: string;
+  total: number;
+  imported: number;
+  judged: number;
+  queued: number;
+  failed: number;
+  skipped: number;
+  percent: number;
+  /** 剩余秒数；未知为 null，终态为 0。 */
+  eta: number | null;
+  heartbeat: number | null;
+  startedAt: number | null;
+  updatedAt: number | null;
+  createdAt: number;
+  problemId: number;
+  mode: string | null;
+  uploadId: string | null;
+  canDelete: boolean;
+  error: { code: string; message: string } | null;
+}
+
+export interface BatchJobsPage {
+  items: BatchJobSummary[];
+  total: number;
+  offset: number;
+  limit: number;
 }
 
 /** Phase 2A：比赛/用户/班级管理。 */
