@@ -2,9 +2,9 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`2fd3ffb merge: P0 secrets, admin bootstrap and judge isolation`  
-发布 tag：`v1.1.0-rc.8`（rc.9 待发布）  
-当前 Release：`v1.1.0-rc.8`（main 已包含 rc.9 候选安全与批量进度改动）
+当前 HEAD：`9ade923 release: prepare v1.1.0-rc.9`  
+发布 tag：`v1.1.0-rc.9`  
+当前 Release：`v1.1.0-rc.9`（P0 安全 + 批量进度 + P1 正确性）
 
 ---
 
@@ -480,7 +480,15 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - 回归测试 + 真实旧库 `/api/health` 200
 - rc.7 已发布但升级迁移缺陷，建议使用 rc.8
 
-## 3.9 rc.9 候选：安全 + 批量进度 + 成绩正确性（2026-11-11）
+## 3.9 v1.1.0-rc.9 发布：安全 + 批量进度 + 成绩正确性（2026-11-11）
+
+- Tag：`v1.1.0-rc.9`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.9
+- CI run：`43029313936`，success
+- 资产：
+  - `OiJudge-Setup-1.1.0-rc.9.exe` 252,561,277 B
+  - `oi-local-judge-1.1.0-rc.9-win-x64.zip` 360,033,607 B
+- prerelease：是
 
 ### P0 安全
 

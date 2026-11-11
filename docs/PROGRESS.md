@@ -2,6 +2,39 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-11 / Round 150（v1.1.0-rc.9 发布）
+
+### 发布
+
+- Tag：`v1.1.0-rc.9`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.9
+- CI run：`43029313936` — **success**
+- 资产：
+  - `OiJudge-Setup-1.1.0-rc.9.exe` 252,561,277 B
+  - `oi-local-judge-1.1.0-rc.9-win-x64.zip` 360,033,607 B
+- prerelease：是
+
+### 内容
+
+- P0 安全：随机 Session 密钥、随机管理员 + Electron 弹窗、强制改密、默认 loopback、judge 环境隔离
+- 批量进度：服务端任务列表/详情/删除、phase/ETA/心跳、`/admin/batch/:jobId` 刷新恢复、导入单飞
+- P1 正确性：merge 不降 AC、preview verdict 变化、published 禁止 discard、交互 CPU 配额、重复源文件报告、Hack 事务
+- rc.8 迁移修复继续保留
+
+### 验证
+
+- 全量：113 文件 / 1032 用例通过
+- build：通过
+- 浏览器 E2E：2 passed
+- release tsc/测试：通过
+- CI：portable + NSIS + Release 全部 success
+
+### 注意
+
+- 管理员升级后需重新登录并改密
+- 默认只监听 127.0.0.1；LAN 需显式 `OIJ_HOST=0.0.0.0` / `OIJ_LAN=1` / `install.ps1 -Lan`
+- 安装包仍未签名，默认 Electron 图标
+
 ## 2026-11-11 / Round 149（P0 安全 + 批量进度 + P1 正确性）
 
 ### 团队
