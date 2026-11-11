@@ -2,6 +2,58 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-11 / Round 149（P0 安全 + 批量进度 + P1 正确性）
+
+### 团队
+
+- `electron-fixer`：task-7 P0 安全
+- `batch-exporter`：task-8 批量任务持久化
+- Lead：task-9 P1 成绩正确性
+
+### 提交
+
+- `6cddcd6 fix(security): remove default secrets and bootstrap admin password`
+- `427a6cf feat: persist batch jobs with phase progress and monitor list`
+- `52b71da fix: preserve batch verdicts and harden contest state transitions`
+- 合并：`2fd3ffb merge: P0 secrets, admin bootstrap and judge isolation`
+
+### P0 安全
+
+- 移除默认 Session 密钥，首次生成并持久化 `secrets.json`
+- 移除 `admin/admin123`，首次随机密码 + Electron 弹窗 + 强制改密
+- 新增改密 API/页面；未改密前除 me/logout/change-password 外 403
+- 默认监听 `127.0.0.1`，LAN 显式开启
+- judge 最小隔离：环境变量白名单、工作目录移出 dataDir
+
+### 批量进度
+
+- `batch_jobs` 增加 phase/heartbeat/eta/started_at/updated_at
+- 任务列表/详情/删除 API
+- 前端 `/admin/batch/:jobId` 刷新恢复
+- 阶段进度、ETA、失败趋势
+- 导入单飞；batch 与在线共用 judge 队列
+
+### P1 正确性
+
+- merge 同分不 AC→WA；preview 展示 verdict 变化
+- published 禁止 discard
+- 交互 runner CPU 预算
+- 重复源文件报告
+- Hack 事务化 + 回滚故障注入测试
+
+### 验证
+
+- 全量 `npx vitest run --maxWorkers=2`：**113 文件 / 1032 用例通过**
+- `npm run build`：通过
+- `npm run test:e2e:browser`：2 passed
+- 安全实际启动：127.0.0.1:18899，`/api/health` 200
+- 桌面 smoke：本工作树无 Electron runtime，未跑
+
+### 待发布
+
+- 版本仍为 rc.8；main 已包含 rc.9 候选改动
+- 下一轮：rc.9 发布、安装包签名/图标、4C/8G 验收
+
 ## 2026-11-06 / Round 148（rc.7 迁移热修 → rc.8）
 
 ### 人工报告

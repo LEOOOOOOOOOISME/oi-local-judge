@@ -1,4 +1,4 @@
-# OiJudge v1.1.0-rc.8
+# OiJudge v1.1.0-rc.9
 
 Windows x64 预发布版本，面向局域网 OI 评测、比赛与教学训练：Electron 桌面端、浏览器选手/管理端、原生 Job Object 评测器。
 
@@ -6,12 +6,67 @@ Windows x64 预发布版本，面向局域网 OI 评测、比赛与教学训练�
 
 ## 下载
 
-GitHub Release 附件同时提供安装器与便携包，`<version>` 与发布 tag 一致（例如 tag `v1.1.0-rc.8` 对应 `1.1.0-rc.8`）：
+GitHub Release 附件同时提供安装器与便携包，`<version>` 与发布 tag 一致（例如 tag `v1.1.0-rc.9` 对应 `1.1.0-rc.9`）：
 
 - `OiJudge-Setup-<version>.exe`：NSIS 安装器，支持自选安装目录，创建桌面与开始菜单快捷方式。
 - `oi-local-judge-<version>-win-x64.zip`：便携版 ZIP，解压即用。
 
 两者均内置 Node 服务、Web 前端、`ojrunner.exe`、`ojinteract.exe` 与 MinGW 运行库。安装版与便携版共用 `%APPDATA%\OiJudge` 数据目录。
+
+## rc.9 安全与批量进度（重要）
+
+### 安全 P0
+
+- **移除默认 Session 密钥**：
+  - 不再使用 `dev-only-change-me`
+  - 首次启动 `randomBytes(32)` 生成并持久化 `<dataDir>/secrets.json`
+  - 旧默认密钥自动迁移，旧 Session 全部失效
+  - 显式 `OIJ_SESSION_SECRET` 优先且不落盘
+- **移除默认管理员 `admin/admin123`**：
+  - 首次启动生成一次性随机管理员密码
+  - CLI 只打印一次；Electron 原生弹窗显示并支持复制
+  - `must_change_password=1`，首次登录强制改密
+  - 旧 `admin123` 管理员升级时强制改密并 bump session_version
+  - 新增 `POST /api/auth/change-password`
+  - 改密前除 `me/logout/change-password` 外返回 403 `PASSWORD_CHANGE_REQUIRED`
+- **默认监听 `127.0.0.1`**：
+  - LAN 必须显式 `OIJ_HOST=0.0.0.0` 或 `OIJ_LAN=1`
+  - Windows 安装脚本只有 `-Lan` 才开放防火墙
+- **评测最小隔离**：
+  - `judge/isolation.ts` 只透传启动必需环境变量
+  - 剔除 `OIJ_*`/`NODE_OPTIONS`
+  - 评测工作目录移到 dataDir 同级 `<dataDir>-judge-tmp`
+  - 编译/runner/checker/validator/generator/interactive 全部应用
+
+> 升级影响：管理员需要重新登录并设置新密码；默认只监听本机，局域网使用需显式开启。
+
+### 批量任务持久化与刷新恢复
+
+- `batch_jobs` 新增 `phase/started_at/updated_at/heartbeat_at/eta_seconds`
+- `GET /api/admin/batch/jobs`：分页、状态过滤、永久保留
+- `GET /api/admin/batch/jobs/:id`：1 秒聚合轮询，不返回明细
+- `DELETE /api/admin/batch/jobs/:id`：仅终态，写审计
+- 阶段：`uploaded → parsing → importing → queued → judging → finished/failed/canceled`
+- 刷新页面/重启服务后从数据库恢复当前任务
+- 前端 `/admin/batch/:jobId`、最近任务列表、阶段进度、ETA、失败趋势
+- 导入单飞，其他批次排队；批次提交与在线提交共用多核 judge 队列，priority 10
+
+### 成绩与状态机 P1
+
+- merge 同分不再把 AC 降成 WA；同分取更优 verdict
+- preview 返回 `afterVerdict/verdictChanged`，verdict-only 变化也计入 changed
+- published 批次禁止 discard，非法状态返回 409
+- 交互 runner 增加共享 CPU 预算，超限判 TLE
+- 重复学生/题目源文件写入 `ignoredFiles` 并在批次详情展示
+- Hack promote/revert 用事务包住 submission 标记、正式分重算、hack 状态；新增故障回滚测试
+
+### rc.9 验证
+
+- 全量：**113 文件 / 1032 用例通过**
+- `npm run build`：通过
+- 浏览器 E2E：2 passed
+- 安全实际启动：`127.0.0.1:18899`，`/api/health` 200，随机密钥/随机管理员
+- 桌面 smoke：本开发工作树缺 Electron runtime，未执行
 
 ## rc.8 修复（重要）
 
@@ -131,7 +186,7 @@ GitHub Release 附件同时提供安装器与便携包，`<version>` 与发布 t
   - desktop 启动日志、userData 可写性探测、单实例失败日志
   - server stdio pipe、60s 超时、子进程输出入日志
 - NSIS 安装包实际构建：
-  - `OiJudge-Setup-1.1.0-rc.8.exe`
+  - `OiJudge-Setup-1.1.0-rc.9.exe`
   - 静默安装/卸载实测
   - 安装态 smoke：窗口、server、`/api/health` 200、LAN、Web UI
 - 新增 `npm run build:installer`
