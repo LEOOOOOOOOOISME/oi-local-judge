@@ -1,10 +1,10 @@
 # OI Local Judge — 目标、已完成与未完成
 
-最后更新：2026-11-06  
-当前分支：`feat/1.1-stability-authoring`  
-当前 HEAD：`f32ad8d release: prepare v1.1.0-rc.8 hotfix`（发布后文档提交在分支上更靠前）  
-发布 tag：`v1.1.0-rc.8`（tag 指向 `f32ad8d`）  
-当前 Release：`v1.1.0-rc.8`（rc.7 因升级迁移缺陷已被取代）
+最后更新：2026-11-11  
+当前分支：`main`  
+当前 HEAD：`2fd3ffb merge: P0 secrets, admin bootstrap and judge isolation`  
+发布 tag：`v1.1.0-rc.8`（rc.9 待发布）  
+当前 Release：`v1.1.0-rc.8`（main 已包含 rc.9 候选安全与批量进度改动）
 
 ---
 
@@ -479,6 +479,58 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - 根因：`batch_items(batch_id,status)` 索引在 `ensureColumn` 之前创建
   - 回归测试 + 真实旧库 `/api/health` 200
 - rc.7 已发布但升级迁移缺陷，建议使用 rc.8
+
+## 3.9 rc.9 候选：安全 + 批量进度 + 成绩正确性（2026-11-11）
+
+### P0 安全
+
+- Session 密钥：
+  - 删除 `dev-only-change-me`
+  - 首次启动 `randomBytes(32)`，持久化 `secrets.json`
+  - 旧默认值自动迁移，旧 Session 失效
+- 管理员：
+  - 删除 `admin/admin123`
+  - 首次随机 20 位密码，CLI 打印一次 / Electron 原生弹窗可复制
+  - `must_change_password=1`
+  - 旧 admin123 升级强制改密
+  - 新增 `POST /api/auth/change-password`
+  - 改密前除改密/logout/me 外 403 `PASSWORD_CHANGE_REQUIRED`
+- 监听：
+  - 默认 `127.0.0.1`
+  - `OIJ_HOST=0.0.0.0` / `OIJ_LAN=1` 显式开放
+  - `install.ps1 -Lan` 才开防火墙
+- 最小隔离：
+  - `judge/isolation.ts`
+  - 只透传启动必需 env，剔除 `OIJ_*`/`NODE_OPTIONS`
+  - 工作目录移到 dataDir 同级 `<dataDir>-judge-tmp`
+  - 编译/runner/checker/validator/generator/interactive 全部应用
+
+### 批量进度
+
+- `batch_jobs` 新增 `phase/started_at/updated_at/heartbeat_at/eta_seconds`
+- `GET /api/admin/batch/jobs` 分页/状态过滤，永久保留
+- `GET /api/admin/batch/jobs/:id` 聚合轮询
+- `DELETE /api/admin/batch/jobs/:id` 仅终态，审计
+- 阶段：uploaded → parsing → importing → queued → judging → finished/failed/canceled
+- 导入单飞，其他排队；与在线共用 judge 队列，batch priority 10
+- 前端 `/admin/batch/:jobId` 刷新恢复、任务列表、阶段进度、ETA、失败趋势
+
+### P1 成绩正确性
+
+- merge 同分不 AC→WA
+- preview 返回 `afterVerdict/verdictChanged`
+- published 禁止 discard，非法状态 409
+- 交互 runner 共享 CPU 预算，超限 TLE
+- 重复源文件写入 `ignoredFiles`
+- Hack promote/revert 事务化 + 故障回滚测试
+
+### 验证
+
+- 全量：**113 文件 / 1032 用例通过**
+- `npm run build`：通过
+- 浏览器 E2E：2 passed
+- 安全实际启动：`127.0.0.1:18899`，`/api/health` 200，随机密钥/随机管理员
+- 桌面 smoke：本环境 Electron runtime 缺失，未跑；构建/tsc 通过
 
 ---
 
