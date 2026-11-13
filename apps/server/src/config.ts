@@ -4,6 +4,8 @@ import { join } from 'node:path';
 import { readPersistedSettings } from './services/settings.js';
 import { loadOrCreateSessionSecret } from './services/secrets.js';
 
+export type WorkerIsolationMode = 'optional' | 'required';
+
 export interface Config {
   host: string;
   port: number;
@@ -17,6 +19,11 @@ export interface Config {
   adminPassword?: string;
   sessionSecret: string;
   sessionTtlSec: number;
+  /** optional = run as the service account when no worker account is configured. */
+  workerIsolation: WorkerIsolationMode;
+  /** Low-privilege Windows account used by the native runner for contestant code. */
+  workerUser?: string;
+  workerPassword?: string;
 }
 
 export function detectGxx(env: NodeJS.ProcessEnv = process.env): string {
@@ -70,6 +77,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // to the LAN until the operator explicitly opts in with OIJ_HOST=0.0.0.0 or
   // the installer's LAN switch.
   const host = env.OIJ_HOST ?? persisted.host ?? '127.0.0.1';
+  const workerFile = readWorkerFile(dataDir);
+  const workerIsolation = resolveWorkerIsolationMode(env);
+  const workerUser = env.OIJ_WORKER_USER?.trim() || workerFile.user || undefined;
+  const workerPassword = env.OIJ_WORKER_PASSWORD ?? workerFile.password;
   return {
     host,
     port: Number(env.OIJ_PORT ?? persisted.port ?? 8787),
@@ -87,6 +98,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // Generated/persisted on first start; the legacy default is migrated.
     sessionSecret: loadOrCreateSessionSecret(dataDir, env).secret,
     sessionTtlSec: Number(env.OIJ_SESSION_TTL ?? persisted.sessionTtlSec ?? 8 * 3600),
+    workerIsolation,
+    workerUser,
+    workerPassword,
   };
 }
 
@@ -94,4 +108,62 @@ export function ensureDataDirs(dataDir: string): void {
   for (const name of ['db', 'problems', 'submissions', 'tmp', 'logs']) {
     mkdirSync(join(dataDir, name), { recursive: true });
   }
+}
+
+interface WorkerFile {
+  username?: unknown;
+  user?: unknown;
+  password?: unknown;
+}
+
+/** Reads the installer-managed worker credentials (ACL-protected worker.json). */
+function readWorkerFile(dataDir: string): { user?: string; password?: string } {
+  const file = join(dataDir, 'worker.json');
+  if (!existsSync(file)) return {};
+  try {
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as WorkerFile;
+    const user =
+      typeof parsed.username === 'string'
+        ? parsed.username
+        : typeof parsed.user === 'string'
+          ? parsed.user
+          : undefined;
+    return {
+      user: user?.trim() || undefined,
+      password: typeof parsed.password === 'string' ? parsed.password : undefined,
+    };
+  } catch {
+    return {};
+  }
+}
+
+export function resolveWorkerIsolationMode(
+  env: NodeJS.ProcessEnv = process.env,
+): Config['workerIsolation'] {
+  const raw = env.OIJ_WORKER_ISOLATION;
+  if (raw === undefined || raw === '') return 'optional';
+  if (raw === 'optional' || raw === 'required') return raw;
+  // An unknown value must not silently disable isolation.
+  throw new Error(`OIJ_WORKER_ISOLATION must be "optional" or "required" (got "${raw}")`);
+}
+
+/**
+ * Returns a startup error when worker isolation is required but impossible.
+ * The caller must refuse to start (fail closed) instead of running contestant
+ * code as the service account.
+ */
+export function workerIsolationIssue(config: Config): string | null {
+  const hasUser = typeof config.workerUser === 'string' && config.workerUser.length > 0;
+  const hasPassword =
+    typeof config.workerPassword === 'string' && config.workerPassword.length > 0;
+  if (hasUser !== hasPassword) {
+    return 'OIJ_WORKER_USER and OIJ_WORKER_PASSWORD must be provided together';
+  }
+  if (config.workerIsolation === 'required' && !hasUser) {
+    return (
+      'OIJ_WORKER_ISOLATION=required but no worker credentials are configured; ' +
+      'run install.ps1 -WorkerIsolation or set OIJ_WORKER_USER/OIJ_WORKER_PASSWORD (or worker.json)'
+    );
+  }
+  return null;
 }

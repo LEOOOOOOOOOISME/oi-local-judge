@@ -14,7 +14,7 @@ import {
   upsertOfficialScore,
 } from '../storage/repos/official-scores.js';
 import { getProblem, type TestcaseRow } from '../storage/repos/problems.js';
-import { createJudgeWorkdir } from './isolation.js';
+import { createIsolatedJudgeWorkdir, workerRunOptions } from './worker.js';
 import {
   clearSubmissionHacked,
   getSubmission,
@@ -184,7 +184,7 @@ export async function judgeHack(
 
   // Hack inputs/results are ephemeral and may contain answer data, so the
   // target's code runs in a temp directory outside the data directory.
-  const workdir = createJudgeWorkdir(config.dataDir, `hack-${hackId}-`);
+  const workdir = createIsolatedJudgeWorkdir(config, `hack-${hackId}-`);
   const inputPath = join(workdir, 'hack.in');
   const answerPath = join(workdir, 'expected.out');
   const stdOutPath = join(workdir, 'std.out');
@@ -252,6 +252,7 @@ export async function judgeHack(
       stdinFile: inputPath,
       stdoutFile: stdOutPath,
       stderrFile: stdErrPath,
+      worker: workerRunOptions(config),
     });
     if (stdRun.exitCode !== 0 || stdRun.timedOut || stdRun.oom || stdRun.signal !== 0) {
       updateHack(db, hackId, {
