@@ -436,7 +436,7 @@ const config: Config = {
   ...loadConfig({
     ...process.env,
     OIJ_DATA_DIR: root,
-    OIJ_SESSION_SECRET: 'test-secret',
+    OIJ_SESSION_SECRET: 'test-session-secret-0123456789-abcdef',
     OIJ_UPDATE_REPO: '',
   }),
   dataDir: root,

@@ -11,6 +11,7 @@ import { startBackupScheduler } from './services/backup-scheduler.js';
 import { startLearningStatsScheduler } from './services/learning-stats-scheduler.js';
 import { startContestClock } from './services/contest-clock.js';
 import { buildApp } from './app.js';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 const config = loadConfig();
@@ -93,7 +94,14 @@ const statsScheduler = startLearningStatsScheduler({
 const contestClock = startContestClock(db);
 const port = config.port;
 const host = config.host;
-await app.listen({ port, host });
+const https =
+  config.tlsCertPath && config.tlsKeyPath
+    ? {
+        cert: readFileSync(config.tlsCertPath),
+        key: readFileSync(config.tlsKeyPath),
+      }
+    : undefined;
+await app.listen({ port, host, ...(https ? { https } : {}) });
 
 const address = app.server.address();
 const actualPort = typeof address === 'object' && address ? address.port : port;
