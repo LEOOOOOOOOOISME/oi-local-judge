@@ -322,15 +322,32 @@ npm start
 http://127.0.0.1:8787
 ```
 
-默认管理员：
+首次启动没有默认管理员密码：
 
-```text
-admin / admin123
+- CLI 会在启动横幅打印一次性随机管理员密码；
+- Electron 会弹出原生对话框，可直接复制；
+- 首次登录必须修改密码；
+- 已有旧库中的 `admin/admin123` 会在升级时被标记为强制改密并吊销旧会话。
+
+> 不要设置 `OIJ_ADMIN_PASSWORD=admin123`。该变量只用于自动化/CI 的显式初始化，不是默认值。
+> `OIJ_SESSION_SECRET` 如果显式设置，必须至少 32 个字符且不能是旧默认值。
+
+默认数据目录为仓库下 `runtime/`；所有数据库、题面、提交、缓存都在本机。  
+默认只监听 `127.0.0.1`。局域网使用必须显式开启：
+
+```powershell
+$env:OIJ_LAN = '1'          # 或 OIJ_HOST=0.0.0.0
 ```
 
-> 生产环境请通过 `OIJ_ADMIN_PASSWORD` 覆盖默认密码，并首次登录后修改。
+需要 HTTPS 时提供证书和私钥：
 
-默认数据目录为仓库下 `runtime/`；所有数据库、题面、提交、缓存都在本机。
+```powershell
+$env:OIJ_TLS_CERT = 'C:\certs\oij-cert.pem'
+$env:OIJ_TLS_KEY  = 'C:\certs\oij-key.pem'
+```
+
+TLS 会自动给 Session Cookie 加 `Secure`；如果 TLS 由反向代理终止，可显式设置
+`OIJ_COOKIE_SECURE=1`。没有 TLS 的 LAN 只应部署在可信隔离网络。
 
 ---
 
@@ -339,9 +356,13 @@ admin / admin123
 | 环境变量 | 说明 | 默认 |
 |---|---|---|
 | `OIJ_DATA_DIR` | 数据目录 | 仓库下 `runtime/` |
-| `OIJ_PORT` | HTTP 端口 | `8787` |
-| `OIJ_HOST` | 监听地址 | `0.0.0.0` |
-| `OIJ_ADMIN_PASSWORD` | 初始管理员密码 | `admin123` |
+| `OIJ_PORT` | HTTP/HTTPS 端口 | `8787` |
+| `OIJ_HOST` | 监听地址 | `127.0.0.1` |
+| `OIJ_LAN` | `1` 时监听 `0.0.0.0` | 关闭 |
+| `OIJ_ADMIN_PASSWORD` | 显式初始化密码（仅自动化） | 无；随机生成 |
+| `OIJ_SESSION_SECRET` | 显式 Session 密钥，至少 32 字符 | 自动生成并持久化 |
+| `OIJ_TLS_CERT` / `OIJ_TLS_KEY` | 内置 HTTPS 证书/私钥 | 无 |
+| `OIJ_COOKIE_SECURE` | 反代 TLS 时强制 Secure Cookie | 随 TLS 自动 |
 | `OIJ_GXX` | g++ 路径 | 自动探测 |
 | `OIJ_JUDGE_CONCURRENCY` | 评测并发 | `min(4, CPU 核数)` |
 | `OIJ_RUNNER` | ojrunner 路径 | `native/runner/out/ojrunner.exe` |

@@ -5,6 +5,7 @@ import { hashPassword, verifyPassword } from '../security/password.js';
 import {
   createUser,
   getUserByUsername,
+  listAdmins,
   setMustChangePassword,
   type UserRow,
 } from '../storage/repos/users.js';
@@ -54,21 +55,25 @@ function adminCount(db: DatabaseSync): number {
  * The returned record is only produced when the caller must notify the user.
  */
 export function ensureAdmin(db: DatabaseSync, config: Config): InitialAdmin | null {
-  const existing: UserRow | null = getUserByUsername(db, config.adminUsername);
-
-  if (existing) {
-    if (existing.role === 'admin' && existing.must_change_password !== 1) {
-      if (verifyPassword(LEGACY_ADMIN_PASSWORD, existing.password_hash)) {
-        setMustChangePassword(db, existing.id, true);
-        // Invalidate sessions created with the known default password.
-        db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').run(
-          existing.id,
-        );
-        return { username: existing.username, password: null, reason: 'legacy-default' };
-      }
-    }
-    return null;
+  // Scan every administrator, not just the configured bootstrap username: a
+  // deployment may have changed OIJ_ADMIN_USERNAME while an old admin/admin123
+  // account remains active.
+  const legacyAdmins = listAdmins(db).filter(
+    (admin) =>
+      admin.must_change_password !== 1 &&
+      verifyPassword(LEGACY_ADMIN_PASSWORD, admin.password_hash),
+  );
+  for (const admin of legacyAdmins) {
+    setMustChangePassword(db, admin.id, true);
+    // Invalidate sessions created with the known default password.
+    db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').run(admin.id);
   }
+  if (legacyAdmins.length > 0) {
+    return { username: legacyAdmins[0].username, password: null, reason: 'legacy-default' };
+  }
+
+  const existing: UserRow | null = getUserByUsername(db, config.adminUsername);
+  if (existing) return null;
 
   // A different administrator already exists: never create a second bootstrap
   // account, because the configured username may belong to another person.

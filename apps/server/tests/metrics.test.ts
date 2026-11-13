@@ -195,7 +195,7 @@ describe('system metrics route', () => {
     db = openDatabase(':memory:');
     migrate(db);
     const config = {
-      ...loadConfig({ ...process.env, OIJ_DATA_DIR: dataDir, OIJ_SESSION_SECRET: 'metrics-http' }),
+      ...loadConfig({ ...process.env, OIJ_DATA_DIR: dataDir, OIJ_SESSION_SECRET: 'test-session-secret-0123456789-abcdef' }),
       dataDir,
       sessionSecret: 'metrics-http',
     };

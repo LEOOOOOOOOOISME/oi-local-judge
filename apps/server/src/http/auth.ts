@@ -1,4 +1,4 @@
-// HTTP auth routes:
+﻿// HTTP auth routes:
 //   POST /api/auth/login
 //   POST /api/auth/logout
 //   GET  /api/me
@@ -12,34 +12,32 @@ import {
 } from '../security/auth.js';
 import { AuthInputError, changePassword, login, logout, me, register } from '../services/auth.js';
 import { recordAudit } from '../storage/repos/audit.js';
+import { BoundedTtlMap } from './auth-rate-limit.js';
 
-const loginFailures = new Map<string, number[]>();
 const LOGIN_WINDOW_MS = 10 * 60 * 1000;
 const LOGIN_MAX_FAILURES = 5;
+const LOGIN_IP_MAX_FAILURES = 20;
 
-const registrationAttempts = new Map<string, number[]>();
-const REGISTRATION_WINDOW_MS = 10 * 60 * 1000;
+// Bounded so rotating usernames/IPs cannot grow process memory without limit.
+const loginFailures = new BoundedTtlMap<number>(5000, LOGIN_WINDOW_MS);
+const registrationAttempts = new BoundedTtlMap<number>(5000, LOGIN_WINDOW_MS);
 const REGISTRATION_MAX_ATTEMPTS = 5;
 
+/** Test/ops helper: clear in-memory throttles without restarting the process. */
+export function resetAuthRateLimits(): void {
+  loginFailures.clear();
+  registrationAttempts.clear();
+}
+
 function allowRegistration(key: string): boolean {
-  const now = Date.now();
-  const recent = (registrationAttempts.get(key) ?? []).filter(
-    (value) => now - value < REGISTRATION_WINDOW_MS,
-  );
-  if (recent.length >= REGISTRATION_MAX_ATTEMPTS) {
-    registrationAttempts.set(key, recent);
-    return false;
-  }
-  recent.push(now);
-  registrationAttempts.set(key, recent);
+  const recent = registrationAttempts.get(key);
+  if (recent.length >= REGISTRATION_MAX_ATTEMPTS) return false;
+  registrationAttempts.record(key, Date.now());
   return true;
 }
 
-function tooManyFailures(key: string): boolean {
-  const now = Date.now();
-  const recent = (loginFailures.get(key) ?? []).filter((value) => now - value < LOGIN_WINDOW_MS);
-  loginFailures.set(key, recent);
-  return recent.length >= LOGIN_MAX_FAILURES;
+function tooManyFailures(key: string, max = LOGIN_MAX_FAILURES): boolean {
+  return loginFailures.get(key).length >= max;
 }
 
 export interface AuthRoutesOptions {
@@ -68,31 +66,35 @@ export async function registerAuthRoutes(
       });
     }
 
+    const userKey = `user:${request.ip}:${username.toLowerCase()}`;
+    const ipKey = `ip:${request.ip}`;
+    // Check the lock before verifying the password: a locked-out caller must
+    // not be able to spend the password-hash cost, even with the right password.
+    if (tooManyFailures(userKey) || tooManyFailures(ipKey, LOGIN_IP_MAX_FAILURES)) {
+      reply.header('retry-after', '600');
+      return reply.code(429).send({
+        ok: false,
+        error: { code: 'TOO_MANY_ATTEMPTS', message: 'too many failed logins, try again later' },
+      });
+    }
+
     const result = login(db, config, username, password);
     if (!result) {
-      const key = `${request.ip}:${username.toLowerCase()}`;
-      const failures = loginFailures.get(key) ?? [];
-      failures.push(Date.now());
-      loginFailures.set(key, failures);
+      loginFailures.record(userKey, Date.now());
+      loginFailures.record(ipKey, Date.now());
       recordAudit(db, {
         action: 'auth.login_failed',
         detail: { username },
         ip: request.ip,
       });
-      if (tooManyFailures(key)) {
-        reply.header('retry-after', '600');
-        return reply.code(429).send({
-          ok: false,
-          error: { code: 'TOO_MANY_ATTEMPTS', message: 'too many failed logins, try again later' },
-        });
-      }
       return reply.code(401).send({
         ok: false,
         error: { code: 'INVALID_CREDENTIALS', message: 'invalid username or password' },
       });
     }
 
-    loginFailures.delete(`${request.ip}:${username.toLowerCase()}`);
+    loginFailures.delete(userKey);
+    loginFailures.delete(ipKey);
     recordAudit(db, {
       actorId: result.user.id,
       action: 'auth.login',
@@ -101,7 +103,7 @@ export async function registerAuthRoutes(
       ip: request.ip,
     });
 
-    reply.header('set-cookie', serializeSessionCookie(result.token, config.sessionTtlSec));
+    reply.header('set-cookie', serializeSessionCookie(result.token, config.sessionTtlSec, { secure: config.secureCookies === true }));
     reply.header('cache-control', 'no-store');
     return {
       ok: true,
@@ -139,7 +141,7 @@ export async function registerAuthRoutes(
         detail: { username: result.user.username },
         ip: request.ip,
       });
-      reply.header('set-cookie', serializeSessionCookie(result.token, config.sessionTtlSec));
+      reply.header('set-cookie', serializeSessionCookie(result.token, config.sessionTtlSec, { secure: config.secureCookies === true }));
       reply.header('cache-control', 'no-store');
       return reply.code(201).send({
         ok: true,
@@ -188,7 +190,7 @@ export async function registerAuthRoutes(
           targetId: result.user.id,
           ip: request.ip,
         });
-        reply.header('set-cookie', serializeSessionCookie(result.token, config.sessionTtlSec));
+        reply.header('set-cookie', serializeSessionCookie(result.token, config.sessionTtlSec, { secure: config.secureCookies === true }));
         reply.header('cache-control', 'no-store');
         return {
           ok: true,
@@ -217,7 +219,7 @@ export async function registerAuthRoutes(
       if (request.user) {
         logout(db, request.user.id);
       }
-      reply.header('set-cookie', serializeClearedSessionCookie());
+      reply.header('set-cookie', serializeClearedSessionCookie({ secure: config.secureCookies === true }));
       reply.header('cache-control', 'no-store');
       return { ok: true, data: { loggedOut: true } };
     },
@@ -235,3 +237,4 @@ export async function registerAuthRoutes(
     return { ok: true, data: result };
   });
 }
+
