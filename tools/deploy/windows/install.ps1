@@ -39,6 +39,13 @@
   classroom machines can reach the OJ. Without this switch the server is only
   reachable from this machine (127.0.0.1).
 
+.PARAMETER WorkerIsolation
+  Create (or reset) the low-privilege local account OiJudgeWorker, store its
+  credentials in an ACL-protected dataDir\worker.json, deny that account read
+  access to the data directory, and block its outbound network traffic with a
+  per-user Windows Firewall rule. The server then runs contestant code as this
+  account (OIJ_WORKER_ISOLATION=required). Requires an elevated PowerShell.
+
 .PARAMETER NoFirewall
   Do not create the inbound Windows Firewall rule. The firewall rule is the
   only step that needs an elevated PowerShell.
@@ -78,6 +85,7 @@ param(
   [string]$DataDir,
   [int]$Port = 8787,
   [switch]$Lan,
+  [switch]$WorkerIsolation,
   [switch]$NoFirewall,
   [switch]$NoShortcut,
   [switch]$NoAutostart,
@@ -194,14 +202,14 @@ $administrator = Test-OijAdministrator
 $firewallRequested = (-not $NoFirewall) -and $Lan
 $hostAddress = if ($Lan) { '0.0.0.0' } else { '127.0.0.1' }
 $predictedExitCode = $OijExitSuccess
-if ($firewallRequested -and -not $administrator) {
+if (($firewallRequested -or $WorkerIsolation) -and -not $administrator) {
   if ($DryRun) {
-    Write-OijWarn 'The firewall rule needs administrator rights; the real run would stop with exit code 3. Use -NoFirewall to install without it.'
+    Write-OijWarn 'Worker isolation and the firewall rule need administrator rights; the real run would stop with exit code 3.'
     $predictedExitCode = $OijExitAdminRequired
   } else {
     Stop-OijDeployment -ExitCode $OijExitAdminRequired -Message (
-      "Administrator rights are required to add the Windows Firewall rule. Re-run this script " +
-      "from an elevated PowerShell, or pass -NoFirewall to install without it."
+      "Administrator rights are required for -WorkerIsolation and the Windows Firewall rule. " +
+      "Re-run this script from an elevated PowerShell, or omit those switches."
     )
   }
 }
@@ -357,6 +365,41 @@ if ($DryRun) {
   Write-OijOk ("data directory ready: {0}" -f $DataDir)
 }
 
+# --- Worker isolation (F-01) ---------------------------------------------
+$workerAccount = $null
+if ($WorkerIsolation) {
+  $workerAccount = $OijWorkerAccountName
+  if ($DryRun) {
+    Write-OijPlan ("create/reset low-privilege local user {0}, write ACL-protected worker.json, deny dataDir read and block its outbound network" -f $workerAccount)
+  } else {
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    $bytes = New-Object byte[] 24
+    $rng.GetBytes($bytes)
+    $workerPassword = [Convert]::ToBase64String($bytes).TrimEnd('=')
+    $securePassword = ConvertTo-SecureString $workerPassword -AsPlainText -Force
+    if (Get-LocalUser -Name $workerAccount -ErrorAction SilentlyContinue) {
+      Set-LocalUser -Name $workerAccount -Password $securePassword
+    } else {
+      New-LocalUser -Name $workerAccount -Password $securePassword -PasswordNeverExpires -UserMayNotChangePassword -Description 'OiJudge judge worker (low privilege)' | Out-Null
+    }
+    $workerFile = Join-Path $DataDir 'worker.json'
+    $workerJson = @{ username = $workerAccount; password = $workerPassword } | ConvertTo-Json
+    Write-OijTextFile -Path $workerFile -Content ($workerJson + [Environment]::NewLine)
+    & icacls.exe $workerFile /inheritance:r /grant:r "$($env:USERNAME):F" /deny "$($workerAccount):(R)" | Out-Null
+    & icacls.exe $DataDir /deny "$($workerAccount):(OI)(CI)R" /C /Q | Out-Null
+    Write-OijOk ("worker account {0} ready; data directory is not readable by it" -f $workerAccount)
+    try {
+      $workerFirewallRule = 'OiJudge Worker outbound block'
+      if (-not (Get-NetFirewallRule -DisplayName $workerFirewallRule -ErrorAction SilentlyContinue)) {
+        New-NetFirewallRule -DisplayName $workerFirewallRule -Direction Outbound -Action Block -Profile Any -LocalUser "$($env:COMPUTERNAME)\$workerAccount" -ErrorAction Stop | Out-Null
+      }
+      Write-OijOk ("outbound network blocked for {0}" -f $workerAccount)
+    } catch {
+      Write-OijWarn ("could not create the per-user outbound firewall rule: {0}" -f $_.Exception.Message)
+    }
+  }
+}
+
 # --- Launcher ------------------------------------------------------------
 $launcherLines = @(
   '@echo off',
@@ -463,6 +506,7 @@ $state = [ordered]@{
   dataDir = $DataDir
   port = $Port
   host = $hostAddress
+  workerIsolation = [bool]$WorkerIsolation
   url = ('http://127.0.0.1:{0}/' -f $Port)
   linkMode = $resolvedMode
   nodePath = $nodePath
@@ -506,7 +550,7 @@ if ($DryRun) {
   exit $OijExitSuccess
 }
 
-$serverProcess = Start-OijServer -AppDir $appTarget -DataDir $DataDir -Port $Port -NodePath $nodePath -LogDir $logDir -HostAddress $hostAddress
+$serverProcess = Start-OijServer -AppDir $appTarget -DataDir $DataDir -Port $Port -NodePath $nodePath -LogDir $logDir -HostAddress $hostAddress -WorkerIsolation $(if ($WorkerIsolation) { 'required' } else { 'optional' })
 if (-not (Wait-OijHealth -Port $Port -TimeoutSeconds 30)) {
   Show-OijLogTail -LogDir $logDir -Lines 25
   $healthMessage = (

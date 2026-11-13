@@ -37,6 +37,7 @@ export function buildRunner() {
       out,
       join(process.cwd(), 'native/runner/src/main.cpp'),
       '-lshell32',
+      '-ladvapi32',
     ],
     { stdio: 'inherit' },
   );

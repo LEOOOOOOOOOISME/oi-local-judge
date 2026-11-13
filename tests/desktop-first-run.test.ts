@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   formatInitialAdminNotice,
+  redactInitialPassword,
   type InitialAdminNotice,
 } from '../apps/desktop/src/first-run.js';
 
@@ -28,5 +29,13 @@ describe('desktop first-run admin notice', () => {
     expect(text).toContain('默认密码');
     expect(text).toContain('必须修改');
     expect(text).not.toContain('admin123');
+  });
+
+  it('redacts bootstrap passwords before they can reach desktop.log (F-07)', () => {
+    const line = ' 初始密码: SuxJWdVeqisHM3DpwFeT';
+    const redacted = redactInitialPassword(line);
+    expect(redacted).not.toContain('SuxJWdVeqisHM3DpwFeT');
+    expect(redacted).toContain('[REDACTED]');
+    expect(redacted).toContain('初始密码');
   });
 });
