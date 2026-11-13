@@ -15,7 +15,7 @@ import { openDatabase } from '../src/storage/db.js';
 const root = mkdtempSync(join(tmpdir(), 'oij-rebuild-http-'));
 const db: DatabaseSync = openDatabase(join(root, 'test.db'));
 const config: Config = {
-  ...loadConfig({ ...process.env, OIJ_DATA_DIR: root, OIJ_SESSION_SECRET: 'test-secret' }),
+  ...loadConfig({ ...process.env, OIJ_DATA_DIR: root, OIJ_SESSION_SECRET: 'test-session-secret-0123456789-abcdef' }),
   dataDir: root,
 };
 let app: Awaited<ReturnType<typeof buildApp>>;

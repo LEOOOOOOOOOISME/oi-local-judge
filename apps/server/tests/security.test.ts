@@ -1,7 +1,8 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { buildApp } from '../src/app.js';
+import { resetAuthRateLimits } from '../src/http/auth.js';
 import { ensureDataDirs, loadConfig } from '../src/config.js';
 import { hashPassword } from '../src/security/password.js';
 import { createUser } from '../src/storage/repos/users.js';
@@ -32,9 +33,13 @@ afterAll(async () => {
 });
 
 describe('security hardening', () => {
+  beforeEach(() => {
+    resetAuthRateLimits();
+  });
+
   it('rate limits repeated failed logins and records them', async () => {
     let lastStatus = 0;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 6; i++) {
       const response = await app.inject({
         method: 'POST',
         url: '/api/auth/login',

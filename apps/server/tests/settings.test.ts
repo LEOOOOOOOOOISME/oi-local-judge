@@ -226,7 +226,7 @@ describe('admin system settings routes', () => {
   const dataDir = mkdtempSync(join(tmpdir(), 'oij-settings-http-'));
   ensureDataDirs(dataDir);
   const db = openDatabase(join(dataDir, 'db', 'oijudge.db'));
-  const config = loadConfig({ OIJ_DATA_DIR: dataDir, OIJ_SESSION_SECRET: 'test-secret' });
+  const config = loadConfig({ OIJ_DATA_DIR: dataDir, OIJ_SESSION_SECRET: 'test-session-secret-0123456789-abcdef' });
   let app: Awaited<ReturnType<typeof buildApp>>;
   let cookie = '';
 

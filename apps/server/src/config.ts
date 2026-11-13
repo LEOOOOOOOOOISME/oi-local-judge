@@ -17,6 +17,11 @@ export interface Config {
   adminPassword?: string;
   sessionSecret: string;
   sessionTtlSec: number;
+  /** Optional built-in HTTPS listener. Both files must be provided together. */
+  tlsCertPath?: string;
+  tlsKeyPath?: string;
+  /** Mark the session cookie Secure (TLS directly or a trusted reverse proxy). */
+  secureCookies?: boolean;
 }
 
 export function detectGxx(env: NodeJS.ProcessEnv = process.env): string {
@@ -67,9 +72,26 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const persisted = readPersistedSettings(dataDir);
   const defaultConcurrency = Math.min(4, cpus().length);
   // Loopback by default: a fresh install must not expose the OJ (and its data)
-  // to the LAN until the operator explicitly opts in with OIJ_HOST=0.0.0.0 or
-  // the installer's LAN switch.
-  const host = env.OIJ_HOST ?? persisted.host ?? '127.0.0.1';
+  // to the LAN until the operator explicitly opts in with OIJ_HOST=0.0.0.0,
+  // OIJ_LAN=1, or the installer's LAN switch. OIJ_LAN is honoured here (not
+  // only in the desktop launcher) so CLI and desktop behave identically.
+  const lanRequested = env.OIJ_LAN === '1' || env.OIJ_LAN === 'true';
+  const host = env.OIJ_HOST ?? (lanRequested ? '0.0.0.0' : (persisted.host ?? '127.0.0.1'));
+  const tlsCertPath = env.OIJ_TLS_CERT;
+  const tlsKeyPath = env.OIJ_TLS_KEY;
+  if (Boolean(tlsCertPath) !== Boolean(tlsKeyPath)) {
+    throw new Error('OIJ_TLS_CERT and OIJ_TLS_KEY must be provided together');
+  }
+  if (tlsCertPath && !existsSync(tlsCertPath)) {
+    throw new Error(`OIJ_TLS_CERT does not exist: ${tlsCertPath}`);
+  }
+  if (tlsKeyPath && !existsSync(tlsKeyPath)) {
+    throw new Error(`OIJ_TLS_KEY does not exist: ${tlsKeyPath}`);
+  }
+  const secureCookies =
+    Boolean(tlsCertPath && tlsKeyPath) ||
+    env.OIJ_COOKIE_SECURE === '1' ||
+    env.OIJ_COOKIE_SECURE === 'true';
   return {
     host,
     port: Number(env.OIJ_PORT ?? persisted.port ?? 8787),
@@ -87,6 +109,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // Generated/persisted on first start; the legacy default is migrated.
     sessionSecret: loadOrCreateSessionSecret(dataDir, env).secret,
     sessionTtlSec: Number(env.OIJ_SESSION_TTL ?? persisted.sessionTtlSec ?? 8 * 3600),
+    ...(tlsCertPath && tlsKeyPath ? { tlsCertPath, tlsKeyPath } : {}),
+    secureCookies,
   };
 }
 

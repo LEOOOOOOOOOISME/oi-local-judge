@@ -63,6 +63,15 @@ describe('session secret bootstrapping', () => {
     expect(loadOrCreateSessionSecret(root, {}).secret).toBe(result.secret);
   });
 
+  it('rejects explicit environment secrets that are weak or legacy', () => {
+    expect(() =>
+      loadOrCreateSessionSecret(dir(), { OIJ_SESSION_SECRET: 'too-short' }),
+    ).toThrow(/at least 32/);
+    expect(() =>
+      loadOrCreateSessionSecret(dir(), { OIJ_SESSION_SECRET: 'dev-only-change-me' }),
+    ).toThrow(/at least 32|legacy/);
+  });
+
   it('honours an explicit environment secret and does not persist it', () => {
     const root = dir();
     const result = loadOrCreateSessionSecret(root, {
@@ -86,6 +95,29 @@ describe('session secret bootstrapping', () => {
     const config = loadConfig({ OIJ_DATA_DIR: root, OIJ_HOST: '0.0.0.0' });
     expect(config.host).toBe('0.0.0.0');
   });
+
+  it('maps OIJ_LAN=1 to a LAN listener for the CLI as well as the desktop', () => {
+    const root = dir();
+    expect(loadConfig({ OIJ_DATA_DIR: root, OIJ_LAN: '1' }).host).toBe('0.0.0.0');
+  });
+
+  it('requires both TLS files and marks cookies Secure with TLS', () => {
+    const root = dir();
+    const cert = join(root, 'cert.pem');
+    const key = join(root, 'key.pem');
+    writeFileSync(cert, 'cert');
+    writeFileSync(key, 'key');
+    const config = loadConfig({
+      OIJ_DATA_DIR: root,
+      OIJ_TLS_CERT: cert,
+      OIJ_TLS_KEY: key,
+    });
+    expect(config.tlsCertPath).toBe(cert);
+    expect(config.secureCookies).toBe(true);
+    expect(() =>
+      loadConfig({ OIJ_DATA_DIR: root, OIJ_TLS_CERT: cert }),
+    ).toThrow(/together/);
+  });
 });
 
 describe('administrator bootstrap', () => {
@@ -107,6 +139,25 @@ describe('administrator bootstrap', () => {
 
     // The one-time password is only emitted once.
     expect(ensureAdmin(db, config)).toBeNull();
+    db.close();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('flags every legacy admin even when the configured bootstrap username differs', () => {
+    const db = openDatabase(':memory:');
+    migrate(db);
+    const root = tempDir('oij-admin-legacy-other-');
+    const config: Config = { ...loadConfig({ OIJ_DATA_DIR: root }), adminUsername: 'root' };
+    createUser(db, {
+      username: 'admin',
+      passwordHash: hashPassword('admin123'),
+      role: 'admin',
+    });
+    const forced = ensureAdmin(db, config);
+    expect(forced?.reason).toBe('legacy-default');
+    expect(forced?.username).toBe('admin');
+    const row = getUserByUsername(db, 'admin')!;
+    expect(row.must_change_password).toBe(1);
     db.close();
     rmSync(root, { recursive: true, force: true });
   });

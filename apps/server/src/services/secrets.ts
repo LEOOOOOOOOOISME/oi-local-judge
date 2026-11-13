@@ -98,7 +98,12 @@ export function loadOrCreateSessionSecret(
   env: NodeJS.ProcessEnv = process.env,
 ): SessionSecretResult {
   const envSecret = env.OIJ_SESSION_SECRET;
-  if (typeof envSecret === 'string' && envSecret.length > 0 && envSecret !== LEGACY_SESSION_SECRET) {
+  if (typeof envSecret === 'string') {
+    if (!isUsableSecret(envSecret)) {
+      throw new Error(
+        'OIJ_SESSION_SECRET must be at least 32 characters and must not be the legacy default',
+      );
+    }
     return { secret: envSecret, source: 'env' };
   }
 
