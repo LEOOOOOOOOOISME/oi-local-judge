@@ -2,6 +2,49 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-13 / Round 151（第二轮安全审查修复）
+
+### 团队
+
+- `electron-fixer`：task-10 F-01/F-07/F-10
+- `batch-exporter`：task-12 F-08
+- Lead：task-11 F-02/03/04/05/06/09/11
+
+### 提交
+
+- `a9c19f5 fix: harden auth limits, secrets, admin migration and add TLS`
+- `3d38bc8 fix: fail closed on duplicate normalized ZIP entry paths`
+- `119cf7e feat(security): optional worker-account judge isolation, desktop password redaction, fail-closed handles`
+- 合并：`e549fae`
+
+### 修复
+
+- F-01 worker 账户隔离（optional/required、ACL、防火墙、fail closed）
+- F-02 登录限流前置
+- F-03 Session env 强度
+- F-04 全量 admin 旧密码扫描
+- F-05 内置 HTTPS + Secure Cookie
+- F-06 README 配置语义
+- F-07 初始密码不落日志
+- F-08 ZIP 重复路径 fail closed
+- F-09 有界 TTL 限流
+- F-10 交互句柄 fail closed
+- F-11 OIJ_LAN CLI 一致
+
+### 验证
+
+- 116 文件 / 1056 用例通过
+- `npm run build:native`、`npm run build` 通过
+- 浏览器 E2E 2 passed
+- worker required 缺凭据 fail closed
+
+### 边界
+
+- 真实 worker 账户需要管理员安装脚本创建；非管理员会话无法完成
+  `CreateProcessWithLogonW` 成功路径/stdio/Job 的端到端实机验证
+- 安装包未签名
+- 4C/8G、5000×4 压测仍未做
+
 ## 2026-11-11 / Round 150（v1.1.0-rc.9 发布）
 
 ### 发布

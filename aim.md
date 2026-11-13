@@ -540,6 +540,39 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - 安全实际启动：`127.0.0.1:18899`，`/api/health` 200，随机密钥/随机管理员
 - 桌面 smoke：本环境 Electron runtime 缺失，未跑；构建/tsc 通过
 
+## 3.10 rc.10：第二轮审查修复（2026-11-13）
+
+### 已修复
+
+- F-01：可选/强制独立 Windows worker 账户
+  - `OIJ_WORKER_ISOLATION=optional|required`
+  - `OIJ_WORKER_USER/PASSWORD` 或 `worker.json`
+  - required 缺凭据启动 fail closed
+  - native runner `CreateProcessWithLogonW + Job Object`
+  - dataDir deny worker 读，workdir grant worker 读写
+  - install.ps1 `-WorkerIsolation` 创建账户/ACL/防火墙出站阻断
+- F-02：登录限流在密码校验前检查；IP+账号、IP 双维度
+- F-03：显式 Session 密钥必须 ≥32 字符，弱值/旧值 fail closed
+- F-04：升级扫描所有 admin，旧 `admin123` 全部强制改密并 bump session
+- F-05：内置 HTTPS：
+  - `OIJ_TLS_CERT` / `OIJ_TLS_KEY`
+  - TLS 时 Cookie `Secure`
+  - `OIJ_COOKIE_SECURE=1` 支持反代
+- F-06：README 删除旧默认账号/0.0.0.0，补随机密码/loopback/LAN/TLS
+- F-07：Electron 模式初始密码不写 stdout/desktop.log；只走 ready IPC + 弹窗
+- F-08：ZIP 重复规范化路径 fail closed，预览/导入一致
+- F-09：登录/注册限流改为有界 TTL Map
+- F-10：交互 runner HANDLE_LIST 失败 fail closed
+- F-11：`OIJ_LAN=1` 在 loadConfig 统一生效
+
+### 验证
+
+- 116 文件 / 1056 用例通过
+- `npm run build:native`、`npm run build` 通过
+- 浏览器 E2E：2 passed
+- worker required 缺凭据：启动即退出，不监听
+- 真实 worker 账户创建/CreateProcessWithLogonW 成功路径未在管理员会话实机验证
+
 ---
 
 ## 4. 没有完成 / 待精进

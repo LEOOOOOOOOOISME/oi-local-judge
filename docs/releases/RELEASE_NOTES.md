@@ -1,4 +1,4 @@
-# OiJudge v1.1.0-rc.9
+# OiJudge v1.1.0-rc.10
 
 Windows x64 预发布版本，面向局域网 OI 评测、比赛与教学训练：Electron 桌面端、浏览器选手/管理端、原生 Job Object 评测器。
 
@@ -6,12 +6,52 @@ Windows x64 预发布版本，面向局域网 OI 评测、比赛与教学训练�
 
 ## 下载
 
-GitHub Release 附件同时提供安装器与便携包，`<version>` 与发布 tag 一致（例如 tag `v1.1.0-rc.9` 对应 `1.1.0-rc.9`）：
+GitHub Release 附件同时提供安装器与便携包，`<version>` 与发布 tag 一致（例如 tag `v1.1.0-rc.10` 对应 `1.1.0-rc.10`）：
 
 - `OiJudge-Setup-<version>.exe`：NSIS 安装器，支持自选安装目录，创建桌面与开始菜单快捷方式。
 - `oi-local-judge-<version>-win-x64.zip`：便携版 ZIP，解压即用。
 
 两者均内置 Node 服务、Web 前端、`ojrunner.exe`、`ojinteract.exe` 与 MinGW 运行库。安装版与便携版共用 `%APPDATA%\OiJudge` 数据目录。
+
+## rc.10 第二轮安全审查修复（重要）
+
+### 执行身份隔离
+
+- 新增可选/强制独立 Windows worker 账户：
+  - `OIJ_WORKER_ISOLATION=optional|required`
+  - `OIJ_WORKER_USER` / `OIJ_WORKER_PASSWORD`，或 ACL 保护的 `worker.json`
+  - `required` 缺少凭据时启动即退出，绝不回退到服务账户
+- native runner 用 `CreateProcessWithLogonW` 创建选手进程，再加入 Job Object
+- `dataDir` 对 worker 账户 deny 读取；仅本次 workdir grant 读写
+- `install.ps1 -WorkerIsolation` 创建本地账户、设置 ACL、按用户添加出站防火墙阻断
+- 注意：真实 worker 账户成功路径需要管理员安装脚本创建账户；本版本仍保留 optional 模式，required 在缺少凭据时 fail closed
+
+### 认证与网络
+
+- 登录限流改为**密码校验前**检查，IP+账号与 IP 双维度；锁定期正确密码也返回 429
+- 限流 Map 改为有界 TTL，避免用户名/IP 轮换导致内存增长
+- `OIJ_SESSION_SECRET` 显式值必须至少 32 字符，弱值/旧默认 fail closed
+- 升级时扫描**所有 admin**，旧 `admin123` 全部强制改密并吊销旧 Session
+- 内置 HTTPS：
+  - `OIJ_TLS_CERT` / `OIJ_TLS_KEY`
+  - TLS 时 Session Cookie 自动 `Secure`
+  - 反向代理 TLS 可设 `OIJ_COOKIE_SECURE=1`
+- `OIJ_LAN=1` 在 CLI 与 Desktop 统一映射到 `0.0.0.0`
+
+### 其他修复
+
+- Electron 模式初始管理员密码不再写入 `desktop.log`/stdout；只通过 ready IPC + 原生弹窗
+- ZIP 重复规范化路径直接 fail closed，预览/导入一致
+- 交互 runner `HANDLE_LIST` 初始化失败 fail closed，不再宽泛继承句柄
+- README/配置文档删除旧 `admin/admin123`、`0.0.0.0` 默认值
+
+### rc.10 验证
+
+- 116 文件 / 1056 用例通过
+- `npm run build:native`、`npm run build` 通过
+- 浏览器 E2E：2 passed
+- worker required 缺凭据启动失败，不监听端口
+- 真实 worker 账户创建、`CreateProcessWithLogonW` 成功路径与 stdio 继承仍需在管理员 Windows 会话补验
 
 ## rc.9 安全与批量进度（重要）
 
@@ -186,7 +226,7 @@ GitHub Release 附件同时提供安装器与便携包，`<version>` 与发布 t
   - desktop 启动日志、userData 可写性探测、单实例失败日志
   - server stdio pipe、60s 超时、子进程输出入日志
 - NSIS 安装包实际构建：
-  - `OiJudge-Setup-1.1.0-rc.9.exe`
+  - `OiJudge-Setup-1.1.0-rc.10.exe`
   - 静默安装/卸载实测
   - 安装态 smoke：窗口、server、`/api/health` 200、LAN、Web UI
 - 新增 `npm run build:installer`
