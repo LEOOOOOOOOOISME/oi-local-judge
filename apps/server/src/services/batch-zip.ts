@@ -34,6 +34,7 @@ export type BatchZipErrorCode =
   | 'BATCH_FILE_TOO_LARGE'
   | 'BATCH_UNCOMPRESSED_LIMIT'
   | 'BATCH_DISK_FULL'
+  | 'BATCH_DUPLICATE_PATH'
   | 'BAD_ZIP'
   | 'INCOMPLETE_UPLOAD';
 
@@ -88,12 +89,17 @@ export interface ZipScanResult {
  * segments. Returns a normalized `/`-separated relative path, or null.
  */
 export function safeZipEntryPath(name: string): string | null {
-  const normalized = name.replace(/\\/g, '/').replace(/^\.\/+/, '');
-  if (!normalized || normalized.includes('\0')) return null;
+  if (name.includes('\0')) return null;
+  const normalized = name.replace(/\\/g, '/');
   if (normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) return null;
-  const parts = normalized.split('/');
-  if (parts.some((part) => part === '..')) return null;
-  return normalized;
+  const parts: string[] = [];
+  for (const part of normalized.split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..') return null;
+    parts.push(part);
+  }
+  if (parts.length === 0) return null;
+  return parts.join('/');
 }
 
 function trimDirectory(path: string): string {
@@ -106,6 +112,8 @@ interface ScanState {
   skipped: ZipSkippedEntry[];
   entryCount: number;
   totalUncompressedBytes: number;
+  /** Normalized file paths already seen in the central directory. */
+  seenFilePaths: Set<string>;
   fatal: BatchZipError | null;
 }
 
@@ -135,6 +143,7 @@ export async function scanZipStream(
     skipped: [],
     entryCount: 0,
     totalUncompressedBytes: 0,
+    seenFilePaths: new Set(),
     fatal: null,
   };
 
@@ -175,6 +184,19 @@ export async function scanZipStream(
       file.start();
       return;
     }
+    // Duplicate normalized file paths make extraction ambiguous: a ZIP can
+    // contain two central-directory entries with the same name and different
+    // data, and a map keyed by path would silently use one of them. Fail the
+    // whole archive so preview and import agree on rejection.
+    if (state.seenFilePaths.has(safePath)) {
+      state.fatal = new BatchZipError(
+        'BATCH_DUPLICATE_PATH',
+        `duplicate zip entry path after normalization: ${safePath}`,
+      );
+      file.terminate?.();
+      return;
+    }
+    state.seenFilePaths.add(safePath);
 
     const entry: ZipEntryInfo = {
       path: safePath,
@@ -267,6 +289,7 @@ export async function extractZipEntries(
   mkdirSync(destDir, { recursive: true });
 
   const written = new Map<string, string>();
+  const seenWantedPaths = new Set<string>();
   let total = 0;
   let index = 0;
   let fatal: Error | null = null;
@@ -284,13 +307,23 @@ export async function extractZipEntries(
       file.terminate?.();
       return;
     }
+    const rawPath = file.name.replace(/\\/g, '/');
     const path = safeZipEntryPath(file.name);
-    if (!path || !wanted.has(path)) {
+    if (!path || rawPath.endsWith('/') || !wanted.has(path)) {
       // Consume and discard; leaving a file unstarted makes fflate buffer it.
       file.ondata = () => {};
       file.start();
       return;
     }
+    if (seenWantedPaths.has(path) || written.has(path)) {
+      fatal = new BatchZipError(
+        'BATCH_DUPLICATE_PATH',
+        `duplicate zip entry path after normalization: ${path}`,
+      );
+      file.terminate?.();
+      return;
+    }
+    seenWantedPaths.add(path);
 
     const target = join(destDir, `${index}.src`);
     index += 1;
@@ -327,6 +360,13 @@ export async function extractZipEntries(
       }
       if (final) {
         done = true;
+        if (written.has(path)) {
+          fatal = new BatchZipError(
+            'BATCH_DUPLICATE_PATH',
+            `duplicate zip entry path after normalization: ${path}`,
+          );
+          return;
+        }
         writeFileSync(target, Buffer.concat(chunks));
         written.set(path, target);
       }

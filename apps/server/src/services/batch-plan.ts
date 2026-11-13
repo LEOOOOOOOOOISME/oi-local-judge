@@ -47,6 +47,8 @@ export interface BatchPlan {
   candidates: BatchSourceCandidate[];
   failures: BatchPlanFailure[];
   duplicates: BatchPlanDuplicate[];
+  /** Normalized central-directory paths seen more than once (first wins). */
+  duplicatePaths: string[];
   invalidStudents: BatchInvalidStudent[];
   studentFolders: string[];
   studentSample: string[];
@@ -109,6 +111,8 @@ export function planBatchSources(input: BatchPlanInput): BatchPlan {
   const candidates: BatchSourceCandidate[] = [];
   const failures: BatchPlanFailure[] = [];
   const duplicates: BatchPlanDuplicate[] = [];
+  const duplicatePaths: string[] = [];
+  const seenPaths = new Set<string>();
   const problemFolders = new Set<string>();
   let maxDepth = 0;
   let treeSample: string[] = [];
@@ -144,6 +148,13 @@ export function planBatchSources(input: BatchPlanInput): BatchPlan {
   for (const entry of files) {
     const parts = entry.path.split('/').filter(Boolean);
     if (parts.length === 0) continue;
+    // Defensive determinism if a caller bypasses scanZipStream: keep the first
+    // sorted occurrence of a normalized path and record the rest.
+    if (seenPaths.has(entry.path)) {
+      duplicatePaths.push(entry.path);
+      continue;
+    }
+    seenPaths.add(entry.path);
     const dot = entry.path.lastIndexOf('.');
     if (dot < 0) continue;
     const extension = entry.path.slice(dot).toLowerCase();
@@ -265,6 +276,7 @@ export function planBatchSources(input: BatchPlanInput): BatchPlan {
     candidates,
     failures,
     duplicates,
+    duplicatePaths,
     invalidStudents,
     studentFolders: sortedStudents,
     studentSample: sortedStudents.slice(0, 100),
