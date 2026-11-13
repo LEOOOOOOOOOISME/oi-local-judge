@@ -2,9 +2,9 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`9ade923 release: prepare v1.1.0-rc.9`  
-发布 tag：`v1.1.0-rc.9`  
-当前 Release：`v1.1.0-rc.9`（P0 安全 + 批量进度 + P1 正确性）
+当前 HEAD：`d53ca06 release: prepare v1.1.0-rc.10`  
+发布 tag：`v1.1.0-rc.10`  
+当前 Release：`v1.1.0-rc.10`（第二轮安全审查修复）
 
 ---
 
@@ -540,7 +540,15 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - 安全实际启动：`127.0.0.1:18899`，`/api/health` 200，随机密钥/随机管理员
 - 桌面 smoke：本环境 Electron runtime 缺失，未跑；构建/tsc 通过
 
-## 3.10 rc.10：第二轮审查修复（2026-11-13）
+## 3.10 v1.1.0-rc.10 发布：第二轮审查修复（2026-11-13）
+
+- Tag：`v1.1.0-rc.10`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.10
+- CI run：`43447435301`，success
+- 资产：
+  - `OiJudge-Setup-1.1.0-rc.10.exe` 252,574,574 B
+  - `oi-local-judge-1.1.0-rc.10-win-x64.zip` 360,115,035 B
+- prerelease：是
 
 ### 已修复
 

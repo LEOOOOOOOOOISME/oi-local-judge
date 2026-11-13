@@ -2,6 +2,45 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-13 / Round 152（v1.1.0-rc.10 发布）
+
+### 发布
+
+- Tag：`v1.1.0-rc.10`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0-rc.10
+- CI run：`43447435301` — **success**
+- 资产：
+  - `OiJudge-Setup-1.1.0-rc.10.exe` 252,574,574 B
+  - `oi-local-judge-1.1.0-rc.10-win-x64.zip` 360,115,035 B
+- prerelease：是
+
+### 内容
+
+- F-01 worker 账户隔离（optional/required、ACL、防火墙、fail closed）
+- F-02 登录限流前置
+- F-03 Session env 密钥强度
+- F-04 全量旧 admin 强制改密
+- F-05 内置 HTTPS + Secure Cookie
+- F-06 README 配置语义
+- F-07 初始密码不落日志
+- F-08 ZIP 重复路径 fail closed
+- F-09 有界 TTL 限流
+- F-10 交互句柄 fail closed
+- F-11 OIJ_LAN CLI 一致
+
+### 验证
+
+- 116 文件 / 1056 用例通过
+- `npm run build:native`、`npm run build`、release 测试通过
+- 浏览器 E2E 2 passed
+- CI portable + NSIS + Release 全部 success
+
+### 边界
+
+- 真实 worker 账户创建与 `CreateProcessWithLogonW` 成功路径需管理员会话补验
+- 安装包未签名
+- 4C/8G、5000×4 压测未做
+
 ## 2026-11-13 / Round 151（第二轮安全审查修复）
 
 ### 团队
