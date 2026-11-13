@@ -27,3 +27,18 @@ export function formatInitialAdminNotice(notice: InitialAdminNotice): string {
     '默认密码不安全，首次登录后必须修改密码。',
   ].join('\n');
 }
+
+/**
+ * F-07 defence in depth: even though the embedded server no longer prints the
+ * bootstrap password, the desktop log captures server stdout. Redact anything
+ * that looks like an initial-password line so desktop.log can never contain a
+ * credential.
+ */
+export function redactInitialPassword(line: string): string {
+  return line
+    .replace(/(初始密码\s*[:：]\s*)(\S+)/g, (_match, prefix: string) => `${prefix}[REDACTED]`)
+    .replace(
+      /(initial\s+password\s*[:=]\s*)(\S+)/gi,
+      (_match, prefix: string) => `${prefix}[REDACTED]`,
+    );
+}

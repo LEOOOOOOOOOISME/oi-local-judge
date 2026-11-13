@@ -73,7 +73,66 @@ struct Options {
   int wallMs = 3000;
   int memoryMb = 256;
   int processLimit = 1;
+  // Fail instead of silently running as the service account when the server
+  // requires isolation. Credentials themselves arrive through the environment
+  // (never argv, which is visible to other users).
+  bool workerRequired = false;
 };
+
+struct WorkerCredentials {
+  std::wstring user;
+  std::wstring password;
+};
+
+std::wstring readEnvValue(const wchar_t* name) {
+  DWORD size = GetEnvironmentVariableW(name, nullptr, 0);
+  if (size == 0) return std::wstring();
+  std::wstring value(size, L'\0');
+  DWORD written = GetEnvironmentVariableW(name, value.data(), size);
+  if (written == 0) return std::wstring();
+  value.resize(written);
+  return value;
+}
+
+WorkerCredentials readWorkerCredentials() {
+  WorkerCredentials credentials;
+  credentials.user = readEnvValue(L"OIJ_RUNNER_WORKER_USER");
+  credentials.password = readEnvValue(L"OIJ_RUNNER_WORKER_PASSWORD");
+  return credentials;
+}
+
+/**
+ * Minimal environment for the isolated worker process. The runner itself holds
+ * the worker password, so passing its own environment block would leak the
+ * credential into contestant code.
+ */
+std::wstring buildWorkerEnvironment(const std::wstring& workdir) {
+  const wchar_t* safeNames[] = {
+      L"SystemRoot", L"SystemDrive", L"windir", L"COMSPEC", L"PATH",
+      L"PATHEXT",    L"NUMBER_OF_PROCESSORS", L"PROCESSOR_ARCHITECTURE",
+      L"OS",
+  };
+  std::wstring block;
+  for (const wchar_t* name : safeNames) {
+    const std::wstring value = readEnvValue(name);
+    if (value.empty()) continue;
+    block.append(name);
+    block.push_back(L'=');
+    block.append(value);
+    block.push_back(L'\0');
+  }
+  if (!workdir.empty()) {
+    block.append(L"TEMP=");
+    block.append(workdir);
+    block.push_back(L'\0');
+    block.append(L"TMP=");
+    block.append(workdir);
+    block.push_back(L'\0');
+  }
+  // Environment blocks are double-NUL terminated.
+  block.push_back(L'\0');
+  return block;
+}
 
 struct Result {
   bool ok = false;
@@ -280,10 +339,13 @@ bool parseOptions(const std::vector<std::wstring>& args, Options* opt, std::stri
       if (!nextInt(&opt->memoryMb)) return false;
     } else if (key == L"--process-limit") {
       if (!nextInt(&opt->processLimit)) return false;
+    } else if (key == L"--worker-required") {
+      opt->workerRequired = true;
     } else if (key == L"--help" || key == L"-h") {
       *error = "usage: ojrunner --exe <path> [--workdir <dir>] [--time-ms <n>] "
                "[--wall-ms <n>] [--memory-mb <n>] [--process-limit <n>] "
-               "[--input <file>] [--output <file>] [--stderr <file>]";
+               "[--input <file>] [--output <file>] [--stderr <file>] "
+               "[--worker-required]";
       return false;
     } else {
       *error = "unknown option " + toUtf8(key);
@@ -459,6 +521,22 @@ int run(const Options& opt, Result* out) {
   // Best effort: UI restrictions are not supported on every SKU.
   SetInformationJobObject(job, JobObjectBasicUIRestrictions, &ui, sizeof(ui));
 
+  const WorkerCredentials worker = readWorkerCredentials();
+  if (opt.workerRequired && (worker.user.empty() || worker.password.empty())) {
+    out->error =
+        "worker isolation required but OIJ_RUNNER_WORKER_USER/OIJ_RUNNER_WORKER_PASSWORD are "
+        "missing (refusing to run as the service account)";
+    CloseHandle(job);
+    return 8;
+  }
+  if (worker.user.empty() != worker.password.empty()) {
+    out->error =
+        "OIJ_RUNNER_WORKER_USER and OIJ_RUNNER_WORKER_PASSWORD must be provided together";
+    CloseHandle(job);
+    return 8;
+  }
+  const bool workerMode = !worker.user.empty();
+
   SECURITY_ATTRIBUTES sa{};
   sa.nLength = sizeof(sa);
   sa.lpSecurityDescriptor = nullptr;
@@ -511,39 +589,101 @@ int run(const Options& opt, Result* out) {
   // bInheritHandles=TRUE every inheritable handle of the runner leaks into the
   // child; in particular an inherited console handle can change the behaviour of
   // a crashing child's CRT teardown. PROC_THREAD_ATTRIBUTE_HANDLE_LIST narrows
-  // inheritance to exactly the redirected files.
-  SIZE_T attributeSize = 0;
-  InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);
-  std::vector<BYTE> attributeStorage(attributeSize);
+  // inheritance to exactly the redirected files. Failure is fatal: falling back
+  // to unrestricted inheritance would silently widen what the contestant can
+  // touch.
+  //
+  // CreateProcessWithLogonW does not accept EXTENDED_STARTUPINFO_PRESENT (it
+  // returns ERROR_INVALID_PARAMETER), so the worker path uses a plain
+  // STARTUPINFOW. That API cannot be combined with an explicit handle list;
+  // this limitation is reported by the worker-isolation path and is why the
+  // required mode refuses to run rather than silently falling back when the
+  // isolated process cannot be created.
+  STARTUPINFOW plainStartup{};
+  plainStartup.cb = sizeof(plainStartup);
+  plainStartup.dwFlags = STARTF_USESTDHANDLES;
+  plainStartup.hStdInput = hIn;
+  plainStartup.hStdOutput = hOut;
+  plainStartup.hStdError = hErr;
+  LPSTARTUPINFOW startupInfo = &plainStartup;
+  std::vector<BYTE> attributeStorage;
   LPPROC_THREAD_ATTRIBUTE_LIST attributeList = nullptr;
-  LPSTARTUPINFOW startupInfo = &siex.StartupInfo;
-  HANDLE stdHandles[3] = {hIn, hOut, hErr};
-  if (!attributeStorage.empty() &&
-      InitializeProcThreadAttributeList(
-          reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeStorage.data()), 1, 0,
-          &attributeSize)) {
+
+  if (!workerMode) {
+    SIZE_T attributeSize = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &attributeSize);
+    if (attributeSize == 0) {
+      out->error = "InitializeProcThreadAttributeList sizing failed: " +
+                   describeWin32Error(GetLastError());
+      CloseHandle(hIn);
+      CloseHandle(hOut);
+      CloseHandle(hErr);
+      CloseHandle(job);
+      return 9;
+    }
+    attributeStorage.assign(attributeSize, 0);
     attributeList =
         reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(attributeStorage.data());
-    if (UpdateProcThreadAttribute(attributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
-                                  stdHandles, sizeof(stdHandles), nullptr, nullptr)) {
-      siex.lpAttributeList = attributeList;
-      creationFlags |= EXTENDED_STARTUPINFO_PRESENT;
-      debugTrace("using PROC_THREAD_ATTRIBUTE_HANDLE_LIST for stdio inheritance");
-    } else {
-      debugTrace("UpdateProcThreadAttribute(HANDLE_LIST) failed: %lu",
-                 GetLastError());
+    if (!InitializeProcThreadAttributeList(attributeList, 1, 0, &attributeSize)) {
+      out->error = "InitializeProcThreadAttributeList failed: " +
+                   describeWin32Error(GetLastError());
+      CloseHandle(hIn);
+      CloseHandle(hOut);
+      CloseHandle(hErr);
+      CloseHandle(job);
+      return 9;
+    }
+    HANDLE stdHandles[3] = {hIn, hOut, hErr};
+    if (!UpdateProcThreadAttribute(attributeList, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST,
+                                   stdHandles, sizeof(stdHandles), nullptr, nullptr)) {
+      out->error = "UpdateProcThreadAttribute(HANDLE_LIST) failed: " +
+                   describeWin32Error(GetLastError());
       DeleteProcThreadAttributeList(attributeList);
-      attributeList = nullptr;
+      CloseHandle(hIn);
+      CloseHandle(hOut);
+      CloseHandle(hErr);
+      CloseHandle(job);
+      return 9;
+    }
+    siex.lpAttributeList = attributeList;
+    creationFlags |= EXTENDED_STARTUPINFO_PRESENT;
+    startupInfo = &siex.StartupInfo;
+    debugTrace("using PROC_THREAD_ATTRIBUTE_HANDLE_LIST for stdio inheritance");
+  }
+
+  const wchar_t* cwd = opt.workdir.empty() ? nullptr : opt.workdir.c_str();
+  const std::wstring workerEnvironment =
+      workerMode ? buildWorkerEnvironment(opt.workdir) : std::wstring();
+  BOOL created = FALSE;
+  if (workerMode) {
+    // CreateProcessWithLogonW creates the process with the worker token; the
+    // environment block is minimal so the worker password in the runner's own
+    // environment never reaches contestant code.
+    created = CreateProcessWithLogonW(
+        worker.user.c_str(), nullptr, worker.password.c_str(), LOGON_WITH_PROFILE,
+        opt.exe.c_str(), commandBuffer.data(),
+        creationFlags | CREATE_UNICODE_ENVIRONMENT,
+        workerEnvironment.empty()
+            ? nullptr
+            : const_cast<wchar_t*>(workerEnvironment.c_str()),
+        cwd, startupInfo, &pi);
+    if (!created) {
+      const DWORD code = GetLastError();
+      out->error = "CreateProcessWithLogonW failed for " + toUtf8(opt.exe) + ": " +
+                   describeWin32Error(code) + " (code " + std::to_string(code) + ")";
+    }
+  } else {
+    created = CreateProcessW(opt.exe.c_str(), commandBuffer.data(), nullptr, nullptr, TRUE,
+                             creationFlags, nullptr, cwd, startupInfo, &pi);
+    if (!created) {
+      out->error = "CreateProcessW failed for " + toUtf8(opt.exe) + ": " +
+                   describeWin32Error(GetLastError());
     }
   }
-  const wchar_t* cwd = opt.workdir.empty() ? nullptr : opt.workdir.c_str();
-  const BOOL created =
-      CreateProcessW(opt.exe.c_str(), commandBuffer.data(), nullptr, nullptr, TRUE,
-                     creationFlags, nullptr, cwd, startupInfo, &pi);
-  if (attributeList != nullptr) DeleteProcThreadAttributeList(attributeList);
+  if (attributeList != nullptr) {
+    DeleteProcThreadAttributeList(attributeList);
+  }
   if (!created) {
-    out->error = "CreateProcessW failed for " + toUtf8(opt.exe) + ": " +
-                 describeWin32Error(GetLastError());
     CloseHandle(hIn);
     CloseHandle(hOut);
     CloseHandle(hErr);

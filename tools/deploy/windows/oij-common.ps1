@@ -27,6 +27,7 @@ $OijRunValueName = 'OiJudge'
 $OijShortcutFileName = 'OiJudge.lnk'
 $OijLauncherFileName = 'OiJudge.cmd'
 $OijProductName = 'OiJudge'
+$OijWorkerAccountName = 'OiJudgeWorker'
 
 function Write-OijOk {
   param([Parameter(Mandatory = $true)][string]$Message)
@@ -507,7 +508,8 @@ function Start-OijServer {
     [Parameter(Mandatory = $true)][int]$Port,
     [Parameter(Mandatory = $true)][string]$NodePath,
     [string]$LogDir,
-    [string]$HostAddress = '127.0.0.1'
+    [string]$HostAddress = '127.0.0.1',
+    [ValidateSet('optional', 'required')][string]$WorkerIsolation = 'optional'
   )
   $cliPath = Join-Path $AppDir 'apps\server\dist\cli.js'
   if (-not $LogDir) {
@@ -516,7 +518,7 @@ function Start-OijServer {
   New-OijDirectory -Path $LogDir
   $stdoutPath = Join-Path $LogDir 'server.out.log'
   $stderrPath = Join-Path $LogDir 'server.err.log'
-  $variableNames = @('OIJ_PORT', 'OIJ_HOST', 'OIJ_DATA_DIR', 'OIJ_RUNNER', 'OIJ_INTERACT_RUNNER')
+  $variableNames = @('OIJ_PORT', 'OIJ_HOST', 'OIJ_DATA_DIR', 'OIJ_RUNNER', 'OIJ_INTERACT_RUNNER', 'OIJ_WORKER_ISOLATION')
   $previousValues = @{}
   foreach ($name in $variableNames) {
     $previousValues[$name] = [Environment]::GetEnvironmentVariable($name, 'Process')
@@ -527,6 +529,7 @@ function Start-OijServer {
     $env:OIJ_DATA_DIR = $DataDir
     $env:OIJ_RUNNER = Join-Path $AppDir 'native\runner\out\ojrunner.exe'
     $env:OIJ_INTERACT_RUNNER = Join-Path $AppDir 'native\interact\out\ojinteract.exe'
+    $env:OIJ_WORKER_ISOLATION = $WorkerIsolation
     $process = Start-Process -FilePath $NodePath -ArgumentList ('"' + $cliPath + '"') `
       -WorkingDirectory $AppDir -WindowStyle Hidden `
       -RedirectStandardOutput $stdoutPath -RedirectStandardError $stderrPath -PassThru

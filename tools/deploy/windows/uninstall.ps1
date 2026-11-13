@@ -199,6 +199,29 @@ if (Test-OijFirewallRule -Port $port) {
   Write-OijSkip 'no firewall rule was found'
 }
 
+# --- Worker isolation (F-01) --------------------------------------------
+if ($state -and $state.PSObject.Properties['workerIsolation'] -and $state.workerIsolation) {
+  $workerAccount = $OijWorkerAccountName
+  if ($DryRun) {
+    Write-OijPlan ("remove the outbound firewall rule and local user {0} (needs administrator)" -f $workerAccount)
+  } elseif (-not (Test-OijAdministrator)) {
+    Write-OijWarn ("worker isolation cleanup (firewall rule/local user {0}) needs an elevated PowerShell" -f $workerAccount)
+    $administratorBlocked = $true
+  } else {
+    try {
+      $workerRule = Get-NetFirewallRule -DisplayName 'OiJudge Worker outbound block' -ErrorAction SilentlyContinue
+      if ($workerRule) { Remove-NetFirewallRule -DisplayName 'OiJudge Worker outbound block' }
+      if (Get-LocalUser -Name $workerAccount -ErrorAction SilentlyContinue) {
+        Remove-LocalUser -Name $workerAccount
+      }
+      Write-OijOk ("removed the worker firewall rule and local user {0}" -f $workerAccount)
+    } catch {
+      Write-OijWarn ("could not fully remove worker isolation: {0}" -f $_.Exception.Message)
+      $cleanupIncomplete = $true
+    }
+  }
+}
+
 # --- Application tree, launcher, helper scripts, state ------------------
 if ((Test-Path -LiteralPath $appDir) -or (Test-OijReparsePoint -Path $appDir)) {
   if ($DryRun) {

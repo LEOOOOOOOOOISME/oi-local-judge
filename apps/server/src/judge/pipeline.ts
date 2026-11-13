@@ -14,7 +14,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { WS_EVENTS, type TestResultDto, type Verdict } from '@oij/shared';
 
 import type { Config } from '../config.js';
-import { createJudgeWorkdir } from './isolation.js';
+import { createIsolatedJudgeWorkdir, workerRunOptions } from './worker.js';
 import { transaction } from '../storage/db.js';
 import {
   getProblem,
@@ -381,6 +381,7 @@ export async function judgeTestcase(args: {
     stdoutFile,
     stderrFile,
     signal,
+    worker: workerRunOptions(config),
   });
 
   throwIfCanceled(signal);
@@ -553,7 +554,7 @@ async function judgeSubmissionInternal(options: JudgeSubmissionOptions): Promise
       markSubmissionFailed(db, submissionId, events, 'problem has no enabled testcases');
       return;
     }
-    const workdir = createJudgeWorkdir(config.dataDir, `answer-${submissionId}-`);
+    const workdir = createIsolatedJudgeWorkdir(config, `answer-${submissionId}-`);
     try {
       throwIfCanceled(signal);
       setSubmissionStatus(db, submissionId, 'running');
@@ -618,7 +619,7 @@ async function judgeSubmissionInternal(options: JudgeSubmissionOptions): Promise
       markSubmissionFailed(db, submissionId, events, 'interactive problem has no interactor source');
       return;
     }
-    const workdir = createJudgeWorkdir(config.dataDir, `interactive-${submissionId}-`);
+    const workdir = createIsolatedJudgeWorkdir(config, `interactive-${submissionId}-`);
     try {
       setSubmissionStatus(db, submissionId, 'compiling');
       const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
@@ -669,6 +670,7 @@ async function judgeSubmissionInternal(options: JudgeSubmissionOptions): Promise
           memoryMb: problem.memory_mb,
           interactorErr: join(workdir, `interactor-${testcase.id}.err`),
           contestantErr: join(workdir, `contestant-${testcase.id}.err`),
+          worker: workerRunOptions(config),
         });
         throwIfCanceled(signal);
         results.push({
@@ -718,7 +720,7 @@ async function judgeSubmissionInternal(options: JudgeSubmissionOptions): Promise
   }
   const subtasks = getSubtasks(db, problem.id);
 
-  const workdir = createJudgeWorkdir(config.dataDir, `sub-${submissionId}-`);
+  const workdir = createIsolatedJudgeWorkdir(config, `sub-${submissionId}-`);
 
   try {
     const sourcePath = resolveDataPath(config.dataDir, submission.source_path);
