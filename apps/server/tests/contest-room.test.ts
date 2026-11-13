@@ -60,7 +60,7 @@ async function setupApp() {
   const config: Config = {
     ...loadConfig({
       ...process.env,
-      OIJ_SESSION_SECRET: 'test-secret',
+      OIJ_SESSION_SECRET: 'test-session-secret-0123456789-abcdef',
       OIJ_DATA_DIR: dataDir,
     }),
     dataDir,
@@ -167,7 +167,7 @@ describe('judge submission events', () => {
     const config: Config = {
       ...loadConfig({
         ...process.env,
-        OIJ_SESSION_SECRET: 'test-secret',
+        OIJ_SESSION_SECRET: 'test-session-secret-0123456789-abcdef',
         OIJ_DATA_DIR: dataDir,
       }),
       dataDir,

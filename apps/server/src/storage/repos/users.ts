@@ -52,6 +52,12 @@ export function getUserById(db: DatabaseSync, id: number): UserRow | null {
   return (db.prepare('SELECT * FROM users WHERE id = ?').get(id) as unknown as UserRow) ?? null;
 }
 
+export function listAdmins(db: DatabaseSync): UserRow[] {
+  return db
+    .prepare("SELECT * FROM users WHERE role = 'admin' ORDER BY id")
+    .all() as unknown as UserRow[];
+}
+
 export function bumpSessionVersion(db: DatabaseSync, userId: number): void {
   db.prepare('UPDATE users SET session_version = session_version + 1 WHERE id = ?').run(userId);
 }

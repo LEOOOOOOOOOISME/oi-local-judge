@@ -17,7 +17,7 @@ afterEach(async () => {
 async function setup() {
   const db = openDatabase(':memory:');
   migrate(db);
-  const config = loadConfig({ ...process.env, OIJ_SESSION_SECRET: 'test-secret' });
+  const config = loadConfig({ ...process.env, OIJ_SESSION_SECRET: 'test-session-secret-0123456789-abcdef' });
   const app = await buildApp({ db, config });
   cleanups.push(async () => {
     await app.close();

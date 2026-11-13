@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { Config } from '../src/config.js';
-import { registerAuthRoutes } from '../src/http/auth.js';
+import { registerAuthRoutes, resetAuthRateLimits } from '../src/http/auth.js';
 import { requireRole } from '../src/security/auth.js';
 import { hashPassword, verifyPassword } from '../src/security/password.js';
 import { signSession, verifySession } from '../src/security/session.js';
@@ -35,6 +35,7 @@ let app: FastifyInstance;
 let tmpDir: string;
 
 beforeEach(async () => {
+  resetAuthRateLimits();
   tmpDir = mkdtempSync(join(tmpdir(), 'oij-auth-'));
   db = openDatabase(join(tmpDir, 'test.db'));
   migrate(db);
@@ -183,6 +184,22 @@ describe('POST /api/auth/login', () => {
     expect(header).toContain('Max-Age=3600');
   });
 
+  it('marks the session cookie Secure when TLS or a trusted proxy is configured', async () => {
+    seedUser();
+    config.secureCookies = true;
+    try {
+      const response = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { username: 'alice', password: 'secret123' },
+      });
+      expect(response.statusCode).toBe(200);
+      expect(String(response.headers['set-cookie'])).toContain('; Secure');
+    } finally {
+      config.secureCookies = false;
+    }
+  });
+
   it('returns 401 for a wrong password', async () => {
     seedUser();
     const response = await app.inject({
@@ -214,6 +231,27 @@ describe('POST /api/auth/login', () => {
       payload: { username: 'alice', password: 'secret123' },
     });
     expect(response.statusCode).toBe(401);
+  });
+
+  it('blocks a correct password once the failure window is locked', async () => {
+    seedUser();
+    for (let i = 0; i < 5; i++) {
+      const failed = await app.inject({
+        method: 'POST',
+        url: '/api/auth/login',
+        payload: { username: 'alice', password: 'wrong-password' },
+      });
+      expect(failed.statusCode).toBe(401);
+    }
+    const blocked = await app.inject({
+      method: 'POST',
+      url: '/api/auth/login',
+      payload: { username: 'alice', password: 'secret123' },
+    });
+    expect(blocked.statusCode, blocked.body).toBe(429);
+    expect((blocked.json() as { error: { code: string } }).error.code).toBe(
+      'TOO_MANY_ATTEMPTS',
+    );
   });
 
   it('returns 400 when credentials are missing', async () => {
