@@ -1,4 +1,5 @@
-import { ensureDataDirs, loadConfig } from './config.js';
+import { ensureDataDirs, loadConfig, workerIsolationIssue } from './config.js';
+import { ensureWorkerDataDirAcl, workerRunOptions } from './judge/worker.js';
 import { openDatabase } from './storage/db.js';
 import { migrate } from './storage/migrate.js';
 import { createHub } from './realtime/hub.js';
@@ -14,7 +15,33 @@ import { buildApp } from './app.js';
 import { join } from 'node:path';
 
 const config = loadConfig();
+// Fail closed at startup: required worker isolation must never degrade to
+// running contestant code as the service account.
+const workerIssue = workerIsolationIssue(config);
+if (workerIssue) {
+  console.error(`[security] ${workerIssue}`);
+  process.exit(1);
+}
 ensureDataDirs(config.dataDir);
+if (workerRunOptions(config)) {
+  const aclError = ensureWorkerDataDirAcl(config);
+  if (aclError) {
+    console.warn(`[worker] could not apply the data-directory deny ACL: ${aclError}`);
+    if (config.workerIsolation === 'required') {
+      console.error('[security] worker isolation required but the data-directory ACL failed');
+      process.exit(1);
+    }
+  }
+}
+
+const parentPort = (
+  process as unknown as {
+    parentPort?: { postMessage(value: unknown): void };
+  }
+).parentPort;
+// In Electron the password is delivered only through the ready IPC message and
+// shown in a native dialog. Writing it to stdout would put it in desktop.log.
+const embedded = parentPort !== undefined;
 
 // Apply a staged restore before the database is opened: replacing the SQLite
 // file while a handle exists is unsafe, and a failure must abort startup rather
@@ -40,7 +67,7 @@ migrate(db);
 // record in the `ready` message and displays it in a dialog; a CLI deployment
 // only sees this banner (and the server log).
 const initialAdmin = ensureAdmin(db, config);
-if (initialAdmin?.reason === 'created' && initialAdmin.password) {
+if (!embedded && initialAdmin?.reason === 'created' && initialAdmin.password) {
   console.warn('');
   console.warn('============================================================');
   console.warn(' OiJudge 首次启动已生成管理员账号（密码只显示这一次）');
@@ -49,7 +76,7 @@ if (initialAdmin?.reason === 'created' && initialAdmin.password) {
   console.warn(' 首次登录后必须立即修改密码。');
   console.warn('============================================================');
   console.warn('');
-} else if (initialAdmin?.reason === 'legacy-default') {
+} else if (!embedded && initialAdmin?.reason === 'legacy-default') {
   console.warn(
     `[security] 管理员 ${initialAdmin.username} 仍在使用默认密码 admin123；` +
       '已强制要求下次登录时修改密码。',
@@ -99,11 +126,6 @@ const address = app.server.address();
 const actualPort = typeof address === 'object' && address ? address.port : port;
 app.log.info({ port: actualPort, host, dataDir: config.dataDir }, 'ojserver listening');
 
-const parentPort = (
-  process as unknown as {
-    parentPort?: { postMessage(value: unknown): void };
-  }
-).parentPort;
 parentPort?.postMessage({
   type: 'ready',
   port: actualPort,

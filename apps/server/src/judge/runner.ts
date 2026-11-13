@@ -5,6 +5,7 @@ import { promisify } from 'node:util';
 
 import { JudgeCanceledError } from './cancellation.js';
 import { judgeChildEnv } from './isolation.js';
+import type { WorkerRunOptions } from './worker.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +16,8 @@ export interface RunOptions {
   exe: string;
   /** Working directory of the child process. */
   workdir: string;
+  /** Optional low-privilege Windows account for the contestant process. */
+  worker?: WorkerRunOptions;
   /** User CPU time limit in milliseconds (job per-process limit, +1s buffer). */
   timeMs: number;
   /** Wall-clock limit in milliseconds enforced by the runner. */
@@ -140,6 +143,14 @@ export async function runSandboxed(o: RunOptions): Promise<RunResult> {
     '--stderr',
     o.stderrFile,
   ];
+  if (o.worker?.required) args.push('--worker-required');
+  const runnerEnv = judgeChildEnv(process.env, o.workdir);
+  if (o.worker) {
+    // Credentials travel through the child environment, never argv (argv is
+    // readable by other users via process listing).
+    runnerEnv.OIJ_RUNNER_WORKER_USER = o.worker.user;
+    runnerEnv.OIJ_RUNNER_WORKER_PASSWORD = o.worker.password;
+  }
 
   let stdout = '';
   try {
@@ -151,7 +162,7 @@ export async function runSandboxed(o: RunOptions): Promise<RunResult> {
       signal: o.signal,
       // Never leak the server environment (secrets/data dir) into contestant
       // code; the native runner passes this environment to the sandboxed child.
-      env: judgeChildEnv(process.env, o.workdir),
+      env: runnerEnv,
     });
     stdout = toText(outcome.stdout);
   } catch (err) {

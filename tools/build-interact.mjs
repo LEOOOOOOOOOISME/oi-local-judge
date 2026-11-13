@@ -23,6 +23,7 @@ export function buildInteractRunner() {
       out,
       join(process.cwd(), 'native/interact/src/main.cpp'),
       '-lshell32',
+      '-ladvapi32',
     ],
     { stdio: 'inherit' },
   );

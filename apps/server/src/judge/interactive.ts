@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { judgeChildEnv } from './isolation.js';
+import type { WorkerRunOptions } from './worker.js';
 
 export interface InteractiveRunOptions {
   runner: string;
@@ -13,6 +14,8 @@ export interface InteractiveRunOptions {
   memoryMb: number;
   interactorErr?: string;
   contestantErr?: string;
+  /** Optional low-privilege Windows account for the contestant process only. */
+  worker?: WorkerRunOptions;
 }
 
 export interface InteractiveRunResult {
@@ -48,6 +51,12 @@ export function runInteractive(options: InteractiveRunOptions): Promise<Interact
   if (options.answer) args.push('--answer', options.answer);
   if (options.interactorErr) args.push('--interactor-err', options.interactorErr);
   if (options.contestantErr) args.push('--contestant-err', options.contestantErr);
+  if (options.worker?.required) args.push('--worker-required');
+  const childEnv = judgeChildEnv(process.env, options.workdir);
+  if (options.worker) {
+    childEnv.OIJ_INTERACT_WORKER_USER = options.worker.user;
+    childEnv.OIJ_INTERACT_WORKER_PASSWORD = options.worker.password;
+  }
 
   return new Promise((resolve) => {
     let stdout = '';
@@ -61,7 +70,7 @@ export function runInteractive(options: InteractiveRunOptions): Promise<Interact
     };
     const child = spawn(options.runner, args, {
       cwd: options.workdir,
-      env: judgeChildEnv(process.env, options.workdir),
+      env: childEnv,
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe'],
     });

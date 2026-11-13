@@ -13,6 +13,7 @@ import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
   formatInitialAdminNotice,
+  redactInitialPassword,
   type InitialAdminNotice,
 } from './first-run.js';
 
@@ -249,10 +250,11 @@ async function startServer(root: string): Promise<ServerReady> {
     output.push(text);
     while (output.length > 200) output.shift();
     for (const line of text.split(/\r?\n/)) {
-      if (line.trim()) log(`[server:${stream}] ${line.trim()}`);
+      if (line.trim()) log(`[server:${stream}] ${redactInitialPassword(line.trim())}`);
     }
   };
-  const tail = (): string => output.join('').trim().slice(-4000);
+  const tail = (): string =>
+    redactInitialPassword(output.join('').trim()).slice(-4000);
   child.stdout?.on('data', (chunk: Buffer) => capture(chunk, 'stdout'));
   child.stderr?.on('data', (chunk: Buffer) => capture(chunk, 'stderr'));
   child.on('spawn', () => log(`server process spawned pid=${child.pid ?? 'unknown'}`));

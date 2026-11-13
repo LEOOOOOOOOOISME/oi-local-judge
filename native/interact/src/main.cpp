@@ -39,7 +39,56 @@ struct Options {
   int timeMs = 1000;
   int wallMs = 5000;
   int memoryMb = 256;
+  bool workerRequired = false;
 };
+
+struct WorkerCredentials {
+  std::wstring user;
+  std::wstring password;
+  bool configured() const { return !user.empty(); }
+};
+
+std::wstring readEnvValue(const wchar_t* name) {
+  DWORD size = GetEnvironmentVariableW(name, nullptr, 0);
+  if (size == 0) return {};
+  std::wstring value(size, L'\0');
+  DWORD written = GetEnvironmentVariableW(name, value.data(), size);
+  if (written == 0) return {};
+  value.resize(written);
+  return value;
+}
+
+WorkerCredentials readWorkerCredentials() {
+  WorkerCredentials credentials;
+  credentials.user = readEnvValue(L"OIJ_INTERACT_WORKER_USER");
+  credentials.password = readEnvValue(L"OIJ_INTERACT_WORKER_PASSWORD");
+  return credentials;
+}
+
+std::wstring buildWorkerEnvironment(const std::wstring& workdir) {
+  const wchar_t* safeNames[] = {L"SystemRoot", L"SystemDrive", L"windir", L"COMSPEC",
+                                L"PATH",       L"PATHEXT",    L"NUMBER_OF_PROCESSORS",
+                                L"PROCESSOR_ARCHITECTURE", L"OS"};
+  std::wstring block;
+  for (const wchar_t* name : safeNames) {
+    const std::wstring value = readEnvValue(name);
+    if (value.empty()) continue;
+    block.append(name);
+    block.push_back(L'=');
+    block.append(value);
+    block.push_back(L'\0');
+  }
+  if (!workdir.empty()) {
+    block.append(L"TEMP=");
+    block.append(workdir);
+    block.push_back(L'\0');
+    block.append(L"TMP=");
+    block.append(workdir);
+    block.push_back(L'\0');
+  }
+  block.push_back(L'\0');
+  return block;
+}
 
 struct Result {
   bool ok = false;
@@ -154,6 +203,8 @@ bool parseOptions(const std::vector<std::wstring>& args, Options* opt, std::stri
       if (!nextInt(&opt->wallMs)) return false;
     } else if (key == L"--memory-mb") {
       if (!nextInt(&opt->memoryMb)) return false;
+    } else if (key == L"--worker-required") {
+      opt->workerRequired = true;
     } else {
       *error = "unknown option " + toUtf8(key);
       return false;
@@ -179,7 +230,8 @@ HANDLE openInheritableFile(const std::wstring& path, SECURITY_ATTRIBUTES& sa) {
 
 bool createChild(const std::wstring& exe, const std::wstring& arguments,
                  const std::wstring& workdir, HANDLE stdinHandle, HANDLE stdoutHandle,
-                 HANDLE stderrHandle, PROCESS_INFORMATION* pi, std::string* error) {
+                 HANDLE stderrHandle, PROCESS_INFORMATION* pi, std::string* error,
+                 const WorkerCredentials& worker) {
   std::wstring commandLine = quote(exe) + (arguments.empty() ? L"" : L" " + arguments);
   std::vector<wchar_t> buffer(commandLine.begin(), commandLine.end());
   buffer.push_back(L'\0');
@@ -191,33 +243,77 @@ bool createChild(const std::wstring& exe, const std::wstring& arguments,
   siex.StartupInfo.hStdOutput = stdoutHandle;
   siex.StartupInfo.hStdError = stderrHandle;
 
-  SIZE_T size = 0;
-  InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
-  std::vector<BYTE> storage(size);
-  LPPROC_THREAD_ATTRIBUTE_LIST list = nullptr;
+  STARTUPINFOW plain{};
+  plain.cb = sizeof(plain);
+  plain.dwFlags = STARTF_USESTDHANDLES;
+  plain.hStdInput = stdinHandle;
+  plain.hStdOutput = stdoutHandle;
+  plain.hStdError = stderrHandle;
+  LPSTARTUPINFOW startupInfo = &plain;
   DWORD flags = CREATE_SUSPENDED | CREATE_NO_WINDOW;
-  HANDLE handles[3] = {stdinHandle, stdoutHandle, stderrHandle};
-  if (!storage.empty() &&
-      InitializeProcThreadAttributeList(reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data()),
-                                        1, 0, &size)) {
+  std::vector<BYTE> storage;
+  LPPROC_THREAD_ATTRIBUTE_LIST list = nullptr;
+
+  if (!worker.configured()) {
+    // F-10: the handle list is a security boundary. If it cannot be constructed
+    // we fail the run; bInheritHandles=TRUE without a list would expose every
+    // inheritable handle of the interactor/runner to contestant code.
+    //
+    // CreateProcessWithLogonW does not accept EXTENDED_STARTUPINFO_PRESENT, so
+    // the worker path cannot use a handle list; that documented limitation is
+    // why required mode fails closed when the isolated process cannot be made.
+    SIZE_T size = 0;
+    InitializeProcThreadAttributeList(nullptr, 1, 0, &size);
+    if (size == 0) {
+      *error = "InitializeProcThreadAttributeList sizing failed: " +
+               describeWin32Error(GetLastError());
+      return false;
+    }
+    storage.assign(size, 0);
     list = reinterpret_cast<LPPROC_THREAD_ATTRIBUTE_LIST>(storage.data());
-    if (UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles,
-                                  sizeof(handles), nullptr, nullptr)) {
-      siex.lpAttributeList = list;
-      flags |= EXTENDED_STARTUPINFO_PRESENT;
-    } else {
+    if (!InitializeProcThreadAttributeList(list, 1, 0, &size)) {
+      *error = "InitializeProcThreadAttributeList failed: " +
+               describeWin32Error(GetLastError());
+      return false;
+    }
+    HANDLE handles[3] = {stdinHandle, stdoutHandle, stderrHandle};
+    if (!UpdateProcThreadAttribute(list, 0, PROC_THREAD_ATTRIBUTE_HANDLE_LIST, handles,
+                                   sizeof(handles), nullptr, nullptr)) {
+      *error = "UpdateProcThreadAttribute(HANDLE_LIST) failed: " +
+               describeWin32Error(GetLastError());
       DeleteProcThreadAttributeList(list);
-      list = nullptr;
+      return false;
+    }
+    siex.lpAttributeList = list;
+    flags |= EXTENDED_STARTUPINFO_PRESENT;
+    startupInfo = &siex.StartupInfo;
+  }
+
+  const wchar_t* cwd = workdir.empty() ? nullptr : workdir.c_str();
+  const std::wstring workerEnvironment =
+      worker.configured() ? buildWorkerEnvironment(workdir) : std::wstring();
+  BOOL ok = FALSE;
+  if (worker.configured()) {
+    ok = CreateProcessWithLogonW(
+        worker.user.c_str(), nullptr, worker.password.c_str(), LOGON_WITH_PROFILE,
+        exe.c_str(), buffer.data(), flags | CREATE_UNICODE_ENVIRONMENT,
+        workerEnvironment.empty() ? nullptr
+                                  : const_cast<wchar_t*>(workerEnvironment.c_str()),
+        cwd, startupInfo, pi);
+    if (!ok) {
+      const DWORD code = GetLastError();
+      *error = "CreateProcessWithLogonW failed for " + toUtf8(exe) + ": " +
+               describeWin32Error(code) + " (code " + std::to_string(code) + ")";
+    }
+  } else {
+    ok = CreateProcessW(exe.c_str(), buffer.data(), nullptr, nullptr, TRUE, flags, nullptr,
+                        cwd, startupInfo, pi);
+    if (!ok) {
+      *error = "CreateProcessW failed for " + toUtf8(exe) + ": " +
+               describeWin32Error(GetLastError());
     }
   }
-  const BOOL ok = CreateProcessW(exe.c_str(), buffer.data(), nullptr, nullptr, TRUE, flags,
-                                 nullptr, workdir.empty() ? nullptr : workdir.c_str(),
-                                 &siex.StartupInfo, pi);
   if (list != nullptr) DeleteProcThreadAttributeList(list);
-  if (!ok) {
-    *error = "CreateProcessW failed for " + toUtf8(exe) + ": " +
-             describeWin32Error(GetLastError());
-  }
   return ok == TRUE;
 }
 
@@ -263,6 +359,21 @@ int main() {
   Options opt;
   Result out;
   if (!parseOptions(args, &opt, &out.error)) {
+    emit(out);
+    return 1;
+  }
+
+  const WorkerCredentials worker = readWorkerCredentials();
+  if (opt.workerRequired && !worker.configured()) {
+    out.error =
+        "worker isolation required but OIJ_INTERACT_WORKER_USER/OIJ_INTERACT_WORKER_PASSWORD "
+        "are missing (refusing to run the contestant as the service account)";
+    emit(out);
+    return 1;
+  }
+  if (worker.user.empty() != worker.password.empty()) {
+    out.error =
+        "OIJ_INTERACT_WORKER_USER and OIJ_INTERACT_WORKER_PASSWORD must be provided together";
     emit(out);
     return 1;
   }
@@ -336,7 +447,7 @@ int main() {
   std::wstring iArgs = quote(opt.input) + (opt.answer.empty() ? L"" : L" " + quote(opt.answer));
   std::string createError;
   if (!createChild(opt.interactor, iArgs, opt.workdir, c2iRead, i2cWrite, iErr, &interactor,
-                   &createError)) {
+                   &createError, WorkerCredentials{})) {
     out.error = createError;
     CloseHandle(c2iRead); CloseHandle(c2iWrite); CloseHandle(i2cRead); CloseHandle(i2cWrite);
     CloseHandle(iErr); CloseHandle(cErr); CloseHandle(job);
@@ -346,7 +457,7 @@ int main() {
   CloseHandle(c2iRead);
   CloseHandle(i2cWrite);
   if (!createChild(opt.contestant, L"", opt.workdir, i2cRead, c2iWrite, cErr, &contestant,
-                   &createError)) {
+                   &createError, worker)) {
     out.error = createError;
     TerminateProcess(interactor.hProcess, 1);
     CloseHandle(interactor.hThread); CloseHandle(interactor.hProcess);
