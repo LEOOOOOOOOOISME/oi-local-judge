@@ -144,6 +144,22 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+      - name: Configure code signing (optional)
+        shell: pwsh
+        env:
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERT_PFX_BASE64)) {
+            Write-Host 'No WINDOWS_CERT_PFX_BASE64 secret; building an unsigned release.'
+            exit 0
+          }
+          $pfx = Join-Path $PWD 'release\codesign.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
+          "CSC_LINK=$pfx" >> $env:GITHUB_ENV
+          "CSC_KEY_PASSWORD=$($env:WINDOWS_CERT_PASSWORD)" >> $env:GITHUB_ENV
+          Write-Host 'Code signing certificate configured.'
+
       - name: Build NSIS installer
         shell: pwsh
         run: |
@@ -174,7 +190,33 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      # Attach the ZIP and the NSIS installer to the GitHub Release for the tag.
+      - name: Verify code signature or record unsigned build
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path 'release/installer' -Filter 'OiJudge-Setup-*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'installer missing' }
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          Write-Host "signature status: $($signature.Status)"
+          if ($env:CSC_LINK) {
+            if ($signature.Status -ne 'Valid') { throw "installer signature is not valid: $($signature.Status)" }
+          } else {
+            Write-Host 'Release is unsigned (no certificate configured).'
+          }
+
+      - name: Generate SHA256 checksums
+        shell: pwsh
+        run: |
+          $zip = Get-ChildItem -Path 'release' -Filter '*.zip' -File | Select-Object -First 1
+          $installer = Get-ChildItem -Path 'release/installer' -Filter 'OiJudge-Setup-*.exe' | Select-Object -First 1
+          if (-not $zip -or -not $installer) { throw 'release assets missing for checksum generation' }
+          $lines = @(
+            "$((Get-FileHash $zip.FullName -Algorithm SHA256).Hash.ToLower())  $($zip.Name)"
+            "$((Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower())  $($installer.Name)"
+          )
+          Set-Content -Path 'release/SHA256SUMS.txt' -Value $lines -Encoding ASCII
+          Get-Content 'release/SHA256SUMS.txt'
+
+      # Attach the ZIP, installer and checksum to the GitHub Release for the tag.
       # This is the only publishing path: electron-builder runs with
       # `--publish never`, so it never talks to the GitHub API itself.
       - name: Publish release assets
@@ -197,7 +239,11 @@ jobs:
           }
           $zip = $zips[0].FullName
           $installer = $installers[0].FullName
+          $checksum = Join-Path $PWD 'release/SHA256SUMS.txt'
+          if (-not (Test-Path $checksum)) { throw "checksum file missing: $checksum" }
+          $isPrerelease = $tag -match '-rc'
           Write-Host "tag:       $tag"
+          Write-Host "prerelease: $isPrerelease"
           Write-Host "zip:       $zip ($($zips[0].Length) bytes)"
           Write-Host "installer: $installer ($($installers[0].Length) bytes)"
 
@@ -205,11 +251,16 @@ jobs:
           # notes. Re-runs find the existing release and only re-upload assets.
           gh release view $tag --json tagName 2>$null | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "OiJudge $tag" --notes-file docs/releases/RELEASE_NOTES.md --prerelease
+            $releaseArgs = @('release', 'create', $tag, '--title', "OiJudge $tag", '--notes-file', 'docs/releases/RELEASE_NOTES.md')
+            if ($isPrerelease) { $releaseArgs += '--prerelease' } else { $releaseArgs += '--latest' }
+            & gh @releaseArgs
             if ($LASTEXITCODE -ne 0) { throw "gh release create $tag failed with exit code $LASTEXITCODE" }
+          } elseif (-not $isPrerelease) {
+            gh release edit $tag --latest
+            if ($LASTEXITCODE -ne 0) { throw "gh release edit $tag failed with exit code $LASTEXITCODE" }
           }
 
-          gh release upload $tag $zip $installer --clobber
+          gh release upload $tag $zip $installer $checksum --clobber
           if ($LASTEXITCODE -ne 0) { throw "gh release upload $tag failed with exit code $LASTEXITCODE" }
 
           Write-Host '=== release assets ==='

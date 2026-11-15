@@ -1,6 +1,7 @@
 {
   "name": "oi-local-judge",
   "private": true,
+  "license": "Apache-2.0",
   "type": "module",
   "description": "OiJudge — 本地 OI 评测系统（Electron 桌面端与局域网网页服务）",
   "author": "OiJudge Team",
@@ -56,5 +57,5 @@
     "markdown-it-texmath": "^1.0.0",
     "sanitize-html": "^2.18.1"
   },
-  "version": "1.1.0-rc.10"
+  "version": "1.1.0"
 }

@@ -152,6 +152,9 @@ export function portableRequiredEntries(outName = OUT_NAME) {
     `${outName}/icudtl.dat`,
     `${outName}/resources/default_app.asar`,
     `${outName}/启动 OiJudge.cmd`,
+    `${outName}/LICENSE`,
+    `${outName}/NOTICE`,
+    `${outName}/THIRD_PARTY_NOTICES.md`,
     `${app}/package.json`,
     `${app}/apps/desktop/dist/main.js`,
     `${app}/apps/desktop/dist/preload.js`,
@@ -362,6 +365,7 @@ function writeAppPackageJson() {
     productName: 'OiJudge',
     version: VERSION,
     private: true,
+    license: 'Apache-2.0',
     main: 'apps/desktop/dist/main.js',
   };
   writeFileSync(APP_PACKAGE, `${JSON.stringify(appPackage, null, 2)}\n`, 'utf8');
@@ -506,6 +510,9 @@ function main(argv = process.argv.slice(2)) {
   copyDir(ELECTRON_DIST, OUT_DIR);
   copyFile(join(OUT_DIR, 'electron.exe'), join(OUT_DIR, 'OiJudge.exe'));
   writeLauncher();
+  for (const name of ['LICENSE', 'NOTICE', 'THIRD_PARTY_NOTICES.md']) {
+    copyFile(join(SOURCE_ROOT, name), join(OUT_DIR, name));
+  }
 
   // Application code and metadata.
   const copies = [
