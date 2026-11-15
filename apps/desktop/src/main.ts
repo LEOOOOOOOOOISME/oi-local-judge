@@ -304,9 +304,10 @@ async function startServer(root: string): Promise<ServerReady> {
     log(`server process error type=${type} location=${location}\n${report}`);
   });
 
-  // First launch may be slowed down by antivirus scanning the packaged files;
-  // 60 s is deliberately generous, and the failure path reports child output.
-  const timeoutMs = Number(process.env.OIJ_SERVER_START_TIMEOUT_MS ?? 60_000);
+  // First launch may be slowed down by antivirus scanning the packaged files
+  // and by restoring a large database. A 60 s timeout produced a false startup
+  // failure on a cold packaged launch, so allow 120 s by default.
+  const timeoutMs = Number(process.env.OIJ_SERVER_START_TIMEOUT_MS ?? 120_000);
   return await new Promise<ServerReady>((resolveReady, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`server start timeout after ${timeoutMs}ms\n${tail()}`)),

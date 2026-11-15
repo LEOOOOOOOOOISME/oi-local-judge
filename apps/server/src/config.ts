@@ -77,7 +77,10 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // Priority: explicit environment variable > persisted settings.json > default.
   // The data directory must be known first so the settings file can be located.
   const persisted = readPersistedSettings(dataDir);
-  const defaultConcurrency = Math.min(4, cpus().length);
+  // Use up to 8 logical CPUs by default (the settings UI cap), while a 4-core
+  // target still gets 4. The previous hard cap of 4 left larger machines with
+  // most cores idle during judging. OIJ_JUDGE_CONCURRENCY still overrides it.
+  const defaultConcurrency = Math.min(8, cpus().length);
   // Loopback by default: a fresh install must not expose the OJ (and its data)
   // to the LAN until the operator explicitly opts in with OIJ_HOST=0.0.0.0,
   // OIJ_LAN=1, or the installer's LAN switch. OIJ_LAN is honoured here (not

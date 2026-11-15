@@ -22,6 +22,8 @@ Windows x64 正式版，面向局域网 OI 评测、比赛与教学训练。
   - 修复 Windows PowerShell 5.1 缺少 `Get-LocalUser`/`New-LocalUser` 导致隔离启用失败。
   - 密码改为无符号字符，避免 `net.exe` 把 `/` 开头的密码当成参数。
 - 安装向导勾选 worker 隔离后，只有全部步骤成功才写入 `worker.json required:true`；失败保持 optional。
+- 判题并发默认提升到最多 8 个逻辑 CPU（4 核机器仍为 4），可在系统设置中修改。
+- 首次冷启动服务等待从 60 秒提高到 120 秒，避免杀毒扫描/大数据库恢复时误报启动失败。
 
 ## v1.1.1 元数据修复
 
