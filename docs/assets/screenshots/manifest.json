@@ -1,0 +1,58 @@
+{
+  "generatedBy": "tools/capture-readme-screenshots.mjs",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "note": "演示数据 + 隔离临时 dataDir；截图不含真实用户、密码或密钥。",
+  "screenshots": [
+    {
+      "file": "login.png",
+      "route": "/login",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "problem.png",
+      "route": "/problem/1",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "contest.png",
+      "route": "/contest/1",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "ranking.png",
+      "route": "/contest/1/ranking",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "statistics.png",
+      "route": "/contest/1/statistics",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "batch.png",
+      "route": "/admin/batch/1",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "class-training.png",
+      "route": "/training-plans/1",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "admin.png",
+      "route": "/admin/users",
+      "width": 1440,
+      "height": 900
+    }
+  ]
+}
