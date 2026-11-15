@@ -2,7 +2,7 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`fb513d1 fix(installer): simplify integrity warning text`  
+当前 HEAD：`874bddd docs: record v1.1.2 startup hotfix`  
 发布 tag：`v1.1.2`  
 当前 Release：`v1.1.2`（正式版，Latest）
 
