@@ -2,6 +2,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import { transaction } from '../db.js';
 import {
   ensureDefaultProblemCategory,
+  ensureObjectiveProblemCategory,
   getProblemCategoryByCode,
   getProblemCategoryById,
   parseDisplayId,
@@ -250,7 +251,13 @@ function resolveNewProblemNumber(
     bumpCategoryNextSeq(db, category.id, parsed.seq);
     return { categoryId: category.id, seq: parsed.seq, displayId: `${category.code}${parsed.seq}` };
   }
-  const categoryId = input.categoryId ?? ensureDefaultProblemCategory(db).id;
+  // Objective problems without an explicit category belong to the Y sequence;
+  // every other type keeps the historical P default.
+  const categoryId =
+    input.categoryId ??
+    (input.type === 'objective'
+      ? ensureObjectiveProblemCategory(db).id
+      : ensureDefaultProblemCategory(db).id);
   return allocateProblemNumber(db, categoryId);
 }
 

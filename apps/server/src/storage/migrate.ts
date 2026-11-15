@@ -1,4 +1,5 @@
 import type { DatabaseSync } from 'node:sqlite';
+import { ensureObjectiveProblemCategory } from './repos/problem-categories.js';
 import { migrateProblemNumbers } from './repos/problems.js';
 
 const SCHEMA = `
@@ -431,7 +432,11 @@ export function migrate(db: DatabaseSync): void {
   ensureColumn(db, 'contest_hacks', 'team_id', 'INTEGER');
   ensureColumn(db, 'teams', 'kind', "TEXT NOT NULL DEFAULT 'team'");
   ensureColumn(db, 'teams', 'allow_contest', 'INTEGER NOT NULL DEFAULT 1');
+  // Built-in numbering categories: P (programming) always exists; Y (objective)
+  // is added for databases created before objective numbering and is created
+  // without touching existing P rows or numbers.
   migrateProblemNumbers(db);
+  ensureObjectiveProblemCategory(db);
   const applied = db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number };
   if (applied.n === 0) {
     db.prepare('INSERT INTO schema_migrations(version, applied_at) VALUES (1, ?)').run(Date.now());
