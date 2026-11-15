@@ -40,7 +40,7 @@ Windows x64 正式版，面向局域网 OI 评测、比赛与教学训练。
   - `FileVersion` / `ProductVersion`
   - `LegalCopyright`
 - 之前通过 `--prepackaged` 构建时，electron-builder 跳过版本资源，文件属性显示为 Electron；现已在归档前写入 OiJudge 元数据。
-- v1.1.1 功能与 v1.1.0 相同；v1.1.3 额外修复启动、端口和 worker 安装问题。
+- v1.1.1 功能与 v1.1.0 相同；v1.1.2 / v1.1.3 额外修复启动、端口和 worker 安装问题。
 
 ## 亮点
 
