@@ -2,6 +2,43 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-15 / Round 153（v1.1.0 正式版发布）
+
+### 发布
+
+- Tag：`v1.1.0`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0
+- CI run：`43686640141` — **success**
+- 类型：非 prerelease，Latest
+- 资产：
+  - `OiJudge-Setup-1.1.0.exe` 252,965,311 B
+  - `oi-local-judge-1.1.0-win-x64.zip` 359,738,047 B
+  - `SHA256SUMS.txt`
+
+### 正式版内容
+
+- Apache-2.0 LICENSE、NOTICE、THIRD_PARTY_NOTICES
+- 自定义多尺寸图标
+- NSIS 可选 worker 隔离向导
+- `install.ps1 -Interactive`
+- README 重写为任务语言 + 8 张真实截图
+- CI 稳定版/ Latest / checksum / 可选签名钩子
+- UAT 计划/清单/反馈表（未执行）
+
+### 验证
+
+- 117 文件 / 1062 用例通过
+- build、release 测试、浏览器 E2E 通过
+- NSIS 安装/卸载 smoke（rc.10 同代码）通过
+- CI 构建/发布成功
+
+### 边界
+
+- 安装包未签名（无证书）
+- 真实 worker 账户成功路径未在管理员会话验证
+- 真实用户 UAT 未执行；脚本化测试不冒充 UAT
+- 公开 README/Release 不写容量验证承诺
+
 ## 2026-11-13 / Round 152（v1.1.0-rc.10 发布）
 
 ### 发布

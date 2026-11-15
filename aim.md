@@ -2,9 +2,9 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`d53ca06 release: prepare v1.1.0-rc.10`  
-发布 tag：`v1.1.0-rc.10`  
-当前 Release：`v1.1.0-rc.10`（第二轮安全审查修复）
+当前 HEAD：`9b7c581 merge: branded installer and optional worker isolation wizard`  
+发布 tag：`v1.1.0`  
+当前 Release：`v1.1.0`（正式版，Latest）
 
 ---
 
@@ -580,6 +580,33 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - 浏览器 E2E：2 passed
 - worker required 缺凭据：启动即退出，不监听
 - 真实 worker 账户创建/CreateProcessWithLogonW 成功路径未在管理员会话实机验证
+
+## 3.11 v1.1.0 正式版发布（2026-11-15）
+
+- Tag：`v1.1.0`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.0
+- CI run：`43686640141`，success
+- Release：非 prerelease、Latest
+- 资产：
+  - `OiJudge-Setup-1.1.0.exe` 252,965,311 B
+  - `oi-local-judge-1.1.0-win-x64.zip` 359,738,047 B
+  - `SHA256SUMS.txt`
+- 正式版内容：
+  - Apache-2.0 LICENSE / NOTICE / THIRD_PARTY_NOTICES
+  - 自定义 OiJudge 图标（多尺寸 ico）
+  - NSIS 可选 worker 隔离向导 + install.ps1 -Interactive
+  - README 重写为任务语言 + 8 张真实 UI 截图
+  - CI stable/Latest + checksum + 可选签名钩子
+  - UAT 协议/清单/反馈表（状态：未执行）
+- 验证：
+  - 117 文件 / 1062 用例通过
+  - build、release 测试、浏览器 E2E 通过
+  - NSIS 安装/卸载 smoke（rc.10 同代码）通过
+- 明确边界：
+  - 未签名（无证书）
+  - 真实 worker 账户成功路径未在管理员会话实机验证
+  - 真实用户 UAT 未执行
+  - 不宣称任何容量验证
 
 ---
 
