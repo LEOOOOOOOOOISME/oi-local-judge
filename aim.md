@@ -2,9 +2,9 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`57fd988 fix: make worker account creation non-interactive`  
+当前 HEAD：`93d091c merge: default new objective problems to Y category`  
 发布 tag：`v1.1.3`  
-当前 Release：`v1.1.3`（正式版，Latest）
+当前 Release：`v1.1.3`（正式版，Latest；客观题产品化尚未发版）
 
 ---
 
@@ -712,6 +712,20 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - `OiJudge-Setup-1.1.3.exe` 252,968,409 B
   - `oi-local-judge-1.1.3-win-x64.zip` 359,739,978 B
   - `SHA256SUMS.txt`
+
+## 3.15 客观题产品化（未发版）
+
+- 题号：新增 Y 分类，objective 自动 `Y1001...`；管理端新建客观题默认 Y，编程题仍 P。
+- 作答页：参考洛谷有题结构（题号导航、逐题卡片、行式选项、sticky 提交栏），外壳/色调/标题栏保持 OiJudge。
+- 考试：题目选择器按编程题/客观题分组，支持纯客观卷和客观+编程混排；控制台显示类型与客观题小题合计。
+- 权限：objective 详情统一剥离 answers；无 ACL 404；team-owned 仅成员/授权者可见；答案只在 admin/setter 出题接口。
+- 团队：团队赛 objective 与编程题同路径计入个人/团队排名；测试覆盖。
+- 验证：
+  - 全量 124 文件 / 1096 用例通过
+  - `npm run build` 通过
+  - 浏览器 E2E 2 passed
+  - 临时数据 Y1001：4 题作答 50/50，比赛混排排名 50 分
+- 未发版；未导入洛谷示例题。
 
 ---
 
