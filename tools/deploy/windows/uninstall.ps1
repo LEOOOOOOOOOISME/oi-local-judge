@@ -200,25 +200,59 @@ if (Test-OijFirewallRule -Port $port) {
 }
 
 # --- Worker isolation (F-01) --------------------------------------------
+# The account/ACL/firewall/credential cleanup lives in worker-isolation.ps1,
+# shared with install.ps1 and the NSIS installer. A failure here is reported as
+# an incomplete cleanup instead of a successful uninstall.
+$workerFile = Join-Path $DataDir 'worker.json'
+$workerIsolationScript = Join-Path $PSScriptRoot 'worker-isolation.ps1'
+if (-not (Test-Path -LiteralPath $workerIsolationScript -PathType Leaf)) {
+  $workerIsolationScript = Join-Path $scriptsDir 'worker-isolation.ps1'
+}
+$workerArtifacts = $false
 if ($state -and $state.PSObject.Properties['workerIsolation'] -and $state.workerIsolation) {
-  $workerAccount = $OijWorkerAccountName
-  if ($DryRun) {
-    Write-OijPlan ("remove the outbound firewall rule and local user {0} (needs administrator)" -f $workerAccount)
-  } elseif (-not (Test-OijAdministrator)) {
-    Write-OijWarn ("worker isolation cleanup (firewall rule/local user {0}) needs an elevated PowerShell" -f $workerAccount)
+  $workerArtifacts = $true
+}
+if (Test-Path -LiteralPath $workerFile) {
+  $workerArtifacts = $true
+}
+try {
+  if (Get-NetFirewallRule -DisplayName 'OiJudge Worker outbound block' -ErrorAction SilentlyContinue) {
+    $workerArtifacts = $true
+  }
+} catch {
+  # Firewall lookup is best effort.
+}
+try {
+  if (Get-LocalUser -Name $OijWorkerAccountName -ErrorAction SilentlyContinue) {
+    $workerArtifacts = $true
+  }
+} catch {
+  # Account lookup is best effort.
+}
+
+if (-not $workerArtifacts) {
+  Write-OijSkip 'no judge-worker isolation was found'
+} elseif ($DryRun) {
+  if (-not (Test-OijAdministrator)) {
+    Write-OijPlan ("remove the worker outbound firewall rule, local user {0} and worker.json (needs administrator)" -f $OijWorkerAccountName)
+    $predictedExitCode = $OijExitAdminRequired
+  } else {
+    Write-OijPlan ("remove the worker outbound firewall rule, local user {0} and worker.json" -f $OijWorkerAccountName)
+  }
+} elseif (-not (Test-Path -LiteralPath $workerIsolationScript -PathType Leaf)) {
+  Write-OijWarn ("worker-isolation.ps1 is missing ({0}); worker account, firewall rule and worker.json were not cleaned up." -f $workerIsolationScript)
+  $cleanupIncomplete = $true
+} else {
+  & $workerIsolationScript -Remove -DataDir $DataDir -Owner $env:USERNAME
+  $workerExit = $LASTEXITCODE
+  if ($workerExit -eq 0) {
+    Write-OijOk 'removed the worker account, outbound firewall rule and worker.json'
+  } elseif ($workerExit -eq 3 -or $workerExit -eq 4) {
+    Write-OijWarn 'worker isolation cleanup needs an elevated PowerShell; the worker account and firewall rule were left in place.'
     $administratorBlocked = $true
   } else {
-    try {
-      $workerRule = Get-NetFirewallRule -DisplayName 'OiJudge Worker outbound block' -ErrorAction SilentlyContinue
-      if ($workerRule) { Remove-NetFirewallRule -DisplayName 'OiJudge Worker outbound block' }
-      if (Get-LocalUser -Name $workerAccount -ErrorAction SilentlyContinue) {
-        Remove-LocalUser -Name $workerAccount
-      }
-      Write-OijOk ("removed the worker firewall rule and local user {0}" -f $workerAccount)
-    } catch {
-      Write-OijWarn ("could not fully remove worker isolation: {0}" -f $_.Exception.Message)
-      $cleanupIncomplete = $true
-    }
+    Write-OijWarn ("worker isolation cleanup is incomplete (worker-isolation.ps1 exit code {0})." -f $workerExit)
+    $cleanupIncomplete = $true
   }
 }
 

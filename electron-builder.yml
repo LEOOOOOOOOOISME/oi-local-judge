@@ -28,6 +28,11 @@ win:
     - target: nsis
       arch:
         - x64
+  # Application/executable icon. electron-builder also embeds this icon in
+  # OiJudge.exe when it packs the app itself; `npm run build:installer` stamps
+  # the same .ico into the prepackaged exe before archiving (see
+  # build/installer/stamp-exe-icon.mjs), because --prepackaged skips that step.
+  icon: build/icon.ico
   artifactName: "OiJudge-Setup-${version}.exe"
 
 nsis:
@@ -36,3 +41,9 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: OiJudge
+  # Optional judge-account isolation wizard page (unchecked by default).
+  include: build/installer/worker-isolation.nsh
+  # Branding shown by the installer, the uninstaller and the header/banner.
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
