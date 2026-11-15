@@ -80,6 +80,7 @@ async function loadResedit() {
 
 async function stampExe(exePath, resedit) {
   const { NtExecutable, NtExecutableResource, Data, Resource } = resedit;
+  const { VersionInfo } = Resource;
   const executable = NtExecutable.from(await readFile(exePath));
   const resources = NtExecutableResource.from(executable);
   const groups = Resource.IconGroupEntry.fromEntries(resources.entries);
@@ -93,6 +94,32 @@ async function stampExe(exePath, resedit) {
     group ? group.lang : 0x0409,
     icons,
   );
+
+  // --prepackaged skips electron-builder's version-resource step too, leaving
+  // the file properties as "Electron". Write OiJudge's own metadata here.
+  const packageJson = JSON.parse(await readFile(join(ROOT, 'package.json'), 'utf8'));
+  const version = String(packageJson.version ?? '').replace(/-.*$/, '');
+  const versions = VersionInfo.fromEntries(resources.entries);
+  const versionInfo =
+    versions[0] ??
+    VersionInfo.create(0x0409, {}, [{ lang: 0x0409, codepage: 1200, values: {} }]);
+  versionInfo.setFileVersion(version);
+  versionInfo.setProductVersion(version);
+  versionInfo.setStringValues(
+    versionInfo.getAllLanguagesForStringValues()[0] ?? { lang: 0x0409, codepage: 1200 },
+    {
+      CompanyName: 'OiJudge Team',
+      FileDescription: 'OiJudge',
+      FileVersion: version,
+      InternalName: 'OiJudge',
+      LegalCopyright: 'Copyright 2026 OiJudge Team',
+      OriginalFilename: 'OiJudge.exe',
+      ProductName: 'OiJudge',
+      ProductVersion: version,
+    },
+  );
+  versionInfo.outputToResourceEntries(resources.entries);
+
   resources.outputResource(executable);
   await writeFile(exePath, Buffer.from(executable.generate()));
   return icons.length;
