@@ -2,6 +2,52 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-15 / Round 155（v1.1.2 启动阻断修复）
+
+### 用户实测问题
+
+- 安装 NSIS 后无窗口、无后台
+- `localhost:8787` 拒绝连接
+- 无法启用 isolate-worker
+- 多核评测不正确
+
+### 根因
+
+1. 安装目录为 Low integrity；Electron 无法写 `%APPDATA%`，静默退出。
+2. 桌面版 `OIJ_PORT=0`，随机端口，8787 必然连不上。
+3. worker 脚本用 `Get-LocalUser`/`New-LocalUser`，Windows PowerShell 5.1 不提供。
+4. 判题并发默认上限 4。
+5. 冷启动 60s 超时不足。
+
+### 修复
+
+- NSIS/install.ps1 安装后全树 `icacls /setintegritylevel Medium /T`
+- 默认固定 `127.0.0.1:8787`，保留 `OIJ_PORT`
+- worker 改用 `net.exe`，密码无符号
+- 默认并发 `min(8, logical CPUs)`
+- 冷启动超时 120s
+- 新增 `server-port` 测试
+
+### 验证
+
+- 118 文件 / 1064 用例通过
+- 本地构建 1.1.2 portable + NSIS
+- Low integrity 目录静默安装 exit 0，全树 Medium
+- 启动后 `/api/health` 200，`main window loaded`，`startup complete`
+- 独立服务 `judgeConcurrency=8`（16 逻辑 CPU）
+- worker 脚本解析/DryRun 通过；管理员真实创建路径未实机验证
+
+### 发布
+
+- Tag：`v1.1.2`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.2
+- CI run：`43702303973` — **success**
+- 非 prerelease、Latest
+- 资产：
+  - `OiJudge-Setup-1.1.2.exe` 252,967,650 B
+  - `oi-local-judge-1.1.2-win-x64.zip` 359,739,973 B
+  - `SHA256SUMS.txt`
+
 ## 2026-11-15 / Round 154（v1.1.1 元数据热修）
 
 ### 发布

@@ -2,9 +2,9 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`c414dfb release: v1.1.1 metadata hotfix`  
-发布 tag：`v1.1.1`  
-当前 Release：`v1.1.1`（正式版，Latest）
+当前 HEAD：`fb513d1 fix(installer): simplify integrity warning text`  
+发布 tag：`v1.1.2`  
+当前 Release：`v1.1.2`（正式版，Latest）
 
 ---
 
@@ -623,6 +623,58 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - 资产：
   - `OiJudge-Setup-1.1.1.exe` 252,965,756 B
   - `oi-local-judge-1.1.1-win-x64.zip` 359,738,051 B
+  - `SHA256SUMS.txt`
+
+## 3.13 v1.1.2 启动修复（2026-11-15）
+
+用户实测正式安装版：无窗口、无后台、`localhost:8787` 拒绝连接、worker 无法启用、多核不正确。
+
+### 根因（已复现）
+
+1. 安装目录继承 **Low integrity**：
+   - `OiJudge.exe`/`electron.exe` 为 Low Mandatory Level。
+   - Electron 无法写 `%APPDATA%`，启动即静默退出；未产生 desktop.log。
+2. 桌面版硬编码 `OIJ_PORT=0`：
+   - 服务监听随机端口，`8787` 必然拒绝连接。
+3. worker 脚本使用 `Get-LocalUser`/`New-LocalUser`：
+   - Windows PowerShell 5.1 无 LocalAccounts 模块，安装必失败。
+4. 多核：
+   - 默认并发硬上限 4，12/16 核机器大部分核心空闲。
+5. 冷启动：
+   - 60 秒超时在 Defender 扫描/大数据库恢复时不够。
+
+### 修复
+
+- NSIS 安装完成与 `install.ps1` 复制后对安装树执行
+  `icacls /setintegritylevel Medium /T`。
+- 桌面版默认 `127.0.0.1:8787`，保留 `OIJ_PORT` 覆盖。
+- worker 账户改用 `net.exe`（创建/重置/启用/删除），密码改为无符号字符。
+- 默认并发 `min(8, logical CPUs)`，4 核仍为 4。
+- 冷启动超时 60s → 120s。
+- 新增 `server-port` 测试。
+
+### 验证
+
+- 117/118 文件、1064 用例通过。
+- 本地构建 1.1.2 便携版与 NSIS 安装器。
+- 在 Low integrity 工作目录静默安装：
+  - 安装 exit 0
+  - 安装树 Medium
+  - 启动后 `http://127.0.0.1:8787/api/health` = 200
+  - `main window loaded` / `startup complete`
+- 独立服务配置验证：`judgeConcurrency=8`（16 逻辑 CPU）。
+- worker 脚本 PowerShell 解析 0 错误、DryRun 通过。
+- **限制**：当前会话非管理员，worker 账户真实创建/`CreateProcessWithLogonW` 成功路径仍未实机验证。
+
+### 发布
+
+- Tag：`v1.1.2`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.2
+- CI run：`43702303973`，success
+- 非 prerelease、Latest
+- 资产：
+  - `OiJudge-Setup-1.1.2.exe` 252,967,650 B
+  - `oi-local-judge-1.1.2-win-x64.zip` 359,739,973 B
   - `SHA256SUMS.txt`
 
 ---
