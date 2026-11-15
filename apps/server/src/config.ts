@@ -100,7 +100,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     env.OIJ_COOKIE_SECURE === '1' ||
     env.OIJ_COOKIE_SECURE === 'true';
   const workerFile = readWorkerFile(dataDir);
-  const workerIsolation = resolveWorkerIsolationMode(env);
+  // The installer writes required:true only after the account, ACL and firewall
+  // steps succeeded. An explicit OIJ_WORKER_ISOLATION still wins.
+  const workerIsolation =
+    env.OIJ_WORKER_ISOLATION !== undefined
+      ? resolveWorkerIsolationMode(env)
+      : workerFile.required
+        ? 'required'
+        : 'optional';
   const workerUser = env.OIJ_WORKER_USER?.trim() || workerFile.user || undefined;
   const workerPassword = env.OIJ_WORKER_PASSWORD ?? workerFile.password;
   return {
@@ -138,10 +145,15 @@ interface WorkerFile {
   username?: unknown;
   user?: unknown;
   password?: unknown;
+  required?: unknown;
 }
 
 /** Reads the installer-managed worker credentials (ACL-protected worker.json). */
-function readWorkerFile(dataDir: string): { user?: string; password?: string } {
+function readWorkerFile(dataDir: string): {
+  user?: string;
+  password?: string;
+  required?: boolean;
+} {
   const file = join(dataDir, 'worker.json');
   if (!existsSync(file)) return {};
   try {
@@ -155,6 +167,7 @@ function readWorkerFile(dataDir: string): { user?: string; password?: string } {
     return {
       user: user?.trim() || undefined,
       password: typeof parsed.password === 'string' ? parsed.password : undefined,
+      required: parsed.required === true,
     };
   } catch {
     return {};
