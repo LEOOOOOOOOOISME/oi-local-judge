@@ -17,6 +17,7 @@ import {
   type InitialAdminNotice,
 } from './first-run.js';
 import { resolveWorkerIsolationMode } from './worker-isolation.js';
+import { serverPortFromEnv } from './server-port.js';
 
 /**
  * Embedded 16x16 PNG for the tray icon: a blue rounded square with a white
@@ -272,7 +273,10 @@ async function startServer(root: string): Promise<ServerReady> {
     cwd: root,
     env: {
       ...process.env,
-      OIJ_PORT: '0',
+      // The packaged app must be reachable at the documented address
+      // (127.0.0.1:8787). OIJ_PORT=0 was used during early development, but it
+      // made every install listen on a random port with no discoverable URL.
+      OIJ_PORT: serverPortFromEnv(),
       OIJ_HOST: host,
       OIJ_DATA_DIR: dataDir,
       OIJ_RUNNER: join(root, 'native/runner/out/ojrunner.exe'),

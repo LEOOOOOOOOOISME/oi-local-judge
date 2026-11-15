@@ -1,4 +1,4 @@
-# OiJudge v1.1.1
+# OiJudge v1.1.2
 
 Windows x64 正式版，面向局域网 OI 评测、比赛与教学训练。
 
@@ -6,20 +6,31 @@ Windows x64 正式版，面向局域网 OI 评测、比赛与教学训练。
 
 ## 下载
 
-- `OiJudge-Setup-1.1.1.exe`：NSIS 安装器，可选择安装目录，创建桌面/开始菜单快捷方式。
-- `oi-local-judge-1.1.1-win-x64.zip`：便携版，解压即用。
+- `OiJudge-Setup-1.1.2.exe`：NSIS 安装器，可选择安装目录，创建桌面/开始菜单快捷方式。
+- `oi-local-judge-1.1.2-win-x64.zip`：便携版，解压即用。
 - `SHA256SUMS.txt`：资产校验值。
 
 安装版与便携版共用数据目录。具体路径以启动日志/安装向导为准。
 
-## v1.1.1 修复
+## v1.1.2 启动修复（重要）
+
+- 安装器安装完成后统一把安装目录规范为 **Medium integrity**：
+  - 之前安装到 Low integrity 目录时，Electron 无法写 `%APPDATA%`，会无窗口、无后台静默退出。
+- 桌面版默认使用 `127.0.0.1:8787`，不再随机端口：
+  - 可用 `OIJ_PORT` 显式覆盖。
+- worker 隔离脚本改用 `net.exe` 管理本地账户：
+  - 修复 Windows PowerShell 5.1 缺少 `Get-LocalUser`/`New-LocalUser` 导致隔离启用失败。
+  - 密码改为无符号字符，避免 `net.exe` 把 `/` 开头的密码当成参数。
+- 安装向导勾选 worker 隔离后，只有全部步骤成功才写入 `worker.json required:true`；失败保持 optional。
+
+## v1.1.1 元数据修复
 
 - 修正 `OiJudge.exe` 的 Windows 文件属性：
   - `FileDescription`、`ProductName`、`CompanyName`
   - `FileVersion` / `ProductVersion`
   - `LegalCopyright`
 - 之前通过 `--prepackaged` 构建时，electron-builder 跳过版本资源，文件属性显示为 Electron；现已在归档前写入 OiJudge 元数据。
-- 功能与 v1.1.0 相同；已安装 v1.1.0 的用户可按需升级。
+- v1.1.1 功能与 v1.1.0 相同；v1.1.2 额外修复启动、端口和 worker 安装问题。
 
 ## 亮点
 

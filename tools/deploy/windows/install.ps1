@@ -373,6 +373,22 @@ if ($DryRun) {
     New-OijAppJunction -Path $appTarget -Target $appSource
     Write-OijOk ("created junction {0} -> {1}" -f $appTarget, $appSource)
   }
+
+  # A copy into a Low-integrity folder (common in sandboxed/portable test
+  # directories) inherits that label. Electron then cannot write %APPDATA% and
+  # exits silently. Normalize the copied tree before creating shortcuts.
+  if ($resolvedMode -eq 'copy') {
+    try {
+      & icacls.exe $appTarget '/setintegritylevel' 'Medium' '/T' '/C' '/Q' | Out-Null
+      if ($LASTEXITCODE -ne 0) {
+        Write-OijWarn ("could not normalize the application tree integrity level (icacls exit {0})" -f $LASTEXITCODE)
+      } else {
+        Write-OijOk 'normalized the application tree integrity level'
+      }
+    } catch {
+      Write-OijWarn ("could not normalize the application tree integrity level: {0}" -f $_.Exception.Message)
+    }
+  }
 }
 
 # --- Helper scripts ------------------------------------------------------

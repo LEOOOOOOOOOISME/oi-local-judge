@@ -304,24 +304,45 @@ function Invoke-OijWorkerElevation {
   }
 }
 
+function Test-OijWorkerAccount {
+  param([Parameter(Mandatory = $true)][string]$Name)
+  # Windows PowerShell 5.1 on Server/older SKUs may not have the LocalAccounts
+  # module, so Get-LocalUser is not universally available. net.exe is present
+  # on every supported Windows installation and its exit code is reliable.
+  & net.exe user $Name *> $null
+  return ($LASTEXITCODE -eq 0)
+}
+
+function Remove-OijWorkerAccount {
+  param([Parameter(Mandatory = $true)][string]$Name)
+  & net.exe user $Name /delete *> $null
+  if ($LASTEXITCODE -ne 0) {
+    throw ('net user {0} /delete failed with exit code {1}' -f $Name, $LASTEXITCODE)
+  }
+}
+
 function New-OijWorkerAccount {
   param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Password
   )
-  $securePassword = ConvertTo-SecureString -String $Password -AsPlainText -Force
-  $existing = Get-LocalUser -Name $Name -ErrorAction SilentlyContinue
+  $existing = Test-OijWorkerAccount -Name $Name
   $created = $false
   if ($existing) {
     Write-OijWorkerLog ('resetting the password of the existing account {0}' -f $Name)
-    Set-LocalUser -Name $Name -Password $securePassword -PasswordNeverExpires $true -ErrorAction Stop
-    if (-not $existing.Enabled) {
-      Enable-LocalUser -Name $Name -ErrorAction Stop
-      Write-OijWorkerLog ('enabled the disabled account {0}' -f $Name)
+    & net.exe user $Name $Password *> $null
+    if ($LASTEXITCODE -ne 0) {
+      throw ('net user {0} password reset failed with exit code {1}' -f $Name, $LASTEXITCODE)
+    }
+    & net.exe user $Name /active:yes *> $null
+    if ($LASTEXITCODE -ne 0) {
+      throw ('net user {0} /active:yes failed with exit code {1}' -f $Name, $LASTEXITCODE)
     }
   } else {
-    New-LocalUser -Name $Name -Password $securePassword -PasswordNeverExpires -UserMayNotChangePassword `
-      -Description 'OiJudge judge worker (low privilege)' -ErrorAction Stop | Out-Null
+    & net.exe user $Name $Password /add /comment:"OiJudge judge worker (low privilege)" /expires:never /passwordchg:no *> $null
+    if ($LASTEXITCODE -ne 0) {
+      throw ('net user {0} /add failed with exit code {1}' -f $Name, $LASTEXITCODE)
+    }
     $created = $true
     Write-OijWorkerLog ('created local account {0}' -f $Name)
   }
@@ -385,7 +406,7 @@ function Undo-OijWorkerInstall {
   }
   if ($CreatedAccount) {
     try {
-      Remove-LocalUser -Name $Name -ErrorAction Stop
+      Remove-OijWorkerAccount -Name $Name
       Write-OijWorkerLog ('rollback: removed the account {0} created by this run' -f $Name)
     } catch {
       Write-OijWorkerWarn ('rollback: could not remove the local account: {0}' -f $_.Exception.Message)
@@ -401,7 +422,7 @@ function Get-OijWorkerArtifacts {
   $account = $false
   $firewall = $false
   try {
-    if (Get-LocalUser -Name $Account -ErrorAction SilentlyContinue) {
+    if (Test-OijWorkerAccount -Name $Account) {
       $account = $true
     }
   } catch {
@@ -439,7 +460,9 @@ function Invoke-OijWorkerInstall {
   $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
   $bytes = New-Object byte[] 24
   $rng.GetBytes($bytes)
-  $password = [Convert]::ToBase64String($bytes).TrimEnd('=')
+  # net.exe treats a password beginning with '/' as an option. Keep the
+  # generated password alphanumeric and guarantee Windows complexity classes.
+  $password = 'Oij9' + ([Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', 'A').Replace('/', 'B'))
 
   $createdAccount = $false
   try {
@@ -574,8 +597,8 @@ function Invoke-OijWorkerRemove {
   }
 
   try {
-    if (Get-LocalUser -Name $Account -ErrorAction SilentlyContinue) {
-      Remove-LocalUser -Name $Account -ErrorAction Stop
+    if (Test-OijWorkerAccount -Name $Account) {
+      Remove-OijWorkerAccount -Name $Account
       Write-OijWorkerOk ('removed the local account {0}' -f $Account)
     } else {
       Write-Host ('[skip] the local account {0} does not exist' -f $Account)

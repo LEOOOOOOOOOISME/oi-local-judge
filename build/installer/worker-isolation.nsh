@@ -50,6 +50,18 @@ Var OijWorkerIsolationChecked
 !macroend
 
 !macro customInstall
+  ; Files extracted into a Low-integrity directory keep that label, and
+  ; Electron then cannot write %APPDATA% (it exits with no window or server).
+  ; Normalize the installed tree regardless of the optional worker checkbox.
+  DetailPrint "Normalizing OiJudge file integrity ..."
+  ExecWait '"$SYSDIR\icacls.exe" "$INSTDIR" /setintegritylevel Medium /T /C /Q' $1
+  ${If} $1 != "0"
+    DetailPrint "Could not normalize OiJudge file integrity (icacls exit code $1)."
+    ${IfNot} ${Silent}
+      MessageBox MB_ICONEXCLAMATION|MB_OK "安装文件权限规范化失败（icacls 退出码 $1）。$\r$\n$\r$\nOiJudge 可能无法启动；请把安装目录移动到普通磁盘路径，或以管理员身份运行：$\r$\n$\r$\nicacls \"$INSTDIR\" /setintegritylevel Medium /T /C /Q"
+    ${EndIf}
+  ${EndIf}
+
   ${If} $OijWorkerIsolationChecked == "1"
     ; Keep a copy in the application directory so the user can retry the
     ; isolation setup later without re-running the installer.
