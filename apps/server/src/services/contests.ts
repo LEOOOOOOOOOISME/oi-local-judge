@@ -33,8 +33,37 @@ export interface ContestDetail {
     tags: string[];
     timeMs: number;
     memoryMb: number;
+    /**
+     * Objective problems are scored by their questions, so the contest-level
+     * `points` value is not the effective maximum. This is the sum of the
+     * question points and never includes the answer key.
+     */
+    objectivePoints: number | null;
   }>;
   participantCount: number;
+}
+
+/**
+ * Sums the points of an objective problem's questions. Returns null when the
+ * stored configuration is missing or malformed; the caller only reads the
+ * totals, never the questions or their answers.
+ */
+function objectiveTotalPoints(objectiveJson: string): number | null {
+  try {
+    const parsed = JSON.parse(objectiveJson) as { questions?: unknown };
+    if (!Array.isArray(parsed.questions)) return null;
+    let total = 0;
+    for (const question of parsed.questions) {
+      if (!question || typeof question !== 'object') continue;
+      const points = (question as { points?: unknown }).points;
+      if (typeof points === 'number' && Number.isFinite(points) && points > 0) {
+        total += points;
+      }
+    }
+    return total;
+  } catch {
+    return null;
+  }
 }
 
 export function getContestDetail(db: DatabaseSync, contestId: number): ContestDetail | null {
@@ -54,6 +83,8 @@ export function getContestDetail(db: DatabaseSync, contestId: number): ContestDe
         tags: JSON.parse(problem.tags_json) as string[],
         timeMs: problem.time_ms,
         memoryMb: problem.memory_mb,
+        objectivePoints:
+          problem.type === 'objective' ? objectiveTotalPoints(problem.objective_json) : null,
       };
     })
     .filter((entry): entry is NonNullable<typeof entry> => entry !== null);
