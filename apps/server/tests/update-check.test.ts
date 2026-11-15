@@ -501,7 +501,7 @@ describe('GET /api/admin/system/update-check', () => {
     resetUpdateCheckCache();
     vi.stubGlobal('fetch', async () =>
       jsonResponse([
-        release('v1.1.1', { html_url: 'https://example.test/release' }),
+        release('v1.2.0', { html_url: 'https://example.test/release' }),
         release('v1.1.0'),
       ]),
     );
@@ -511,8 +511,8 @@ describe('GET /api/admin/system/update-check', () => {
     const result = (response.json() as { data: UpdateCheckResult }).data;
     expect(result).toMatchObject({
       current: ROOT_VERSION,
-      latest: '1.1.1',
-      tagName: 'v1.1.1',
+      latest: '1.2.0',
+      tagName: 'v1.2.0',
       isPrerelease: false,
       updateAvailable: true,
       url: 'https://example.test/release',

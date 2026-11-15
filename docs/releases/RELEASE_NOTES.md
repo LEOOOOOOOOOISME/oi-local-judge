@@ -1,4 +1,4 @@
-# OiJudge v1.1.0
+# OiJudge v1.1.1
 
 Windows x64 正式版，面向局域网 OI 评测、比赛与教学训练。
 
@@ -6,11 +6,20 @@ Windows x64 正式版，面向局域网 OI 评测、比赛与教学训练。
 
 ## 下载
 
-- `OiJudge-Setup-1.1.0.exe`：NSIS 安装器，可选择安装目录，创建桌面/开始菜单快捷方式。
-- `oi-local-judge-1.1.0-win-x64.zip`：便携版，解压即用。
+- `OiJudge-Setup-1.1.1.exe`：NSIS 安装器，可选择安装目录，创建桌面/开始菜单快捷方式。
+- `oi-local-judge-1.1.1-win-x64.zip`：便携版，解压即用。
 - `SHA256SUMS.txt`：资产校验值。
 
 安装版与便携版共用数据目录。具体路径以启动日志/安装向导为准。
+
+## v1.1.1 修复
+
+- 修正 `OiJudge.exe` 的 Windows 文件属性：
+  - `FileDescription`、`ProductName`、`CompanyName`
+  - `FileVersion` / `ProductVersion`
+  - `LegalCopyright`
+- 之前通过 `--prepackaged` 构建时，electron-builder 跳过版本资源，文件属性显示为 Electron；现已在归档前写入 OiJudge 元数据。
+- 功能与 v1.1.0 相同；已安装 v1.1.0 的用户可按需升级。
 
 ## 亮点
 

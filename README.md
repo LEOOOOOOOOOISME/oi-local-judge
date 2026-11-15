@@ -4,7 +4,7 @@
 
 老师在电脑上安装 OiJudge，学生用浏览器登录、看题、提交代码、查看成绩。题目、比赛、评测记录和数据都保存在这台电脑上，不依赖外部服务器。
 
-当前版本：**v1.1.0**
+当前版本：**v1.1.1**
 
 ---
 
@@ -76,8 +76,8 @@
 
 从 GitHub Releases 下载：
 
-- `OiJudge-Setup-1.1.0.exe`：安装版
-- `oi-local-judge-1.1.0-win-x64.zip`：便携版
+- `OiJudge-Setup-1.1.1.exe`：安装版
+- `oi-local-judge-1.1.1-win-x64.zip`：便携版
 
 发布页：
 
