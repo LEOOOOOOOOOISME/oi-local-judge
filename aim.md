@@ -2,9 +2,9 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`9b7c581 merge: branded installer and optional worker isolation wizard`  
-发布 tag：`v1.1.0`  
-当前 Release：`v1.1.0`（正式版，Latest）
+当前 HEAD：`c414dfb release: v1.1.1 metadata hotfix`  
+发布 tag：`v1.1.1`  
+当前 Release：`v1.1.1`（正式版，Latest）
 
 ---
 
@@ -607,6 +607,23 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - 真实 worker 账户成功路径未在管理员会话实机验证
   - 真实用户 UAT 未执行
   - 不宣称任何容量验证
+
+## 3.12 v1.1.1 元数据热修（2026-11-15）
+
+- Tag：`v1.1.1`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.1
+- CI run：`43688619386`，success
+- 非 prerelease、Latest
+- 修复：`OiJudge.exe` 文件属性从 Electron 改为：
+  - FileDescription/ProductName = OiJudge
+  - CompanyName = OiJudge Team
+  - FileVersion/ProductVersion = 1.1.1
+  - LegalCopyright
+- 功能与 1.1.0 相同；不移动已发布 tag
+- 资产：
+  - `OiJudge-Setup-1.1.1.exe` 252,965,756 B
+  - `oi-local-judge-1.1.1-win-x64.zip` 359,738,051 B
+  - `SHA256SUMS.txt`
 
 ---
 

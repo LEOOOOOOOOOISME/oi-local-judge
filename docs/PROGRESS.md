@@ -2,6 +2,36 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-15 / Round 154（v1.1.1 元数据热修）
+
+### 发布
+
+- Tag：`v1.1.1`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.1
+- CI run：`43688619386` — **success**
+- 非 prerelease、Latest
+- 资产：
+  - `OiJudge-Setup-1.1.1.exe` 252,965,756 B
+  - `oi-local-judge-1.1.1-win-x64.zip` 359,738,051 B
+  - `SHA256SUMS.txt`
+
+### 修复
+
+- `build/installer/stamp-exe-icon.mjs` 同时写入 Windows 版本资源：
+  - FileDescription / ProductName
+  - CompanyName
+  - FileVersion / ProductVersion
+  - LegalCopyright
+- 根因：electron-builder `--prepackaged` 跳过版本资源步骤，只 stamp 图标时文件属性仍为 Electron。
+- 未移动已发布的 `v1.1.0` tag；功能不变，新增 v1.1.1。
+
+### 验证
+
+- 本地对已安装 `OiJudge.exe` 执行 stamp 后属性为 OiJudge/1.1.1
+- CI 日志确认 `stamp-exe-icon` 成功
+- update-check 回归测试通过
+- 之前全量 117 文件 / 1062 用例、build、E2E 均通过
+
 ## 2026-11-15 / Round 153（v1.1.0 正式版发布）
 
 ### 发布
