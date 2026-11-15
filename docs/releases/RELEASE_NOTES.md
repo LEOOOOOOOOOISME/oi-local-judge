@@ -1,4 +1,4 @@
-# OiJudge v1.1.2
+# OiJudge v1.1.3
 
 Windows x64 正式版，面向局域网 OI 评测、比赛与教学训练。
 
@@ -6,11 +6,19 @@ Windows x64 正式版，面向局域网 OI 评测、比赛与教学训练。
 
 ## 下载
 
-- `OiJudge-Setup-1.1.2.exe`：NSIS 安装器，可选择安装目录，创建桌面/开始菜单快捷方式。
-- `oi-local-judge-1.1.2-win-x64.zip`：便携版，解压即用。
+- `OiJudge-Setup-1.1.3.exe`：NSIS 安装器，可选择安装目录，创建桌面/开始菜单快捷方式。
+- `oi-local-judge-1.1.3-win-x64.zip`：便携版，解压即用。
 - `SHA256SUMS.txt`：资产校验值。
 
 安装版与便携版共用数据目录。具体路径以启动日志/安装向导为准。
+
+## v1.1.3 worker 修复
+
+- 修复 `net user` 对超过 14 字符密码的交互式确认：
+  - 非交互安装拿不到 `Y`，worker 账户创建失败，安装器返回退出码 1。
+  - 现生成 14 字符随机密码，满足复杂度要求且不再触发提示。
+- worker 日志改为 UTF-8，记录 `net.exe` 的真实输出、退出码和当前身份，不再只显示 `?`。
+- `net.exe` 参数改为数组传递，避免 PowerShell 5.1 对 `/comment:"..."` 的再拆分。
 
 ## v1.1.2 启动修复（重要）
 
@@ -32,7 +40,7 @@ Windows x64 正式版，面向局域网 OI 评测、比赛与教学训练。
   - `FileVersion` / `ProductVersion`
   - `LegalCopyright`
 - 之前通过 `--prepackaged` 构建时，electron-builder 跳过版本资源，文件属性显示为 Electron；现已在归档前写入 OiJudge 元数据。
-- v1.1.1 功能与 v1.1.0 相同；v1.1.2 额外修复启动、端口和 worker 安装问题。
+- v1.1.1 功能与 v1.1.0 相同；v1.1.3 额外修复启动、端口和 worker 安装问题。
 
 ## 亮点
 

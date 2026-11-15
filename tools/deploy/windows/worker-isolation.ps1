@@ -5,7 +5,7 @@
 
 .DESCRIPTION
   Creates (or resets) the low-privilege local account OiJudgeWorker, generates
-  a 24-byte random password, stores it in an ACL-protected
+  a 14-character random password, stores it in an ACL-protected
   <DataDir>\worker.json, denies the worker account read access to the data
   directory, grants it write access to the judge work root (a sibling of the
   data directory), and blocks its outbound network traffic with a per-user
@@ -116,7 +116,10 @@ function Write-OijWorkerLog {
   }
   try {
     $line = '{0} {1}' -f (Get-Date).ToString('o'), $Message
-    Add-Content -LiteralPath $script:OijWorkerLogFile -Value $line -Encoding ASCII
+    # Windows PowerShell 5.1 has no BOM-less UTF-8 Add-Content; ASCII silently
+    # turned localized errors into "??????", making diagnosis impossible.
+    $utf8 = New-Object System.Text.UTF8Encoding($false)
+    [System.IO.File]::AppendAllText($script:OijWorkerLogFile, $line + [Environment]::NewLine, $utf8)
   } catch {
     # Logging must never block the isolation step.
   }
@@ -304,20 +307,32 @@ function Invoke-OijWorkerElevation {
   }
 }
 
+function Invoke-OijNetUser {
+  param([Parameter(Mandatory = $true)][string[]]$Arguments)
+  $exe = Join-Path $env:SystemRoot 'System32\net.exe'
+  # Array splatting avoids Windows PowerShell 5.1 native-argument re-quoting
+  # (the old /comment:"a b" form was split into extra arguments on some hosts).
+  $output = & $exe @Arguments 2>&1 | Out-String
+  return [pscustomobject]@{
+    ExitCode = $LASTEXITCODE
+    Output   = $output.Trim()
+  }
+}
+
 function Test-OijWorkerAccount {
   param([Parameter(Mandatory = $true)][string]$Name)
   # Windows PowerShell 5.1 on Server/older SKUs may not have the LocalAccounts
   # module, so Get-LocalUser is not universally available. net.exe is present
   # on every supported Windows installation and its exit code is reliable.
-  & net.exe user $Name *> $null
-  return ($LASTEXITCODE -eq 0)
+  $result = Invoke-OijNetUser -Arguments @('user', $Name)
+  return ($result.ExitCode -eq 0)
 }
 
 function Remove-OijWorkerAccount {
   param([Parameter(Mandatory = $true)][string]$Name)
-  & net.exe user $Name /delete *> $null
-  if ($LASTEXITCODE -ne 0) {
-    throw ('net user {0} /delete failed with exit code {1}' -f $Name, $LASTEXITCODE)
+  $result = Invoke-OijNetUser -Arguments @('user', $Name, '/delete')
+  if ($result.ExitCode -ne 0) {
+    throw ('net user {0} /delete failed with exit code {1}: {2}' -f $Name, $result.ExitCode, $result.Output)
   }
 }
 
@@ -330,18 +345,23 @@ function New-OijWorkerAccount {
   $created = $false
   if ($existing) {
     Write-OijWorkerLog ('resetting the password of the existing account {0}' -f $Name)
-    & net.exe user $Name $Password *> $null
-    if ($LASTEXITCODE -ne 0) {
-      throw ('net user {0} password reset failed with exit code {1}' -f $Name, $LASTEXITCODE)
+    $reset = Invoke-OijNetUser -Arguments @('user', $Name, $Password)
+    if ($reset.ExitCode -ne 0) {
+      Write-OijWorkerLog ('net user password reset failed exit={0}: {1}' -f $reset.ExitCode, $reset.Output)
+      throw ('net user {0} password reset failed: {1}' -f $Name, $reset.Output)
     }
-    & net.exe user $Name /active:yes *> $null
-    if ($LASTEXITCODE -ne 0) {
-      throw ('net user {0} /active:yes failed with exit code {1}' -f $Name, $LASTEXITCODE)
+    $active = Invoke-OijNetUser -Arguments @('user', $Name, '/active:yes')
+    if ($active.ExitCode -ne 0) {
+      Write-OijWorkerLog ('net user /active:yes failed exit={0}: {1}' -f $active.ExitCode, $active.Output)
+      throw ('net user {0} /active:yes failed: {1}' -f $Name, $active.Output)
     }
   } else {
-    & net.exe user $Name $Password /add /comment:"OiJudge judge worker (low privilege)" /expires:never /passwordchg:no *> $null
-    if ($LASTEXITCODE -ne 0) {
-      throw ('net user {0} /add failed with exit code {1}' -f $Name, $LASTEXITCODE)
+    $add = Invoke-OijNetUser -Arguments @(
+      'user', $Name, $Password, '/add', '/expires:never', '/passwordchg:no'
+    )
+    if ($add.ExitCode -ne 0) {
+      Write-OijWorkerLog ('net user /add failed exit={0}: {1}' -f $add.ExitCode, $add.Output)
+      throw ('net user {0} /add failed: {1}' -f $Name, $add.Output)
     }
     $created = $true
     Write-OijWorkerLog ('created local account {0}' -f $Name)
@@ -449,20 +469,23 @@ function Invoke-OijWorkerInstall {
     [Parameter(Mandatory = $true)][string]$WorkRoot
   )
   $workerFile = Join-Path $DataRoot 'worker.json'
+  $identityName = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+  Write-OijWorkerLog ('install running as {0}; administrator={1}' -f $identityName, (Test-OijWorkerAdministrator))
 
   # Last chance to avoid wasting a password: the directory must be usable.
   if (-not (Test-Path -LiteralPath $DataRoot)) {
     New-Item -ItemType Directory -Path $DataRoot -Force | Out-Null
   }
 
-  # 24 random bytes -> 32 Base64 characters (meets the default complexity
-  # policy without relying on the truncated '=' padding).
+  # net.exe prompts "password longer than 14 characters ... continue? (Y/N)"
+  # for longer passwords; an installer has no stdin, so that prompt made every
+  # worker setup fail. Keep the password exactly 14 characters (still > 80 bits
+  # for the random part) and guarantee the default complexity classes.
   $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
   $bytes = New-Object byte[] 24
   $rng.GetBytes($bytes)
-  # net.exe treats a password beginning with '/' as an option. Keep the
-  # generated password alphanumeric and guarantee Windows complexity classes.
-  $password = 'Oij9' + ([Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', 'A').Replace('/', 'B'))
+  $randomPart = ([Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', 'A').Replace('/', 'B')).Substring(0, 10)
+  $password = 'Oij9' + $randomPart
 
   $createdAccount = $false
   try {
@@ -689,7 +712,7 @@ if ($WorkDir) {
 
 if ($DryRun) {
   if ($Install) {
-    Write-OijWorkerPlan ('create or reset local user {0} with a new 24-byte random password' -f $Account)
+    Write-OijWorkerPlan ('create or reset local user {0} with a new 14-character random password' -f $Account)
     Write-OijWorkerPlan ('write owner-only {0} and deny {1} read access' -f (Join-Path $resolvedDataDir 'worker.json'), $Account)
     Write-OijWorkerPlan ('deny {0} read access to {1}' -f $Account, $resolvedDataDir)
     Write-OijWorkerPlan ('grant {0} modify access to the judge work root {1}' -f $Account, $resolvedWorkDir)
