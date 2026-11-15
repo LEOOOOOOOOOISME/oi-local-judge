@@ -102,6 +102,13 @@ interface ContestFormValues {
   freezeAt?: string;
 }
 
+/**
+ * Contest detail problem plus the objective question total returned by the API.
+ * Objective problems are scored by their questions, so the contest-level points
+ * are not the effective maximum.
+ */
+type ContestProblemRow = ContestDetailProblem & { objectivePoints?: number | null };
+
 const STATUS_COLOR: Record<string, string> = {
   draft: 'default',
   running: 'blue',
@@ -281,7 +288,25 @@ export function AdminContestConsolePage() {
 
   const detail = detailQuery.data ?? null;
   const contest = detail?.contest ?? null;
-  const problems = detail?.problems ?? [];
+  const problems = (detail?.problems ?? []) as ContestProblemRow[];
+  const programmingProblemCount = problems.filter(
+    (problem) => problem.type !== 'objective',
+  ).length;
+  const objectiveProblemCount = problems.length - programmingProblemCount;
+  const configuredProblemPoints = problems.reduce(
+    (sum, problem) => sum + (pointsDraft[problem.problemId] ?? problem.points),
+    0,
+  );
+  const objectiveQuestionPoints = problems.reduce(
+    (sum, problem) =>
+      problem.type === 'objective' && typeof problem.objectivePoints === 'number'
+        ? sum + problem.objectivePoints
+        : sum,
+    0,
+  );
+  const objectiveTotalsKnown = problems.every(
+    (problem) => problem.type !== 'objective' || typeof problem.objectivePoints === 'number',
+  );
   const participants = participantsQuery.data ?? [];
   const teamRegistrations = contestTeamsQuery.data ?? [];
   const registrations = registrationsQuery.data ?? [];
@@ -914,7 +939,7 @@ export function AdminContestConsolePage() {
     }
   };
 
-  const problemColumns: TableColumnsType<ContestDetailProblem> = [
+  const problemColumns: TableColumnsType<ContestProblemRow> = [
     {
       title: '编号',
       dataIndex: 'ordinal',
@@ -929,23 +954,43 @@ export function AdminContestConsolePage() {
       ),
     },
     {
-      title: '分值',
-      width: 130,
+      title: '类型',
+      dataIndex: 'type',
+      width: 96,
+      render: (_value, row) =>
+        row.type === 'objective' ? (
+          <Tag color="green">客观题</Tag>
+        ) : (
+          <Tag color="blue">编程题</Tag>
+        ),
+    },
+    {
+      title: '比赛分值',
+      width: 160,
       render: (_value, row) => (
-        <InputNumber
-          size="small"
-          min={0}
-          max={10000}
-          precision={0}
-          value={pointsDraft[row.problemId] ?? row.points}
-          onChange={(value) =>
-            setPointsDraft((previous) => ({
-              ...previous,
-              [row.problemId]: typeof value === 'number' ? value : 0,
-            }))
-          }
-          style={{ width: 96 }}
-        />
+        <Space direction="vertical" size={2}>
+          <InputNumber
+            size="small"
+            min={0}
+            max={10000}
+            precision={0}
+            value={pointsDraft[row.problemId] ?? row.points}
+            onChange={(value) =>
+              setPointsDraft((previous) => ({
+                ...previous,
+                [row.problemId]: typeof value === 'number' ? value : 0,
+              }))
+            }
+            style={{ width: 96 }}
+          />
+          {row.type === 'objective' ? (
+            <span className="muted" style={{ fontSize: 12 }}>
+              {typeof row.objectivePoints === 'number'
+                ? `小题合计 ${row.objectivePoints} 分`
+                : '小题分值未知'}
+            </span>
+          ) : null}
+        </Space>
       ),
     },
   ];
@@ -1640,10 +1685,34 @@ export function AdminContestConsolePage() {
             </Button>
           }
         >
+          {problems.length > 0 ? (
+            <Space wrap style={{ marginBottom: 12 }}>
+              <Tag>共 {problems.length} 题</Tag>
+              <Tag color="blue">编程题 {programmingProblemCount}</Tag>
+              <Tag color="green">客观题 {objectiveProblemCount}</Tag>
+              <span className="muted">
+                比赛配置分值合计{' '}
+                <strong className="mono">{configuredProblemPoints}</strong>
+              </span>
+              {objectiveProblemCount > 0 ? (
+                <span className="muted">
+                  {objectiveTotalsKnown ? (
+                    <>
+                      客观题小题合计{' '}
+                      <strong className="mono">{objectiveQuestionPoints}</strong>{' '}
+                      （OI/IOI 客观题按小题得分计）
+                    </>
+                  ) : (
+                    '客观题小题分值未知'
+                  )}
+                </span>
+              ) : null}
+            </Space>
+          ) : null}
           {problems.length === 0 ? (
             <Empty description="尚未配置比赛题目" />
           ) : (
-            <Table<ContestDetailProblem>
+            <Table<ContestProblemRow>
               className="oij-table"
               rowKey="problemId"
               size="small"

@@ -20,7 +20,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiGet, apiPost } from '../api/client';
 import type {
-  AdminProblemSummary,
+  AdminProblemPickerItem,
   AdminUser,
   Contest,
   CreateContestRequest,
@@ -75,6 +75,16 @@ function userOption(user: AdminUser): string {
   })`;
 }
 
+/**
+ * The contest picker groups problems by type. The label carries the display id,
+ * title and type so the built-in search matches any of them.
+ */
+function problemOptionLabel(problem: AdminProblemPickerItem): string {
+  const displayId = problem.displayId || `#${problem.id}`;
+  const kind = problem.type === 'objective' ? '客观题' : '编程题';
+  return `${displayId} ${problem.title}（${kind}）`;
+}
+
 export function AdminContestsPage() {
   const { message } = App.useApp();
   const navigate = useNavigate();
@@ -88,8 +98,12 @@ export function AdminContestsPage() {
     staleTime: 15_000,
   });
   const problemsQuery = useQuery({
-    queryKey: ['admin-problems'],
-    queryFn: () => apiGet<AdminProblemSummary[]>('/api/admin/problems'),
+    queryKey: ['admin-problem-picker', 'all'],
+    // The picker guard admits admin/contestmanager/setter, while the authoring
+    // list `/api/admin/problems` is admin/setter only. Contest managers need the
+    // picker to assemble a contest. Same cache key as the batch mapping page.
+    queryFn: () =>
+      apiGet<AdminProblemPickerItem[]>('/api/admin/problems/picker?scope=all&limit=500'),
     staleTime: 30_000,
   });
   const usersQuery = useQuery({
@@ -153,10 +167,23 @@ export function AdminContestsPage() {
     setDrawerOpen(true);
   };
 
-  const problemOptions = (problemsQuery.data ?? []).map((problem) => ({
-    value: problem.id,
-    label: `#${problem.id} ${problem.title}`,
-  }));
+  const problemItems = problemsQuery.data ?? [];
+  // Grouped options keep objective and programming problems visually separate
+  // while a multiple Select still preserves the order the user picked them in.
+  const groupedProblemOptions = [
+    {
+      label: '编程题',
+      options: problemItems
+        .filter((problem) => problem.type !== 'objective')
+        .map((problem) => ({ value: problem.id, label: problemOptionLabel(problem) })),
+    },
+    {
+      label: '客观题',
+      options: problemItems
+        .filter((problem) => problem.type === 'objective')
+        .map((problem) => ({ value: problem.id, label: problemOptionLabel(problem) })),
+    },
+  ].filter((group) => group.options.length > 0);
   const userOptions = (usersQuery.data ?? []).map((user) => ({
     value: user.id,
     label: userOption(user),
@@ -378,14 +405,19 @@ export function AdminContestsPage() {
           <Form.Item label="封榜时间（可空）" name="freezeAt">
             <Input type="datetime-local" />
           </Form.Item>
-          <Form.Item label="题目" name="problemIds">
+          <Form.Item
+            label="题目"
+            name="problemIds"
+            tooltip="编程题与客观题可混排；选择顺序即比赛题号顺序，创建后可在控制台调整每题比赛分值。"
+          >
             <Select
               mode="multiple"
               showSearch
               optionFilterProp="label"
-              placeholder="选择比赛题目"
-              options={problemOptions}
+              placeholder="搜索题号、标题或类型，可同时选择编程题与客观题"
+              options={groupedProblemOptions}
               loading={problemsQuery.isPending}
+              notFoundContent={problemsQuery.isError ? '题目加载失败' : '没有匹配的题目'}
             />
           </Form.Item>
           <Form.Item label="参赛者" name="participantIds">
