@@ -12,6 +12,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e:browser": "playwright test tests/e2e/browser.spec.ts tests/e2e/business-flow.spec.ts",
+    "shots:readme": "node tools/capture-readme-screenshots.mjs",
     "typecheck": "tsc -b",
     "build:help": "node tools/build-help-docs.mjs",
     "build:runner": "node tools/build-runner.mjs",
