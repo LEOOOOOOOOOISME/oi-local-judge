@@ -41,6 +41,11 @@ import {
   problemOwnerLabel,
 } from '../utils/problemAcl';
 import { PROBLEM_TYPE_LABEL, difficultyLabel, problemTypeLabel } from '../utils/status';
+import {
+  categoryIdForCreatePayload,
+  defaultCategoryCodeForType,
+  resolveCategoryIdForType,
+} from '../utils/objectiveCategory';
 import '../styles/admin.css';
 
 interface CreateProblemFormValues {
@@ -87,6 +92,7 @@ export function AdminProblemsPage() {
   const [importing, setImporting] = useState(false);
   const [form] = Form.useForm<CreateProblemFormValues>();
   const ioMode = Form.useWatch('ioMode', form);
+  const problemType = Form.useWatch('type', form);
   const ownerType = (Form.useWatch('ownerType', form) ?? 'user') as ProblemOwnerType;
   const [categoryOpen, setCategoryOpen] = useState(false);
   const [categoryForm] = Form.useForm<{ code: string; name?: string; seqStart?: number }>();
@@ -109,6 +115,10 @@ export function AdminProblemsPage() {
     staleTime: 60_000,
   });
   const categories = categoriesQuery.data ?? [];
+  const preferredCategoryCode = defaultCategoryCodeForType(problemType ?? 'standard');
+  const preferredCategoryMissing =
+    !categoriesQuery.isPending &&
+    !categories.some((category) => category.code === preferredCategoryCode);
   const createCategoryMutation = useMutation({
     mutationFn: (values: { code: string; name?: string; seqStart?: number }) =>
       apiPost<ProblemCategory>('/api/admin/problem-categories', {
@@ -175,7 +185,12 @@ export function AdminProblemsPage() {
         ...(values.ownerType === 'team' ? { ownerId: values.teamId ?? null } : {}),
         ...(values.ownerType === 'system' ? { ownerId: null } : {}),
         ...(values.type === 'objective' ? { objective: { questions: [] } } : {}),
-        categoryId: values.categoryId,
+        // 手动题号自带分类前缀；留空时由后端按题型分配（客观题 Y、编程题 P）。
+        categoryId: categoryIdForCreatePayload({
+          type: values.type,
+          categoryId: values.categoryId,
+          displayId: values.displayId,
+        }),
         displayId: values.displayId?.trim() || undefined,
       };
       return apiPost<CreateProblemResult>('/api/admin/problems', payload);
@@ -196,9 +211,9 @@ export function AdminProblemsPage() {
 
   const openCreate = () => {
     form.resetFields();
-    const defaultCategory =
-      categories.find((category) => category.code === 'P') ?? categories[0];
-    form.setFieldsValue({ categoryId: defaultCategory?.id });
+    form.setFieldsValue({
+      categoryId: resolveCategoryIdForType(DEFAULT_FORM_VALUES.type ?? 'standard', categories),
+    });
     setDrawerOpen(true);
   };
 
@@ -408,6 +423,16 @@ export function AdminProblemsPage() {
           layout="vertical"
           initialValues={DEFAULT_FORM_VALUES}
           requiredMark={false}
+          onValuesChange={(changedValues) => {
+            // 切换题型时跟随默认分类：客观题 -> Y，其他题型 -> P。
+            // 分类尚未加载时留空，交给后端按题型自动分配。
+            if (!('type' in changedValues)) return;
+            const nextType = changedValues.type ?? 'standard';
+            form.setFieldValue(
+              'categoryId',
+              resolveCategoryIdForType(nextType, categories),
+            );
+          }}
           onFinish={(values) => createMutation.mutate(values)}
         >
           <Form.Item
@@ -423,11 +448,21 @@ export function AdminProblemsPage() {
               <Form.Item
                 label="题号分类"
                 name="categoryId"
-                rules={[{ required: true, message: '请选择题号分类' }]}
-                extra="自动分配该分类的下一个题号"
+                extra={
+                  categoriesQuery.isPending
+                    ? '正在加载分类…'
+                    : preferredCategoryMissing
+                      ? `未找到 ${preferredCategoryCode} 分类，留空将由后端按题型自动分配题号`
+                      : `${preferredCategoryCode} 分类自动分配下一个题号；留空由后端按题型分配`
+                }
               >
                 <Select
-                  placeholder="选择分类"
+                  allowClear
+                  placeholder={
+                    categoriesQuery.isPending
+                      ? '加载中…'
+                      : `自动（${preferredCategoryCode}）`
+                  }
                   loading={categoriesQuery.isPending}
                   options={categories.map((category) => ({
                     value: category.id,
