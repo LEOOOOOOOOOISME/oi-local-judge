@@ -2,6 +2,43 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-15 / Round 156（v1.1.3 worker 创建修复）
+
+### 问题
+
+- 1.1.2 安装时勾选 worker 隔离仍返回退出码 1
+- `worker-isolation.log` 只有 `account step failed: ??????`
+
+### 根因
+
+- `net user` 对超过 14 字符的密码交互询问 Y/N
+- 安装器无 stdin，账户创建失败
+- 日志 ASCII 编码把中文错误变成问号
+
+### 修复
+
+- 密码改为 14 字符：`Oij9` + 10 位随机字母数字
+- `net.exe` 参数数组传递
+- 日志 UTF-8，记录身份/exit code/net 输出
+
+### 验证
+
+- 非管理员 14 字符 `net user /add` 返回 `System error 5`，无 Y/N 提示
+- PowerShell 解析 0 错误
+- 118 文件 / 1064 用例通过
+- 真实管理员账户创建仍未实机验证
+
+### 发布
+
+- Tag：`v1.1.3`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.3
+- CI run：`43706908598` — **success**
+- 非 prerelease、Latest
+- 资产：
+  - `OiJudge-Setup-1.1.3.exe` 252,968,409 B
+  - `oi-local-judge-1.1.3-win-x64.zip` 359,739,978 B
+  - `SHA256SUMS.txt`
+
 ## 2026-11-15 / Round 155（v1.1.2 启动阻断修复）
 
 ### 用户实测问题

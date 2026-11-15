@@ -2,9 +2,9 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`874bddd docs: record v1.1.2 startup hotfix`  
-发布 tag：`v1.1.2`  
-当前 Release：`v1.1.2`（正式版，Latest）
+当前 HEAD：`57fd988 fix: make worker account creation non-interactive`  
+发布 tag：`v1.1.3`  
+当前 Release：`v1.1.3`（正式版，Latest）
 
 ---
 
@@ -675,6 +675,42 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - 资产：
   - `OiJudge-Setup-1.1.2.exe` 252,967,650 B
   - `oi-local-judge-1.1.2-win-x64.zip` 359,739,973 B
+  - `SHA256SUMS.txt`
+
+## 3.14 v1.1.3 worker 创建修复（2026-11-15）
+
+用户安装 1.1.2 时 worker 隔离仍返回退出码 1。
+
+### 根因
+
+- `net user` 对超过 14 字符的密码会交互式询问
+  `password longer than 14 characters ... continue? (Y/N)`。
+- 安装器没有 stdin，无法回答 Y，`net user /add` 直接失败。
+- 原日志写 ASCII，中文错误被改成 `??????`，无法定位。
+
+### 修复
+
+- worker 密码固定 14 字符：`Oij9` + 10 位随机字母数字。
+- `net.exe` 参数改为数组传递，避免 PowerShell 5.1 对带空格注释的再拆分。
+- 日志改 UTF-8 无 BOM，记录身份、管理员状态、`net.exe` 退出码与真实输出。
+- 新增失败时记录 `net user /add failed exit=...`。
+
+### 验证
+
+- PowerShell 解析 0 错误。
+- 14 字符 `net user /add` 在非管理员会话返回 `System error 5`（权限拒绝），不再出现超长密码 Y/N 提示。
+- 118 文件 / 1064 用例通过。
+- **限制**：当前会话非管理员，真实账户创建仍需管理员会话实测。
+
+### 发布
+
+- Tag：`v1.1.3`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.1.3
+- CI run：`43706908598`，success
+- 非 prerelease、Latest
+- 资产：
+  - `OiJudge-Setup-1.1.3.exe` 252,968,409 B
+  - `oi-local-judge-1.1.3-win-x64.zip` 359,739,978 B
   - `SHA256SUMS.txt`
 
 ---
