@@ -250,6 +250,7 @@ npm run build:installer    # 安装包
 
 ## 文档
 
+- [功能与特色](features.md)
 - [发布说明](docs/releases/RELEASE_NOTES.md)
 - [技术设计与维护](docs/help/)
 - [排名与赛制](docs/ranking.md)
