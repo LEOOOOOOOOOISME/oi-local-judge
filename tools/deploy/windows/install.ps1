@@ -45,6 +45,12 @@
   access to the data directory, and block its outbound network traffic with a
   per-user Windows Firewall rule. The server then runs contestant code as this
   account (OIJ_WORKER_ISOLATION=required). Requires an elevated PowerShell.
+  worker-isolation.ps1 performs the work; if any step fails, the deployment is
+  left in the optional mode and the warning is printed (no fake success).
+
+.PARAMETER Interactive
+  Ask interactively whether to enable judge-account isolation. The prompt
+  defaults to "no"; the answer is equivalent to passing -WorkerIsolation.
 
 .PARAMETER NoFirewall
   Do not create the inbound Windows Firewall rule. The firewall rule is the
@@ -86,6 +92,7 @@ param(
   [int]$Port = 8787,
   [switch]$Lan,
   [switch]$WorkerIsolation,
+  [switch]$Interactive,
   [switch]$NoFirewall,
   [switch]$NoShortcut,
   [switch]$NoAutostart,
@@ -98,6 +105,23 @@ $ErrorActionPreference = 'Stop'
 
 if ($Port -lt 1 -or $Port -gt 65535) {
   Stop-OijDeployment -ExitCode $OijExitUsage -Message ("-Port must be between 1 and 65535 (got {0})." -f $Port)
+}
+
+# --- Interactive options --------------------------------------------------
+# -Interactive is deliberately explicit: a plain scripted install must never
+# block on a prompt. The default answer is "no".
+if ($Interactive -and -not $DryRun) {
+  Write-Host ''
+  Write-Host 'OiJudge install options' -ForegroundColor Cyan
+  Write-Host 'Judge-account isolation runs contestant code as a dedicated'
+  Write-Host 'low-privilege Windows account (OiJudgeWorker) and needs administrator rights.'
+  $workerAnswer = Read-Host 'Enable judge-account isolation (OiJudgeWorker)? [y/N]'
+  if ($workerAnswer -match '^(y|yes)$') {
+    $WorkerIsolation = $true
+  } else {
+    $WorkerIsolation = $false
+  }
+  Write-Host ''
 }
 
 $currentDirectory = (Get-Location).Path
@@ -204,13 +228,26 @@ $hostAddress = if ($Lan) { '0.0.0.0' } else { '127.0.0.1' }
 $predictedExitCode = $OijExitSuccess
 if (($firewallRequested -or $WorkerIsolation) -and -not $administrator) {
   if ($DryRun) {
-    Write-OijWarn 'Worker isolation and the firewall rule need administrator rights; the real run would stop with exit code 3.'
-    $predictedExitCode = $OijExitAdminRequired
-  } else {
+    if ($firewallRequested) {
+      Write-OijWarn 'The firewall rule needs administrator rights; the real run would stop with exit code 3.'
+      $predictedExitCode = $OijExitAdminRequired
+    } else {
+      Write-OijWarn 'Worker isolation needs administrator rights; the real run would continue with workerIsolation=optional.'
+      $WorkerIsolation = $false
+    }
+  } elseif ($firewallRequested) {
     Stop-OijDeployment -ExitCode $OijExitAdminRequired -Message (
-      "Administrator rights are required for -WorkerIsolation and the Windows Firewall rule. " +
-      "Re-run this script from an elevated PowerShell, or omit those switches."
+      "Administrator rights are required for the Windows Firewall rule. " +
+      "Re-run this script from an elevated PowerShell, or pass -NoFirewall."
     )
+  } else {
+    # Worker isolation is optional: a missing elevation must not abort the
+    # whole deployment, but it must be reported and never recorded as enabled.
+    Write-OijWarn (
+      "Administrator rights are required for -WorkerIsolation; continuing without judge-account " +
+      "isolation (workerIsolation=optional). Re-run elevated to enable it."
+    )
+    $WorkerIsolation = $false
   }
 }
 
@@ -339,7 +376,7 @@ if ($DryRun) {
 }
 
 # --- Helper scripts ------------------------------------------------------
-$scriptFiles = @('oij-common.ps1', 'install.ps1', 'uninstall.ps1', 'start.ps1', 'stop.ps1', 'status.ps1')
+$scriptFiles = @('oij-common.ps1', 'install.ps1', 'uninstall.ps1', 'start.ps1', 'stop.ps1', 'status.ps1', 'worker-isolation.ps1')
 if ($DryRun) {
   Write-OijPlan ("copy {0} helper script(s) to {1}" -f $scriptFiles.Count, $scriptsDir)
 } else {
@@ -366,36 +403,24 @@ if ($DryRun) {
 }
 
 # --- Worker isolation (F-01) ---------------------------------------------
-$workerAccount = $null
+# The actual account/ACL/firewall work lives in worker-isolation.ps1 so the
+# NSIS installer, install.ps1 and uninstall.ps1 share one implementation.
+# workerIsolation stays false unless the helper reports verified success: a
+# failed or incomplete setup must not be recorded (and started) as required.
+$workerIsolationEnabled = $false
+$workerIsolationScript = Join-Path $PSScriptRoot 'worker-isolation.ps1'
 if ($WorkerIsolation) {
-  $workerAccount = $OijWorkerAccountName
   if ($DryRun) {
-    Write-OijPlan ("create/reset low-privilege local user {0}, write ACL-protected worker.json, deny dataDir read and block its outbound network" -f $workerAccount)
+    Write-OijPlan ("run worker-isolation.ps1: create/reset low-privilege local user {0}, protect worker.json, deny dataDir read, grant the judge work root and block outbound network" -f $OijWorkerAccountName)
+  } elseif (-not (Test-Path -LiteralPath $workerIsolationScript -PathType Leaf)) {
+    Write-OijWarn ("worker-isolation.ps1 is missing next to install.ps1 ({0}); worker isolation stays optional." -f $workerIsolationScript)
   } else {
-    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
-    $bytes = New-Object byte[] 24
-    $rng.GetBytes($bytes)
-    $workerPassword = [Convert]::ToBase64String($bytes).TrimEnd('=')
-    $securePassword = ConvertTo-SecureString $workerPassword -AsPlainText -Force
-    if (Get-LocalUser -Name $workerAccount -ErrorAction SilentlyContinue) {
-      Set-LocalUser -Name $workerAccount -Password $securePassword
+    & $workerIsolationScript -Install -DataDir $DataDir -Owner $env:USERNAME
+    if ($LASTEXITCODE -eq 0) {
+      $workerIsolationEnabled = $true
+      Write-OijOk 'worker isolation is enabled and requested as required'
     } else {
-      New-LocalUser -Name $workerAccount -Password $securePassword -PasswordNeverExpires -UserMayNotChangePassword -Description 'OiJudge judge worker (low privilege)' | Out-Null
-    }
-    $workerFile = Join-Path $DataDir 'worker.json'
-    $workerJson = @{ username = $workerAccount; password = $workerPassword } | ConvertTo-Json
-    Write-OijTextFile -Path $workerFile -Content ($workerJson + [Environment]::NewLine)
-    & icacls.exe $workerFile /inheritance:r /grant:r "$($env:USERNAME):F" /deny "$($workerAccount):(R)" | Out-Null
-    & icacls.exe $DataDir /deny "$($workerAccount):(OI)(CI)R" /C /Q | Out-Null
-    Write-OijOk ("worker account {0} ready; data directory is not readable by it" -f $workerAccount)
-    try {
-      $workerFirewallRule = 'OiJudge Worker outbound block'
-      if (-not (Get-NetFirewallRule -DisplayName $workerFirewallRule -ErrorAction SilentlyContinue)) {
-        New-NetFirewallRule -DisplayName $workerFirewallRule -Direction Outbound -Action Block -Profile Any -LocalUser "$($env:COMPUTERNAME)\$workerAccount" -ErrorAction Stop | Out-Null
-      }
-      Write-OijOk ("outbound network blocked for {0}" -f $workerAccount)
-    } catch {
-      Write-OijWarn ("could not create the per-user outbound firewall rule: {0}" -f $_.Exception.Message)
+      Write-OijWarn ("worker isolation was NOT enabled (worker-isolation.ps1 exit code {0}); the deployment stays optional." -f $LASTEXITCODE)
     }
   }
 }
@@ -506,7 +531,7 @@ $state = [ordered]@{
   dataDir = $DataDir
   port = $Port
   host = $hostAddress
-  workerIsolation = [bool]$WorkerIsolation
+  workerIsolation = $workerIsolationEnabled
   url = ('http://127.0.0.1:{0}/' -f $Port)
   linkMode = $resolvedMode
   nodePath = $nodePath
@@ -550,7 +575,7 @@ if ($DryRun) {
   exit $OijExitSuccess
 }
 
-$serverProcess = Start-OijServer -AppDir $appTarget -DataDir $DataDir -Port $Port -NodePath $nodePath -LogDir $logDir -HostAddress $hostAddress -WorkerIsolation $(if ($WorkerIsolation) { 'required' } else { 'optional' })
+$serverProcess = Start-OijServer -AppDir $appTarget -DataDir $DataDir -Port $Port -NodePath $nodePath -LogDir $logDir -HostAddress $hostAddress -WorkerIsolation $(if ($workerIsolationEnabled) { 'required' } else { 'optional' })
 if (-not (Wait-OijHealth -Port $Port -TimeoutSeconds 30)) {
   Show-OijLogTail -LogDir $logDir -Lines 25
   $healthMessage = (
@@ -587,6 +612,13 @@ if ($NoFirewall) {
   Write-Host '  Firewall:   no rule (only local access guaranteed)'
 } else {
   Write-Host ("  Firewall:   {0}" -f (Get-OijFirewallRuleName -Port $Port))
+}
+if ($workerIsolationEnabled) {
+  Write-Host ("  Isolation:  OiJudgeWorker (required; credentials in {0})" -f (Join-Path $DataDir 'worker.json'))
+} elseif ($WorkerIsolation) {
+  Write-Host '  Isolation:  requested but NOT enabled (running optional)'
+} else {
+  Write-Host '  Isolation:  optional (no worker account; re-run with -WorkerIsolation to enable)'
 }
 Write-Host ''
 Write-Host 'Manage the deployment with:'

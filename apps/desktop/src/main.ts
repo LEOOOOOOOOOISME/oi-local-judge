@@ -8,7 +8,7 @@ import {
   Tray,
   utilityProcess,
 } from 'electron';
-import { appendFileSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { homedir, networkInterfaces } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import {
@@ -16,6 +16,7 @@ import {
   redactInitialPassword,
   type InitialAdminNotice,
 } from './first-run.js';
+import { resolveWorkerIsolationMode } from './worker-isolation.js';
 
 /**
  * Embedded 16x16 PNG for the tray icon: a blue rounded square with a white
@@ -74,6 +75,41 @@ let pendingShow = false;
  */
 function appRoot(): string {
   return app.isPackaged ? join(process.resourcesPath, 'app') : join(__dirname, '../../..');
+}
+
+/**
+ * Returns a usable PNG for the main window, or undefined when the packaged
+ * build should inherit the icon embedded in OiJudge.exe (electron-builder
+ * applies build/icon.ico to the executable). Development runs use the same
+ * source PNG as a visible sanity check that the icon asset exists.
+ */
+function windowIconPath(): string | undefined {
+  const candidates = app.isPackaged
+    ? [
+        join(process.resourcesPath, 'app', 'build', 'icon.png'),
+        join(process.resourcesPath, 'icon.png'),
+      ]
+    : [join(appRoot(), 'build', 'icon.png')];
+  for (const candidate of candidates) {
+    try {
+      if (statSync(candidate).isFile()) return candidate;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Optional judge-account isolation requested by the installer.
+ * See worker-isolation.ts: an explicit OIJ_WORKER_ISOLATION wins, otherwise
+ * the verified worker.json marker selects required mode. A missing marker
+ * keeps the server in optional mode.
+ */
+function workerIsolationMode(): string | undefined {
+  return resolveWorkerIsolationMode({
+    workerFile: join(app.getPath('userData'), 'runtime', 'worker.json'),
+  });
 }
 
 function serverEntry(root: string): string {
@@ -226,6 +262,7 @@ async function startServer(root: string): Promise<ServerReady> {
   // (or a specific interface address) from the launcher/installer.
   const lanRequested = process.env.OIJ_LAN === '1';
   const host = process.env.OIJ_HOST ?? (lanRequested ? '0.0.0.0' : '127.0.0.1');
+  const workerMode = workerIsolationMode();
   const child = utilityProcess.fork(serverEntry(root), [], {
     // `pipe` instead of `inherit`: a packaged GUI app has no reliable inherited
     // stdout, and a blocked inherited handle used to make the child hang
@@ -240,6 +277,7 @@ async function startServer(root: string): Promise<ServerReady> {
       OIJ_DATA_DIR: dataDir,
       OIJ_RUNNER: join(root, 'native/runner/out/ojrunner.exe'),
       OIJ_INTERACT_RUNNER: join(root, 'native/interact/out/ojinteract.exe'),
+      ...(workerMode ? { OIJ_WORKER_ISOLATION: workerMode } : {}),
     },
   });
   serverProcess = child;
@@ -384,11 +422,13 @@ function showMainWindow(): void {
 }
 
 async function createWindow(port: number): Promise<BrowserWindow> {
+  const icon = windowIconPath();
   const created = new BrowserWindow({
     width: 1280,
     height: 800,
     title: 'OiJudge',
     show: false,
+    ...(icon ? { icon } : {}),
     webPreferences: {
       preload: join(__dirname, 'preload.js'),
       contextIsolation: true,
