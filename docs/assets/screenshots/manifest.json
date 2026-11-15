@@ -53,6 +53,18 @@
       "route": "/admin/users",
       "width": 1440,
       "height": 900
+    },
+    {
+      "file": "authoring.png",
+      "route": "/admin/problems/1",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "learning.png",
+      "route": "/students/2/learning",
+      "width": 1440,
+      "height": 900
     }
   ]
 }

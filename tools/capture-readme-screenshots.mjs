@@ -338,6 +338,22 @@ async function main() {
       }),
     );
 
+    // 9. 出题：题目编辑页（题面、资产、测试数据与生成的入口）。
+    captured.push(
+      await screenshot('authoring.png', `/admin/problems/${seedData.problemIds[0]}`, {
+        ready: 'text=基本信息',
+        settleMs: 800,
+      }),
+    );
+
+    // 10. 学生个人学习页（学习概览、错题、提交记录和标签掌握度）。
+    captured.push(
+      await screenshot('learning.png', `/students/${seedData.students[0].id}/learning`, {
+        ready: 'text=学习概览',
+        settleMs: 800,
+      }),
+    );
+
     if (pageErrors.length > 0) {
       throw new Error(`uncaught page errors:\n${pageErrors.join('\n')}`);
     }

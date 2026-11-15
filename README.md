@@ -1,264 +1,183 @@
 # OiJudge
 
-**在 Windows 上搭一套自己的 OI 评测和比赛系统。**
+**在自己的 Windows 电脑上，搭一套 OI 教学、评测和比赛系统。**
 
-老师在电脑上安装 OiJudge，学生用浏览器登录、看题、提交代码、查看成绩。题目、比赛、评测记录和数据都保存在这台电脑上，不依赖外部服务器。
+老师在电脑上安装，学生用浏览器登录、看题、提交、查看成绩。题目、代码、成绩、比赛和数据都保存在这台电脑上，不需要另外准备一台专门运行系统的电脑。
 
 当前版本：**v1.1.3**
 
----
+![比赛总览](docs/assets/screenshots/contest.png)
 
 ## 适合谁
 
 - 学校信息学教练：建题、组织比赛、收作业、批量评测
-- 比赛组织者：报名、封榜、榜单、奖项、Hack
+- 比赛组织者：报名、封榜、榜单、奖项、证书
 - 班级教学：班级名单、训练计划、错题与学习统计
 - 想在自己电脑上练习 OI 的学生
 
-## 能做什么
+## 亮点
 
-### 评测
+### 1. 题库、出题和做题放在一起
 
-- 支持传统题、文件 IO、SPJ、交互题、客观题、提交答案题
-- 支持 C++14 / C++17 / C++20、C11
-- 支持 OI、IOI、ACM、CF-like 排名
-- 子任务、部分分、重测、取消评测
-- 编译缓存、崩溃恢复、输出限制
+老师可以在管理端完成一整道题的准备工作：写题面、放附件、准备标准程序、准备数据生成器、准备数据校验器、设置特殊判分和交互程序，再一键生成数据并检查。
 
-### 比赛
+学生端看到的是排版好的题面，支持图片和数学公式；可以看样例、下载附件、提交代码、查看每次提交的结果。
 
-- 个人、团队、混合报名
-- 管理员导入名单，或开放/审核报名
-- 封榜、解封、归档、比赛大屏
-- 奖项、证书、成绩导出
-- 补题、订正排名、Hack
-- 正式榜实时更新与历史快照
-
-### 批量收作业
-
-- 上传一个 ZIP，按“学生/题目/源码”自动整理
-- 先预览，确认学生和题目对应关系
-- 后台导入、评测，页面可查看进度
-- 刷新页面或重启后继续显示任务进度
-- 支持取消、恢复、失败项报告
-- 导出 CSV、Excel、HTML，或学生×题目矩阵
-
-### 统计与教学
-
-- 比赛统计：分数分布、每题情况、难度/区分度、班级/团队对比
-- 一键生成分析报告 PDF
-- 导出完整个人成绩 PDF
-- 班级、训练计划、成员完成度
-- 错题、标签掌握度、班级学习统计
-- 教练可以查看学生提交源码
-
-### 题库
-
-- 富文本题面，支持 Markdown 和数学公式
-- 测试数据、子任务、SPJ、交互题、客观题
-- 题目附件：PDF、图片、ZIP
-- 分类题号，如 `P1001`
-- 题单：个人、团队、公开
-- 支持导入 Cena、Lemon 题包
-
-### 数据与安全
-
-- 数据保存在本机，默认只允许本机访问
-- 首次启动生成随机管理员密码，必须改密
-- 可开启局域网访问
-- 可开启 HTTPS
-- 可选用独立低权限账户运行评测代码
-- 自动备份、恢复、系统诊断
-
-## 快速开始
-
-### 方式一：安装包
-
-从 GitHub Releases 下载：
-
-- `OiJudge-Setup-1.1.3.exe`：安装版
-- `oi-local-judge-1.1.3-win-x64.zip`：便携版
-
-发布页：
-
-<https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases>
-
-安装后启动 OiJudge，浏览器会自动打开管理页面。
-
-### 方式二：源码运行
-
-需要：
-
-- Windows 10/11 x64
-- Node.js 24+
-- MinGW-W64 g++
-- CMake 3.20+
-
-```powershell
-npm install --ignore-scripts --cache .npm-cache
-npm run build:native
-npm run build
-npm run seed
-npm start
-```
-
-访问：
-
-```text
-http://127.0.0.1:8787
-```
-
-## 第一次启动
-
-没有默认管理员密码。
-
-- 命令行启动时，终端会显示一次性随机密码
-- Electron 启动时，会弹窗显示，可直接复制
-- 第一次登录必须修改密码
-
-如果从旧版本升级，旧的管理员默认密码会被强制修改，并让旧登录状态失效。
-
-## 局域网访问
-
-默认只有本机能访问。需要学生从别的电脑打开时，显式开启局域网：
-
-```powershell
-$env:OIJ_LAN = '1'
-```
-
-或：
-
-```powershell
-$env:OIJ_HOST = '0.0.0.0'
-```
-
-建议同时启用 HTTPS：
-
-```powershell
-$env:OIJ_TLS_CERT = 'C:\certs\oij-cert.pem'
-$env:OIJ_TLS_KEY  = 'C:\certs\oij-key.pem'
-```
-
-没有 HTTPS 的局域网只适合可信网络。
-
-## 评测隔离
-
-默认以启动 OiJudge 的 Windows 用户运行评测程序。
-
-如果你要运行不受信任的代码，请在安装时勾选“启用判题账户隔离”，或运行：
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\deploy\windows\install.ps1 -WorkerIsolation
-```
-
-然后设置：
-
-```powershell
-$env:OIJ_WORKER_ISOLATION = 'required'
-```
-
-启用后，评测程序使用独立低权限账户，不能直接读取数据目录中的数据库、答案和密钥。
-
-> 该模式的真实账户创建与运行需要在管理员 Windows 会话中验证；未启用时不要把它当作强安全沙箱。
-
-## 批量导入
-
-目录结构示例：
-
-```text
-学生姓名/题目编号/main.cpp
-学生姓名/题目编号/answers.json
-```
-
-流程：
-
-1. 上传 ZIP
-2. 确认学生和题目的层级
-3. 检查预览，修正题目对应关系
-4. 后台导入并评测
-5. 查看进度，刷新页面不会丢
-6. 预览成绩，选择发布
-7. 导出成绩
-
-## 界面
-
-> 截图来自本地演示数据，实际界面以当前版本为准。
-
-| 登录 | 题目 |
+| 老师出题 | 学生看题 |
 |---|---|
-| <img src="docs/assets/screenshots/login.png" width="100%" alt="登录" /> | <img src="docs/assets/screenshots/problem.png" width="100%" alt="题目" /> |
+| <img src="docs/assets/screenshots/authoring.png" width="100%" alt="老师出题页面" /> | <img src="docs/assets/screenshots/problem.png" width="100%" alt="学生题目页面" /> |
 
-| 比赛 | 正式榜 |
+其他出题相关能力：
+
+- 题目可以带文档、图片、压缩包等附件。
+- 题目有固定编号，例如 `P1001`，方便引用和整理。
+- 支持个人题目清单、团队题目清单和公开题目清单。
+- 可以按人、按班级、按团队或公开设置题目可见范围。
+- 支持导入 Cena、Lemon 题包，旧题可以继续使用。
+- 支持按组设置测试点、分值和生成参数。
+- 支持一键生成数据、自动检查数据格式和边界。
+- 支持标准程序、数据生成器、数据校验器、特殊判分、交互程序和暴力对拍程序。
+
+### 2. 比赛从报名到颁奖都能完成
+
+支持个人赛、团队赛和混合赛。
+
+报名可以三种方式：
+
+- 管理员导入参赛名单。
+- 开放报名，学生自己报名。
+- 开放报名后由管理员审核。
+
+比赛过程中支持公告、开始、结束、补时、封榜、解封和归档；归档后成绩只读，避免赛后误改。
+
+| 比赛页面 | 正式榜单 |
 |---|---|
-| <img src="docs/assets/screenshots/contest.png" width="100%" alt="比赛" /> | <img src="docs/assets/screenshots/ranking.png" width="100%" alt="正式榜" /> |
+| <img src="docs/assets/screenshots/contest.png" width="100%" alt="比赛页面" /> | <img src="docs/assets/screenshots/ranking.png" width="100%" alt="正式榜单" /> |
 
-| 统计 | 批量任务 |
+比赛相关能力：
+
+- 正式榜单实时更新，保留历史榜单和排名变化。
+- 支持比赛大屏，现场展示排名和倒计时。
+- 支持奖项设置和证书生成。
+- 支持导出比赛成绩。
+- 支持生成比赛分析报告。
+- 支持为每位学生生成完整成绩单。
+- 支持补题和订正排名。
+- 支持隐藏或恢复参赛者，成绩和提交仍然保留。
+- 比赛锁题后，可以查看同题其他参赛者的代码并构造反例；成功的反例会从正式成绩中剔除，并重新计算排名。
+
+### 3. 成绩和统计看得清楚
+
+比赛结束后，可以直接看到参赛人数、提交次数、平均分、中位数、满分人数、零分人数，以及总分分布和每道题的得分情况。
+
+统计页面还支持班级对比、团队对比、题目难度和区分度分析；可以导出比赛分析报告和每位学生的完整成绩单。
+
+![比赛统计](docs/assets/screenshots/statistics.png)
+
+### 4. 批量收作业不用一个个点
+
+老师上传一个压缩包，按“学生 / 题目 / 代码文件”的层级自动整理。
+
+上传后先预览，确认学生和题目的对应关系，再开始导入和评测。页面会显示当前阶段、已完成数量、预计剩余时间和失败情况；刷新页面或重启程序后，任务进度仍然保留。
+
+![批量任务](docs/assets/screenshots/batch.png)
+
+批量相关能力：
+
+- 自动识别题目编号、题目标题或比赛中的题号顺序。
+- 支持手动修改学生和题目的对应关系。
+- 支持取消任务、从中断处继续。
+- 支持查看失败项和失败原因。
+- 评测结果先作为草稿，确认后才进入正式成绩。
+- 发布时可以选择覆盖、取较高分或只补空缺。
+- 支持导出普通表格、学生与题目交叉表、表格文件和网页表格。
+- 支持比赛批量导入，也支持日常批量评测。
+
+### 5. 教学进度和错题能长期跟踪
+
+按班级管理学生，建立训练计划，安排题目和完成时间；查看每位学生的完成度、班级整体完成情况、错题和标签掌握度。
+
+学生可以查看自己的学习页、错题和统计；教练可以查看学生提交的源代码。
+
+| 班级训练进度 | 学生个人学习 |
 |---|---|
-| <img src="docs/assets/screenshots/statistics.png" width="100%" alt="统计" /> | <img src="docs/assets/screenshots/batch.png" width="100%" alt="批量任务" /> |
+| <img src="docs/assets/screenshots/class-training.png" width="100%" alt="班级训练进度" /> | <img src="docs/assets/screenshots/learning.png" width="100%" alt="学生个人学习统计" /> |
 
-| 班级/训练 | 管理端 |
-|---|---|
-| <img src="docs/assets/screenshots/class-training.png" width="100%" alt="班级与训练" /> | <img src="docs/assets/screenshots/admin.png" width="100%" alt="管理端" /> |
+### 6. 账号、权限和管理集中在一个地方
 
-## 常用配置
+管理员、出题人、比赛管理员、参赛者使用不同角色，看到的页面和操作不同。
 
-| 配置 | 作用 | 默认 |
-|---|---|---|
-| `OIJ_DATA_DIR` | 数据目录 | 项目下 `runtime/` |
-| `OIJ_PORT` | 端口 | `8787` |
-| `OIJ_HOST` | 监听地址 | `127.0.0.1` |
-| `OIJ_LAN` | 设为 `1` 开启局域网 | 关闭 |
-| `OIJ_ADMIN_USERNAME` | 初始管理员用户名 | `admin` |
-| `OIJ_ADMIN_PASSWORD` | 自动化初始化密码 | 随机生成 |
-| `OIJ_SESSION_SECRET` | 登录签名密钥 | 自动生成 |
-| `OIJ_TLS_CERT` | HTTPS 证书 | 无 |
-| `OIJ_TLS_KEY` | HTTPS 私钥 | 无 |
-| `OIJ_COOKIE_SECURE` | 反代 HTTPS 时强制安全 Cookie | 随 TLS |
-| `OIJ_GXX` | g++ 路径 | 自动查找 |
-| `OIJ_JUDGE_CONCURRENCY` | 同时评测数 | 自动 |
-| `OIJ_WORKER_ISOLATION` | 评测账户隔离 | `optional` |
+管理端支持创建、修改、停用账号，重置密码，管理比赛名单，设置题目可见范围，查看关键操作记录，以及调整系统设置。
 
-## 数据与备份
+![用户管理](docs/assets/screenshots/admin.png)
 
-默认数据目录：
+管理端还可以：
 
-```text
-runtime/
-  db/           数据库
-  problems/     题目、数据、附件
-  submissions/  提交源码
-  cache/        编译缓存
-  logs/         日志
-  backups/      备份
-```
+- 设置本机访问或局域网访问。
+- 设置是否开启加密访问。
+- 设置同时评测数量。
+- 设置登录有效时间。
+- 自定义排名规则。
+- 查看运行状态和系统检查结果。
 
-可以在管理端创建/恢复备份，也可以用 `OIJ_DATA_DIR` 指向其他磁盘。
+### 7. 数据留在本机，备份和恢复都在管理端
 
-升级前请先备份。
+题目、代码、成绩、比赛记录都保存在本机。
 
-## 常用命令
+默认只允许本机访问；需要学生从其他电脑访问时，再由管理员开启局域网访问。
 
-```powershell
-npm run build              # 构建 Web/服务端/桌面端
-npm run build:native       # 构建评测器
-npm start                  # 启动
-npm test                   # 单元/接口测试
-npm run test:e2e:browser   # 浏览器流程测试
-npm run build:portable     # 便携版
-npm run build:installer    # 安装包
-```
+首次启动会生成随机管理员密码，第一次登录必须修改密码；旧版本的固定管理员密码会被强制修改。
 
-## 文档
+支持自动备份、手动备份和恢复；升级前可以先做一次备份。
 
-- [功能与特色](features.md)
-- [发布说明](docs/releases/RELEASE_NOTES.md)
-- [技术设计与维护](docs/help/)
-- [排名与赛制](docs/ranking.md)
-- [批量导入](docs/batch-import.md)
-- [Windows 部署](docs/help/maintenance/windows-deploy.md)
-- [发布构建](docs/help/maintenance/release.md)
+![登录页面](docs/assets/screenshots/login.png)
 
-## License
+其他安全和运维能力：
 
-Apache License 2.0，见 [LICENSE](LICENSE) 与 [NOTICE](NOTICE)。  
-第三方组件声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+- 登录失败次数过多会被限制。
+- 可以选择让评测代码使用单独的低权限账户，不能直接读取系统数据、答案和重要凭据。
+- 支持系统检查，方便发现异常。
+- 所有内容集中在一个数据文件夹里，方便整体备份和迁移。
+
+## 安装方式
+
+### 运行环境
+
+- Windows 10 或 Windows 11。
+- 64 位系统。
+- 不需要另外准备一台专门运行系统的电脑。
+
+### 方式一：安装版
+
+1. 打开发布页：
+
+   <https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases>
+
+2. 下载 `OiJudge-Setup-1.1.3.exe`。
+3. 双击安装，选择安装位置。
+4. 安装完成后启动 OiJudge。
+
+安装版会创建桌面和开始菜单快捷方式，并带有卸载程序。
+
+### 方式二：免安装版
+
+1. 打开同一个发布页。
+2. 下载 `oi-local-judge-1.1.3-win-x64.zip`。
+3. 解压到普通文件夹。
+4. 双击 `OiJudge.exe` 启动。
+
+免安装版适合放在 U 盘或临时电脑上。安装版和免安装版使用同一套数据，可以按场景切换。
+
+### 第一次启动
+
+- 启动后浏览器会自动打开管理页面。
+- 第一次启动会显示随机管理员密码，可以复制。
+- 第一次登录必须修改密码。
+- 学生从其他电脑访问时，在管理端开启局域网访问，然后用浏览器打开老师电脑的地址。
+
+### 安装前请知道
+
+- 安装包当前没有发布者认证，Windows 可能提示“未知发布者”。
+- 首次启动可能被杀毒软件扫描拖慢；第二次启动通常会快一些。
+- 需要运行不完全可信的选手代码时，建议开启独立评测账户；该账户需要管理员权限创建。
+
