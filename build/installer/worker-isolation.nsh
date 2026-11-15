@@ -58,7 +58,7 @@ Var OijWorkerIsolationChecked
   ${If} $1 != "0"
     DetailPrint "Could not normalize OiJudge file integrity (icacls exit code $1)."
     ${IfNot} ${Silent}
-      MessageBox MB_ICONEXCLAMATION|MB_OK "安装文件权限规范化失败（icacls 退出码 $1）。$\r$\n$\r$\nOiJudge 可能无法启动；请把安装目录移动到普通磁盘路径，或以管理员身份运行：$\r$\n$\r$\nicacls \"$INSTDIR\" /setintegritylevel Medium /T /C /Q"
+      MessageBox MB_ICONEXCLAMATION|MB_OK "安装文件权限规范化失败（icacls 退出码 $1）。$\r$\n$\r$\nOiJudge 可能无法启动；请将 OiJudge 安装到普通磁盘路径，或在管理员 PowerShell 中重新规范安装目录权限。"
     ${EndIf}
   ${EndIf}
 
