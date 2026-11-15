@@ -94,18 +94,51 @@ export function getProblemCategoryByCode(
   );
 }
 
+/** Default category for programming problems (auto-numbered P1001, P1002, ...). */
+export const DEFAULT_CATEGORY_CODE = 'P';
+/** Category for objective (multiple-choice / fill) problems: Y1001, Y1002, ... */
+export const OBJECTIVE_CATEGORY_CODE = 'Y';
+export const OBJECTIVE_CATEGORY_NAME = '客观题题库';
+export const DEFAULT_CATEGORY_SEQ_START = 1001;
+
+/** Ensures one built-in category exists; an existing category is never modified. */
+function ensureNumberingCategory(
+  db: DatabaseSync,
+  code: string,
+  name: string,
+  now: number,
+): ProblemCategoryRow {
+  const existing = getProblemCategoryByCode(db, code);
+  if (existing) return existing;
+  db.prepare(
+    `INSERT INTO problem_categories(code, name, next_seq, seq_start, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+  ).run(code, name, DEFAULT_CATEGORY_SEQ_START, DEFAULT_CATEGORY_SEQ_START, now);
+  return getProblemCategoryByCode(db, code)!;
+}
+
 /** Ensures the default `P` category exists (seq starts at 1001; no `L` is created). */
 export function ensureDefaultProblemCategory(
   db: DatabaseSync,
   now = Date.now(),
 ): ProblemCategoryRow {
-  const existing = getProblemCategoryByCode(db, 'P');
-  if (existing) return existing;
-  db.prepare(
-    `INSERT INTO problem_categories(code, name, next_seq, seq_start, created_at)
-       VALUES (?, ?, ?, ?, ?)`,
-  ).run('P', 'P', 1001, 1001, now);
-  return getProblemCategoryByCode(db, 'P')!;
+  return ensureNumberingCategory(db, DEFAULT_CATEGORY_CODE, DEFAULT_CATEGORY_CODE, now);
+}
+
+/**
+ * Ensures the objective category `Y` exists (seq starts at 1001). New objective
+ * problems are numbered Y1001, Y1002, ...; existing P numbers are untouched.
+ */
+export function ensureObjectiveProblemCategory(
+  db: DatabaseSync,
+  now = Date.now(),
+): ProblemCategoryRow {
+  return ensureNumberingCategory(
+    db,
+    OBJECTIVE_CATEGORY_CODE,
+    OBJECTIVE_CATEGORY_NAME,
+    now,
+  );
 }
 
 export interface CreateProblemCategoryInput {
