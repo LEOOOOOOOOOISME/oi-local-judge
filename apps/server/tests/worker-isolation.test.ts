@@ -110,6 +110,28 @@ describe('worker isolation configuration', () => {
     expect(fromEnv.workerIsolation).toBe('required');
   });
 
+  it('honours required:true written by the installer worker.json', () => {
+    const dataDir = tempDir();
+    writeFileSync(
+      join(dataDir, 'worker.json'),
+      JSON.stringify({
+        username: 'OiJudgeWorker',
+        password: 'file-password',
+        required: true,
+      }),
+      'utf8',
+    );
+    const config = loadConfig({ OIJ_DATA_DIR: dataDir });
+    expect(config.workerIsolation).toBe('required');
+    expect(workerIsolationIssue(config)).toBeNull();
+
+    const overridden = loadConfig({
+      OIJ_DATA_DIR: dataDir,
+      OIJ_WORKER_ISOLATION: 'optional',
+    });
+    expect(overridden.workerIsolation).toBe('optional');
+  });
+
   it('builds the documented icacls ACL commands', () => {
     const grant = buildWorkdirGrantArgs('D:\\data-judge-tmp\\sub-1', 'OiJudgeWorker');
     expect(grant[0]).toBe('D:\\data-judge-tmp\\sub-1');
