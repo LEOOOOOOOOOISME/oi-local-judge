@@ -36,6 +36,10 @@ import { useAuth } from '../auth/AuthContext';
 import { CodeBlock } from '../components/CodeBlock';
 import { MetaList } from '../components/MetaList';
 import { ObjectiveAnswerForm } from '../components/ObjectiveAnswerForm';
+import {
+  countAnsweredObjective,
+  toObjectiveAnswerPayload,
+} from '../components/ObjectiveAnswerModel';
 import { PageHead } from '../components/PageHead';
 import { ErrorResult, PageLoading } from '../components/PageStates';
 import { ProblemSharePanel } from '../components/ProblemSharePanel';
@@ -99,6 +103,7 @@ export function ProblemPage() {
   const [objectiveAnswers, setObjectiveAnswers] = useState<
     Record<number, ObjectiveAnswerValue>
   >({});
+  const [activeObjectiveId, setActiveObjectiveId] = useState<number | null>(null);
   const [outputAnswers, setOutputAnswers] = useState<Record<number, string>>({});
   const [locking, setLocking] = useState(false);
   const [sourceTarget, setSourceTarget] = useState<HackTarget | null>(null);
@@ -122,6 +127,7 @@ export function ProblemPage() {
     lastProblemRef.current = problemRef;
     setCode(readDraft(problemRef) ?? DEFAULT_CODE);
     setObjectiveAnswers({});
+    setActiveObjectiveId(null);
     setOutputAnswers({});
   }, [problemRef]);
 
@@ -337,22 +343,17 @@ export function ProblemPage() {
     (sum, question) => sum + Number(question.points || 0),
     0,
   );
-  const answeredObjectiveCount = objectiveQuestions.filter((question) => {
-    const value = objectiveAnswers[question.id];
-    return Array.isArray(value) ? value.length > 0 : typeof value === 'string' && value.trim().length > 0;
-  }).length;
+  const answeredObjectiveCount = countAnsweredObjective(
+    objectiveQuestions,
+    objectiveAnswers,
+  );
+  const activeObjectiveQuestionId =
+    objectiveQuestions.find((question) => question.id === activeObjectiveId)?.id ??
+    objectiveQuestions[0]?.id ??
+    null;
 
   const submitObjective = () => {
-    const answers = objectiveQuestions.flatMap((question) => {
-      const value = objectiveAnswers[question.id];
-      if (value === undefined) return [];
-      if (typeof value === 'string') {
-        if (value.trim().length === 0) return [];
-      } else if (value.length === 0) {
-        return [];
-      }
-      return [{ questionId: question.id, value }];
-    });
+    const answers = toObjectiveAnswerPayload(objectiveQuestions, objectiveAnswers);
     if (answers.length === 0) {
       message.warning('请至少作答一题');
       return;
@@ -461,8 +462,7 @@ export function ProblemPage() {
             title="作答"
             extra={
               <span className="muted">
-                已作答 {answeredObjectiveCount} / {objectiveQuestions.length} 题 · 总分{' '}
-                {objectiveTotal} 分
+                共 {objectiveQuestions.length} 题 · 总分 {objectiveTotal} 分
               </span>
             }
           >
@@ -473,20 +473,37 @@ export function ProblemPage() {
                 setObjectiveAnswers((previous) => ({ ...previous, [questionId]: value }))
               }
               disabled={submitMutation.isPending}
+              showNav={objectiveQuestions.length > 1}
+              activeQuestionId={activeObjectiveQuestionId}
+              onActiveQuestionChange={setActiveObjectiveId}
             />
-            <div className="objective-answer-footer">
-              <span className="objective-answer-summary">
-                单选/判断点击选项，多选可勾选多个；填空提交后由后端统一评分。
-              </span>
-              <Button
-                type="primary"
-                onClick={submitObjective}
-                loading={submitMutation.isPending}
-                disabled={answeredObjectiveCount === 0}
-              >
-                提交答案
-              </Button>
-            </div>
+            {objectiveQuestions.length > 0 ? (
+              <div className="objective-submit-bar">
+                <div className="objective-submit-stats">
+                  <span>
+                    已答 <strong>{answeredObjectiveCount}</strong> /{' '}
+                    {objectiveQuestions.length} 题
+                  </span>
+                  <span className="objective-submit-divider" aria-hidden="true">
+                    ·
+                  </span>
+                  <span>总分 {objectiveTotal} 分</span>
+                </div>
+                <div className="objective-submit-actions">
+                  <span className="objective-submit-hint">
+                    单选/判断点击选项，多选可勾选多个；填空提交后由后端统一评分。
+                  </span>
+                  <Button
+                    type="primary"
+                    onClick={submitObjective}
+                    loading={submitMutation.isPending}
+                    disabled={answeredObjectiveCount === 0}
+                  >
+                    提交答案
+                  </Button>
+                </div>
+              </div>
+            ) : null}
           </Card>
         )
       ) : null}

@@ -85,17 +85,151 @@
   font-size: 12px;
 }
 
-.objective-answer-list {
+/* ---------- 选手作答：洛谷式答题卡 ---------- */
+
+.objective-answer-card .ant-card-body {
+  padding-bottom: 0;
+}
+
+.objective-answer-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 12px;
+  align-items: start;
+}
+
+.objective-answer-layout-with-nav {
+  grid-template-columns: 168px minmax(0, 1fr);
+  gap: 16px;
+}
+
+/* 左侧 sticky 题号导航 */
+.objective-nav {
+  position: sticky;
+  top: 60px;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+}
+
+.objective-nav-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.objective-nav-title {
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.objective-nav-progress {
+  color: var(--text-3);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.objective-nav-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(32px, 1fr));
+  gap: 6px;
+}
+
+.objective-nav-item {
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  background: #ffffff;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background-color 0.15s ease, color 0.15s ease;
+}
+
+.objective-nav-item:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.objective-nav-item.is-answered {
+  border-color: #86efac;
+  background: #f0fdf4;
+  color: #15803d;
+}
+
+.objective-nav-item.is-current {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.objective-nav-item:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.objective-nav-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  color: var(--text-3);
+  font-size: 11px;
+}
+
+.objective-nav-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.objective-nav-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 2px;
+  background: #ffffff;
+}
+
+.objective-nav-dot.is-current {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.objective-nav-dot.is-answered {
+  border-color: #86efac;
+  background: #f0fdf4;
+}
+
+/* 中间逐题卡片 */
+.objective-question-list {
   display: flex;
   flex-direction: column;
   gap: 12px;
+  min-width: 0;
 }
 
 .objective-question {
-  padding: 12px 14px;
+  padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  background: #fcfcfd;
+  background: #ffffff;
+  scroll-margin-top: 64px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.objective-question.is-active {
+  border-color: #bfd3ff;
+  box-shadow: inset 0 0 0 1px #e5eeff;
 }
 
 .objective-question-head {
@@ -107,7 +241,24 @@
 }
 
 .objective-question-index {
+  font-size: 13.5px;
   font-weight: 600;
+}
+
+.objective-question-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #15803d;
+  font-size: 11.5px;
+}
+
+.objective-question-status::before {
+  content: '';
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #22c55e;
 }
 
 .objective-question-points {
@@ -118,25 +269,199 @@
 }
 
 .objective-question-stem {
-  margin-bottom: 10px;
+  margin-bottom: 12px;
+  line-height: 1.7;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
 }
 
-.objective-fill-input {
-  max-width: 520px;
+/* A/B/C/D 行式选项 */
+.objective-option-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
 }
 
-.objective-answer-footer {
+.objective-option-list.ant-checkbox-group {
+  display: flex;
+}
+
+.objective-option {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #ffffff;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+}
+
+.objective-option:hover {
+  border-color: #b9cdfb;
+  background: #f8fbff;
+}
+
+.objective-option.ant-radio-wrapper-checked,
+.objective-option.ant-checkbox-wrapper-checked {
+  border-color: var(--accent);
+  background: var(--accent-weak);
+}
+
+.objective-option > span:last-child {
+  display: inline-flex;
+  flex: 1;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.objective-option-key {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border-strong);
+  border-radius: 50%;
+  color: var(--text-2);
+  font-family: var(--mono);
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.objective-option.ant-radio-wrapper-checked .objective-option-key,
+.objective-option.ant-checkbox-wrapper-checked .objective-option-key {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+.objective-option-text {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.objective-fill-input {
+  max-width: 420px;
+}
+
+/* 底部 sticky 提交栏 */
+.objective-submit-bar {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  margin-top: 12px;
+  margin: 16px -12px 0;
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(4px);
 }
 
-.objective-answer-summary {
+.objective-submit-stats {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   color: var(--text-2);
-  font-size: 12px;
+  font-size: 12.5px;
+}
+
+.objective-submit-stats strong {
+  color: var(--text);
+  font-family: var(--mono);
+  font-size: 14px;
+}
+
+.objective-submit-divider {
+  color: var(--border-strong);
+}
+
+.objective-submit-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+}
+
+.objective-submit-hint {
+  color: var(--text-3);
+  font-size: 11.5px;
+}
+
+@media (max-width: 960px) {
+  .objective-answer-layout-with-nav {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 窄屏：题号导航折叠成顶部横向条 */
+  .objective-nav {
+    position: static;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    overflow: hidden;
+  }
+
+  .objective-nav-head {
+    flex: none;
+    margin-bottom: 0;
+  }
+
+  .objective-nav-title {
+    white-space: nowrap;
+  }
+
+  .objective-nav-progress {
+    display: none;
+  }
+
+  .objective-nav-grid {
+    display: flex;
+    flex: 1;
+    gap: 6px;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .objective-nav-item {
+    flex: 0 0 30px;
+  }
+
+  .objective-nav-legend {
+    display: none;
+  }
+}
+
+@media (max-width: 720px) {
+  .objective-question {
+    padding: 12px;
+  }
+
+  .objective-question-points {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .objective-submit-bar {
+    margin: 12px -12px 0;
+  }
+
+  .objective-submit-hint {
+    display: none;
+  }
+
+  .objective-submit-actions {
+    margin-left: 0;
+  }
 }
