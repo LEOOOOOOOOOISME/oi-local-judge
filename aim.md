@@ -2,7 +2,7 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`93d091c merge: default new objective problems to Y category`  
+当前 HEAD：`6cb2aa8 docs: record objective question productization`  
 发布 tag：`v1.1.3`  
 当前 Release：`v1.1.3`（正式版，Latest；客观题产品化尚未发版）
 
