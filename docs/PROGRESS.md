@@ -2,6 +2,19 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-18 / Round 161（客观题浏览器 E2E）
+
+### 完成
+
+- 新增 `tests/e2e/objective.spec.ts`：
+  - 真实 server + 浏览器登录
+  - API 创建 Y 开头客观题
+  - 单选/多选/判断/填空作答
+  - 提交后满分 50、4 题 AC
+  - 监听 5xx 与 pageerror
+- `test:e2e:browser` 纳入 objective spec。
+- 验证：`npm run test:e2e:browser` → **3 passed**。
+
 ## 2026-11-18 / Round 160（v1.2.0 客观题发布）
 
 ### 完成

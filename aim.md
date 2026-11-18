@@ -2,7 +2,7 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`8a56092 release: v1.2.0 objective question productization`  
+当前 HEAD：`ebb9dcc test(e2e): include objective spec in browser suite`  
 发布 tag：`v1.2.0`  
 当前 Release：`v1.2.0`（正式版，Latest）
 
@@ -723,7 +723,7 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 - 验证：
   - 全量 124 文件 / 1097 用例通过
   - `npm run build` 通过
-  - 浏览器 E2E 2 passed
+  - 浏览器 E2E 3 passed（新增 objective spec）
   - 临时数据 Y1001：4 题作答 50/50，比赛混排排名 50 分
   - 答题卡随滚动自动定位；点击/聚焦优先
 - 未导入洛谷示例题。
