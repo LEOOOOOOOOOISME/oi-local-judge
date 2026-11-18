@@ -78,7 +78,9 @@
 - 新增 `showcase-film.html`：6 个镜头、真实界面推拉、大字关键词、开场“还在到处搬文件？”、结尾“一台电脑，整间机房”。
 - 用 EAC 19-paperclip 项目制作 24 秒宣传片：
   - 24 秒 / 1920×1080 / 30fps / H.264 + AAC
-  - 本地生成 120 BPM 配乐，最终整体降 6 dB，峰值 −5.7 dB
+  - 本地生成 160 BPM 配乐
+  - 场景切换加入低频冲击音和 whoosh
+  - 总线压缩 + 限幅，最终峰值 −1.4 dB
   - 输出 `docs/assets/oi-judge-promo.mp4`
   - 生成 `promo-contact-sheet.jpg` 与 `promo-poster.jpg`
 - 这是动态宣传片，不是截图轮播。

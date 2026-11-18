@@ -18,7 +18,7 @@ OiJudge 把这条线往后延伸了一大截：
 
 ![比赛总览](docs/assets/screenshots/contest.png)
 
-> **24 秒宣传片**：用 EAC design world 的 19-paperclip 模板制作，真实界面推拉 + 大字关键词 + 本地配乐。  
+> **24 秒宣传片**：用 EAC design world 的 19-paperclip 模板制作，真实界面推拉 + 大字关键词 + 160 BPM 配乐与场景切换冲击音。  
 > [播放 / 下载 MP4](docs/assets/oi-judge-promo.mp4)
 
 ![24 秒宣传片分镜](docs/assets/screenshots/promo-contact-sheet.jpg)
