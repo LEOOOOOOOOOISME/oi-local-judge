@@ -67,6 +67,30 @@ export function toObjectiveAnswerPayload(
   return payload;
 }
 
+export interface ObjectiveQuestionVisibility {
+  id: number;
+  /** 卡片顶部相对视口的位置；滚动到视口上方的卡片为负值。 */
+  top: number;
+}
+
+/**
+ * 从当前可见的题目中选出“最接近视口顶部”的一题，用于滚动时同步答题卡当前题。
+ *
+ * 传入的应是 IntersectionObserver 判定为可见的卡片（已经按阅读区域裁剪过），
+ * 这里按 top 最小者选取：即当前占据阅读线的那道题。没有可见题时返回 null，
+ * 调用方应保持现有当前题不变。
+ */
+export function pickScrollActiveObjectiveId(
+  visibleQuestions: readonly ObjectiveQuestionVisibility[],
+): number | null {
+  let best: ObjectiveQuestionVisibility | null = null;
+  for (const item of visibleQuestions) {
+    if (!Number.isFinite(item.top)) continue;
+    if (best === null || item.top < best.top) best = item;
+  }
+  return best?.id ?? null;
+}
+
 export type ObjectiveNavStatus = 'current' | 'answered' | 'blank';
 
 export interface ObjectiveNavItem {
