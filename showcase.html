@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OiJudge｜一台电脑，接管整间机房的 OI 教学</title>
+<noscript><style>.reveal{opacity:1!important;transform:none!important}</style></noscript>
+<meta name="description" content="OiJudge 是放在 Windows 电脑上的 OI 教学与比赛系统：出题、评测、比赛、批量收作业、教学统计，一台教师机完成，学生只需要浏览器。">
+<style>
+  :root{
+    --ink:#0b1220;
+    --ink-2:#111b2c;
+    --muted:#64748b;
+    --line:#dbe3ee;
+    --paper:#f4f7fb;
+    --white:#fff;
+    --orange:#ff6b35;
+    --orange-2:#ff9f68;
+    --teal:#31c7b5;
+    --blue:#4d8dff;
+    --radius:22px;
+    --shadow:0 22px 70px rgba(15,30,55,.14);
+    --max:1160px;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0;
+    color:var(--ink);
+    background:var(--paper);
+    font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",system-ui,-apple-system,sans-serif;
+    line-height:1.7;
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:inherit;text-decoration:none}
+  img{max-width:100%;display:block}
+  .wrap{width:min(var(--max),calc(100% - 40px));margin:0 auto}
+  .eyebrow{
+    display:inline-flex;align-items:center;gap:10px;
+    font-size:12px;font-weight:800;letter-spacing:.16em;text-transform:uppercase;
+  }
+  .eyebrow::before{content:"";width:24px;height:3px;border-radius:3px;background:var(--orange)}
+  .tag{
+    display:inline-flex;align-items:center;gap:6px;
+    padding:5px 10px;border-radius:999px;
+    background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);
+    color:#dbe7f8;font-size:12px;font-weight:700;white-space:nowrap;
+  }
+  .tag.light{background:#fff;border-color:var(--line);color:#334155}
+  .tag.hot{background:rgba(255,107,53,.14);border-color:rgba(255,107,53,.28);color:#ffb494}
+  .btn{
+    display:inline-flex;align-items:center;justify-content:center;gap:10px;
+    min-height:50px;padding:0 22px;border-radius:14px;
+    font-weight:800;font-size:14px;transition:.2s ease;
+  }
+  .btn.primary{background:var(--orange);color:#0b1220;box-shadow:0 12px 30px rgba(255,107,53,.28)}
+  .btn.primary:hover{transform:translateY(-2px);background:#ff7d4d}
+  .btn.ghost{border:1px solid rgba(255,255,255,.2);color:#e9f1fc;background:rgba(255,255,255,.05)}
+  .btn.ghost:hover{background:rgba(255,255,255,.1)}
+  .btn.dark{background:var(--ink);color:#fff}
+  .btn.dark:hover{transform:translateY(-2px)}
+
+  /* ---------- nav ---------- */
+  .nav{
+    position:sticky;top:0;z-index:50;
+    background:rgba(11,18,32,.82);
+    border-bottom:1px solid rgba(255,255,255,.08);
+    backdrop-filter:blur(16px);
+  }
+  .nav-inner{display:flex;align-items:center;justify-content:space-between;height:68px;gap:20px}
+  .brand{display:flex;align-items:center;gap:10px;color:#fff;font-weight:900;letter-spacing:-.02em;font-size:20px}
+  .brand-mark{
+    width:30px;height:30px;border-radius:9px;
+    background:linear-gradient(135deg,var(--orange),#ffb28a);
+    display:grid;place-items:center;color:#111b2c;font-size:15px;font-weight:900;
+    box-shadow:0 8px 20px rgba(255,107,53,.28);
+  }
+  .nav-links{display:flex;align-items:center;gap:26px;font-size:13px;color:#b9c8dc;font-weight:700}
+  .nav-links a:hover{color:#fff}
+  .nav .btn{min-height:38px;padding:0 14px;border-radius:10px;font-size:12px}
+
+  /* ---------- hero ---------- */
+  .hero{
+    position:relative;overflow:hidden;color:#fff;
+    background:
+      radial-gradient(900px 500px at 15% 10%,rgba(77,141,255,.17),transparent 60%),
+      radial-gradient(800px 500px at 85% 15%,rgba(255,107,53,.14),transparent 60%),
+      var(--ink);
+  }
+  .hero::before{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
+    background-size:64px 64px;
+    mask-image:linear-gradient(to bottom,black,transparent 82%);
+  }
+  .hero-inner{position:relative;display:grid;grid-template-columns:1.02fr .98fr;gap:48px;align-items:center;padding:78px 0 84px}
+  .hero h1{
+    margin:18px 0 18px;
+    font-size:clamp(38px,5.1vw,68px);
+    line-height:1.08;letter-spacing:-.045em;font-weight:950;
+  }
+  .hero h1 .accent{color:var(--orange-2)}
+  .hero .lead{max-width:560px;margin:0 0 28px;color:#c7d5e8;font-size:17px;line-height:1.9}
+  .hero .lead b{color:#fff}
+  .hero-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+  .hero-meta{display:flex;flex-wrap:wrap;gap:10px;margin-top:20px}
+  .proof{display:flex;flex-wrap:wrap;gap:26px;margin-top:34px;padding-top:22px;border-top:1px solid rgba(255,255,255,.1)}
+  .proof div{min-width:92px}
+  .proof strong{display:block;font-size:28px;line-height:1;color:#fff;letter-spacing:-.03em}
+  .proof span{display:block;margin-top:7px;font-size:11px;letter-spacing:.08em;color:#8fa3bd;font-weight:700}
+  .hero-visual{position:relative}
+  .browser{
+    background:#0f1a2b;border:1px solid rgba(255,255,255,.13);border-radius:18px;
+    box-shadow:0 34px 90px rgba(0,0,0,.4);
+    overflow:hidden;transform:perspective(1100px) rotateY(-4deg) rotateX(2deg);
+  }
+  .browser-bar{display:flex;align-items:center;gap:6px;height:32px;padding:0 12px;background:#142135;border-bottom:1px solid rgba(255,255,255,.08)}
+  .browser-bar i{width:7px;height:7px;border-radius:50%;background:#55647a}
+  .browser-bar i:nth-child(1){background:#ff6b5f}.browser-bar i:nth-child(2){background:#ffbf4d}.browser-bar i:nth-child(3){background:#45d483}
+  .browser-bar span{margin-left:12px;font-size:10px;color:#8da1bb;letter-spacing:.06em}
+  .browser img{width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top left}
+  .float{
+    position:absolute;display:flex;align-items:center;gap:8px;
+    padding:10px 13px;border-radius:12px;background:#fff;color:#172033;
+    font-size:11px;font-weight:900;box-shadow:0 16px 35px rgba(0,0,0,.22);
+    border:1px solid rgba(255,255,255,.8);
+  }
+  .float::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--teal)}
+  .float.one{top:9%;right:-14px;transform:rotate(2deg)}
+  .float.two{bottom:17%;left:-20px;transform:rotate(-2deg)}
+  .float.three{bottom:-14px;right:8%;transform:rotate(1deg)}
+  .float.three::before{background:var(--orange)}
+
+  /* ---------- generic section ---------- */
+  section{padding:84px 0;scroll-margin-top:68px}
+  .section-head{display:flex;justify-content:space-between;gap:28px;align-items:end;margin-bottom:34px}
+  .section-head h2{margin:12px 0 0;font-size:clamp(28px,3.3vw,44px);line-height:1.18;letter-spacing:-.04em}
+  .section-head p{max-width:430px;margin:0;color:var(--muted);font-size:14px;line-height:1.85}
+  .dark{background:var(--ink);color:#fff}
+  .dark .section-head p{color:#91a3ba}
+  .dark .eyebrow{color:#c5d6ea}
+
+  /* ---------- pain ---------- */
+  .pain{background:#fff}
+  .pain-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .pain-card{
+    padding:22px;border:1px solid var(--line);border-radius:16px;background:#fbfdff;
+    transition:.2s ease;
+  }
+  .pain-card:hover{transform:translateY(-3px);box-shadow:var(--shadow);border-color:#c8d7ea}
+  .pain-card .num{font-size:11px;font-weight:900;color:var(--orange);letter-spacing:.14em}
+  .pain-card h3{font-size:17px;margin:12px 0 8px;letter-spacing:-.02em}
+  .pain-card p{font-size:12px;color:var(--muted);margin:0;line-height:1.8}
+
+  /* ---------- flow ---------- */
+  .flow{background:linear-gradient(180deg,#eef4fb,#f7faff)}
+  .flow-track{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;position:relative}
+  .flow-step{position:relative;padding:22px 18px;border-radius:16px;background:#fff;border:1px solid var(--line);min-height:150px}
+  .flow-step:not(:last-child)::after{
+    content:"→";position:absolute;right:-15px;top:50%;transform:translateY(-50%);
+    color:#8da5c2;font-weight:900;font-size:18px;z-index:2;
+  }
+  .flow-step .step-k{font-size:10px;letter-spacing:.16em;color:#8da1bb;font-weight:900}
+  .flow-step h3{margin:10px 0 7px;font-size:18px;letter-spacing:-.02em}
+  .flow-step p{margin:0;color:var(--muted);font-size:12px;line-height:1.75}
+  .flow-step .dot{position:absolute;top:20px;right:18px;width:9px;height:9px;border-radius:50%;background:var(--orange)}
+
+  /* ---------- feature rows ---------- */
+  .feature{
+    display:grid;grid-template-columns:1fr 1fr;gap:44px;align-items:center;
+    padding:46px 0;border-bottom:1px solid var(--line);
+  }
+  .feature:last-child{border-bottom:0}
+  .feature.rev .copy{order:2}
+  .feature.rev .shot{order:1}
+  .feature .copy .kicker{display:flex;align-items:center;gap:10px;font-size:11px;font-weight:900;letter-spacing:.14em;color:var(--orange)}
+  .feature .copy .kicker span{width:26px;height:3px;background:var(--orange);border-radius:3px}
+  .feature h3{font-size:clamp(24px,2.7vw,34px);line-height:1.22;margin:13px 0 12px;letter-spacing:-.035em}
+  .feature p{color:var(--muted);font-size:14px;line-height:1.9;margin:0 0 18px}
+  .chips{display:flex;flex-wrap:wrap;gap:7px}
+  .chip{
+    display:inline-flex;align-items:center;padding:5px 9px;border-radius:8px;
+    background:#fff;border:1px solid var(--line);font-size:11px;font-weight:800;color:#42526b;
+  }
+  .shot-frame{
+    position:relative;border-radius:18px;overflow:hidden;background:#fff;
+    border:1px solid #cfdbea;box-shadow:0 24px 60px rgba(35,61,96,.14);
+  }
+  .shot-frame .bar{height:28px;display:flex;align-items:center;gap:5px;padding:0 10px;background:#edf3fa;border-bottom:1px solid #dbe6f2}
+  .shot-frame .bar i{width:6px;height:6px;border-radius:50%;background:#b8c7d9}
+  .shot-frame .bar em{font-style:normal;font-size:9px;color:#8297af;margin-left:8px;letter-spacing:.08em}
+  .shot-frame img{width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top left}
+  .shot-frame .label{
+    position:absolute;left:12px;bottom:12px;padding:7px 10px;border-radius:8px;
+    background:rgba(11,18,32,.82);color:#fff;font-size:10px;font-weight:800;letter-spacing:.04em;
+    backdrop-filter:blur(8px);
+  }
+  .shot-frame .label b{color:var(--orange-2)}
+
+  /* ---------- difference ---------- */
+  .diff{background:#fff}
+  .diff-table{border:1px solid var(--line);border-radius:18px;overflow:hidden;background:#fff;box-shadow:0 18px 50px rgba(35,61,96,.06)}
+  .diff-row{display:grid;grid-template-columns:1fr 1.35fr;border-bottom:1px solid var(--line)}
+  .diff-row:last-child{border-bottom:0}
+  .diff-row > div{padding:17px 22px;font-size:13px;line-height:1.7}
+  .diff-row > div:first-child{color:#7b8ca3;background:#f8fbff;border-right:1px solid var(--line);font-weight:700}
+  .diff-row > div:last-child{font-weight:800;color:#18243a}
+  .diff-row > div:last-child span{color:var(--orange);margin-right:8px}
+
+  /* ---------- gallery ---------- */
+  .gallery{background:linear-gradient(180deg,#eef4fb,#fff)}
+  .gallery-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+  .g-card{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;transition:.2s ease}
+  .g-card:hover{transform:translateY(-4px);box-shadow:var(--shadow)}
+  .g-card img{width:100%;aspect-ratio:16/10;object-fit:cover;object-position:top left}
+  .g-card div{padding:12px 14px 15px}
+  .g-card strong{display:block;font-size:13px;letter-spacing:-.01em}
+  .g-card span{display:block;color:var(--muted);font-size:11px;margin-top:3px}
+
+  /* ---------- video ---------- */
+  .video-band{background:var(--ink);color:#fff}
+  .video-grid{display:grid;grid-template-columns:.9fr 1.1fr;gap:40px;align-items:center}
+  .video-copy h2{font-size:clamp(28px,3.2vw,44px);line-height:1.18;letter-spacing:-.04em;margin:12px 0 16px}
+  .video-copy p{color:#a9bad0;font-size:14px;line-height:1.9;margin:0 0 20px;max-width:460px}
+  .video-box{border-radius:18px;overflow:hidden;border:1px solid rgba(255,255,255,.16);background:#000;box-shadow:0 30px 80px rgba(0,0,0,.35)}
+  .video-box video{display:block;width:100%;aspect-ratio:16/9;background:#000}
+
+  /* ---------- install ---------- */
+  .install{background:var(--paper)}
+  .install-grid{display:grid;grid-template-columns:1.05fr .95fr;gap:30px;align-items:stretch}
+  .install-card{background:var(--ink);color:#fff;border-radius:22px;padding:34px;position:relative;overflow:hidden}
+  .install-card::after{content:"";position:absolute;width:300px;height:300px;border-radius:50%;right:-130px;top:-110px;background:radial-gradient(circle,rgba(255,107,53,.32),transparent 70%)}
+  .install-card h2{font-size:30px;line-height:1.2;letter-spacing:-.04em;margin:10px 0 12px;position:relative}
+  .install-card p{color:#a9bad0;font-size:13px;line-height:1.9;position:relative;max-width:400px}
+  .install-card .hero-actions{position:relative;margin-top:22px}
+  .steps{display:grid;gap:10px}
+  .step{display:flex;gap:14px;padding:17px 18px;background:#fff;border:1px solid var(--line);border-radius:14px}
+  .step b{flex:0 0 28px;height:28px;border-radius:8px;background:var(--ink);color:#fff;display:grid;place-items:center;font-size:12px}
+  .step strong{display:block;font-size:13px}
+  .step span{display:block;font-size:11px;color:var(--muted);margin-top:2px}
+  .fine{margin-top:14px;color:#8092a9;font-size:11px;line-height:1.8}
+
+  footer{background:#080e18;color:#71839b;padding:34px 0;font-size:12px}
+  .footer-inner{display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .footer-inner b{color:#c8d7e8}
+
+  /* reveal */
+  .reveal{opacity:0;transform:translateY(18px);transition:opacity .7s ease,transform .7s ease}
+  .reveal.in{opacity:1;transform:none}
+
+  @media (max-width:980px){
+    .hero-inner{grid-template-columns:1fr;padding:56px 0 64px}
+    .hero-visual{max-width:680px;margin:0 auto;width:100%}
+    .float.two{left:-8px}.float.one{right:-6px}
+    .pain-grid{grid-template-columns:repeat(2,1fr)}
+    .flow-track{grid-template-columns:1fr 1fr;gap:12px}
+    .flow-step:not(:last-child)::after{display:none}
+    .feature{grid-template-columns:1fr;gap:24px;padding:36px 0}
+    .feature.rev .copy,.feature.rev .shot{order:initial}
+    .gallery-grid{grid-template-columns:1fr 1fr}
+    .video-grid,.install-grid{grid-template-columns:1fr}
+  }
+  @media (max-width:640px){
+    .wrap{width:min(100% - 28px,var(--max))}
+    .nav-links{display:none}
+    .nav-inner{height:60px}
+    .hero h1{font-size:38px}
+    .hero .lead{font-size:15px}
+    .proof{gap:18px}
+    .proof strong{font-size:23px}
+    .section-head{display:block}
+    .section-head p{margin-top:12px}
+    section{padding:58px 0}
+    .pain-grid,.gallery-grid{grid-template-columns:1fr}
+    .diff-row{grid-template-columns:1fr}
+    .diff-row > div:first-child{border-right:0;border-bottom:1px solid var(--line)}
+    .float{display:none}
+    .browser{transform:none}
+  }
+  @media print{
+    .nav,.hero-actions,.video-band,.float{display:none!important}
+    body{background:#fff}
+    .hero{background:#fff;color:#111}
+    .hero .lead,.proof span{color:#444}
+    .reveal{opacity:1!important;transform:none!important}
+  }
+  @media (prefers-reduced-motion:reduce){
+    html{scroll-behavior:auto}
+    .reveal{opacity:1;transform:none;transition:none}
+    *{animation:none!important;transition:none!important}
+  }
+</style>
+</head>
+<body>
+
+<nav class="nav">
+  <div class="wrap nav-inner">
+    <a class="brand" href="#top"><span class="brand-mark">O</span>OiJudge</a>
+    <div class="nav-links">
+      <a href="#why">为什么</a>
+      <a href="#flow">一条链路</a>
+      <a href="#features">功能</a>
+      <a href="#gallery">界面</a>
+      <a href="#install">安装</a>
+    </div>
+    <a class="btn primary" href="https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases" target="_blank" rel="noreferrer">下载 1.1.3</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap hero-inner">
+    <div>
+      <div class="eyebrow" style="color:#b8c9df">OI · 机房生产力工具</div>
+      <h1>一台电脑，<br><span class="accent">接管整间机房</span>的 OI 教学。</h1>
+      <p class="lead">
+        OiJudge 把 <b>出题、评测、比赛、收作业、讲评</b> 放进同一台 Windows 电脑。<br>
+        学生不用安装任何东西，打开浏览器就能上课、比赛、交作业。
+      </p>
+      <div class="hero-actions">
+        <a class="btn primary" href="https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases" target="_blank" rel="noreferrer">下载 Windows 版</a>
+        <a class="btn ghost" href="docs/assets/oi-judge-showcase.mp4" target="_blank">看 18 秒速览</a>
+      </div>
+      <div class="hero-meta">
+        <span class="tag">学生端 0 安装</span>
+        <span class="tag">教师机 1 台</span>
+        <span class="tag hot">数据留在本机</span>
+      </div>
+      <div class="proof">
+        <div><strong>0</strong><span>学生机安装</span></div>
+        <div><strong>1</strong><span>台教师电脑</span></div>
+        <div><strong>5</strong><span>个教学环节</span></div>
+      </div>
+    </div>
+    <div class="hero-visual">
+      <div class="browser">
+        <div class="browser-bar"><i></i><i></i><i></i><span>OiJudge · 比赛统计</span></div>
+        <img src="docs/assets/screenshots/statistics.png" alt="OiJudge 比赛统计界面" loading="eager">
+      </div>
+      <div class="float one">数据计划</div>
+      <div class="float two">批量收作业</div>
+      <div class="float three">比赛大屏</div>
+    </div>
+  </div>
+</header>
+
+<section class="pain" id="why">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <div class="eyebrow">机房里的真实问题</div>
+        <h2>不是题不够，是流程太散。</h2>
+      </div>
+      <p>出题一个工具，评测一个网站，收作业一个网盘，成绩一个表格。OiJudge 把这些动作收进同一台教师机。</p>
+    </div>
+    <div class="pain-grid">
+      <article class="pain-card reveal"><div class="num">01 / 学生机</div><h3>只开浏览器</h3><p>不装客户端、不配环境。机房电脑打开网址就能登录、看题、提交。</p></article>
+      <article class="pain-card reveal"><div class="num">02 / 教师机</div><h3>不再搬文件</h3><p>题目、数据、提交、成绩在同一个系统里流转，不用来回压缩、解压、对名单。</p></article>
+      <article class="pain-card reveal"><div class="num">03 / 数据</div><h3>留在机房</h3><p>默认只允许本机访问，备份、恢复、权限都在管理端，不把学生数据交给外部平台。</p></article>
+      <article class="pain-card reveal"><div class="num">04 / 讲评</div><h3>下课就能讲</h3><p>错题、标签掌握度、每题得分分布，比赛结束直接打开统计页。</p></article>
+    </div>
+  </div>
+</section>
+
+<section class="flow" id="flow">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <div class="eyebrow">一条完整链路</div>
+        <h2>从出题到讲评，不用换工具。</h2>
+      </div>
+      <p>普通 OJ 从“交题”开始；OiJudge 从“出题”开始，一直管到“讲评”。</p>
+    </div>
+    <div class="flow-track reveal">
+      <div class="flow-step"><div class="dot"></div><div class="step-k">STEP 01</div><h3>出题</h3><p>题面、程序、数据计划、生成、校验、对拍</p></div>
+      <div class="flow-step"><div class="dot"></div><div class="step-k">STEP 02</div><h3>评测</h3><p>多种题型、部分分、重测、取消、同时评测</p></div>
+      <div class="flow-step"><div class="dot"></div><div class="step-k">STEP 03</div><h3>办赛</h3><p>报名、团队、封榜、大屏、证书、反例</p></div>
+      <div class="flow-step"><div class="dot"></div><div class="step-k">STEP 04</div><h3>收作业</h3><p>压缩包、预览、后台进度、草稿发布、导出</p></div>
+      <div class="flow-step"><div class="dot"></div><div class="step-k">STEP 05</div><h3>讲评</h3><p>错题、掌握度、分数分布、分析报告</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <div class="eyebrow">普通 OJ 不常做的部分</div>
+        <h2>真正让机房省事的 6 个细节。</h2>
+      </div>
+      <p>不是功能堆叠，而是把老师每周都会遇到的动作做成按钮。</p>
+    </div>
+
+    <article class="feature reveal">
+      <div class="copy">
+        <div class="kicker"><span></span>01 / 出题</div>
+        <h3>题面、程序、数据，<br>在一页里做完。</h3>
+        <p>标准程序、生成器、校验器、特殊判分、交互程序，一处管理；数据计划用一张表决定“分几组、每组几个点、每组多少分”，再一键生成和检查。</p>
+        <div class="chips"><span class="chip">题面</span><span class="chip">数据计划</span><span class="chip">一键生成</span><span class="chip">校验</span><span class="chip">对拍</span></div>
+      </div>
+      <div class="shot">
+        <div class="shot-frame"><div class="bar"><i></i><i></i><i></i><em>老师 · 出题</em></div><img src="docs/assets/screenshots/data-plan.png" alt="数据计划页面" loading="lazy"><div class="label"><b>数据计划</b> · 一张表说清</div></div>
+      </div>
+    </article>
+
+    <article class="feature rev reveal">
+      <div class="copy">
+        <div class="kicker"><span></span>02 / 比赛</div>
+        <h3>不是排个榜，<br>是从报名办到颁奖。</h3>
+        <p>个人赛、团队赛、混合赛；导入名单或开放报名；封榜、解封、归档；比赛大屏、奖项、证书、赛后报告都在同一个控制台。</p>
+        <div class="chips"><span class="chip">报名</span><span class="chip">封榜</span><span class="chip">大屏</span><span class="chip">证书</span><span class="chip">反例</span></div>
+      </div>
+      <div class="shot">
+        <div class="shot-frame"><div class="bar"><i></i><i></i><i></i><em>现场 · 比赛大屏</em></div><img src="docs/assets/screenshots/contest-screen.png" alt="比赛大屏" loading="lazy"><div class="label"><b>比赛大屏</b> · 现场直接投</div></div>
+      </div>
+    </article>
+
+    <article class="feature reveal">
+      <div class="copy">
+        <div class="kicker"><span></span>03 / 收作业</div>
+        <h3>压缩包进去，<br>成绩表出来。</h3>
+        <p>按“学生 / 题目 / 代码”自动整理；先预览谁没匹配上；后台导入、断点继续；结果先做草稿，确认后才进正式成绩，最后导出表格。</p>
+        <div class="chips"><span class="chip">批量收作业</span><span class="chip">预览</span><span class="chip">断点续跑</span><span class="chip">草稿</span><span class="chip">导出</span></div>
+      </div>
+      <div class="shot">
+        <div class="shot-frame"><div class="bar"><i></i><i></i><i></i><em>老师 · 批量任务</em></div><img src="docs/assets/screenshots/batch.png" alt="批量任务进度" loading="lazy"><div class="label"><b>批量任务</b> · 进度可恢复</div></div>
+      </div>
+    </article>
+
+    <article class="feature rev reveal">
+      <div class="copy">
+        <div class="kicker"><span></span>04 / 教学</div>
+        <h3>判完不是结束，<br>进步要看得见。</h3>
+        <p>班级、训练计划、完成度、错题、标签掌握度；学生看自己的学习页，教练能看提交源码，讲评时不再靠印象。</p>
+        <div class="chips"><span class="chip">班级</span><span class="chip">训练计划</span><span class="chip">错题</span><span class="chip">掌握度</span><span class="chip">源码</span></div>
+      </div>
+      <div class="shot">
+        <div class="shot-frame"><div class="bar"><i></i><i></i><i></i><em>老师 · 班级训练</em></div><img src="docs/assets/screenshots/class-training.png" alt="班级训练进度" loading="lazy"><div class="label"><b>训练进度</b> · 谁卡在哪一题</div></div>
+      </div>
+    </article>
+
+    <article class="feature reveal">
+      <div class="copy">
+        <div class="kicker"><span></span>05 / 统计</div>
+        <h3>一场比赛，<br>拆开看。</h3>
+        <p>总分分布、分数段、每题得分、难度、区分度、班级/团队对比；分析报告和学生成绩单可以直接导出。</p>
+        <div class="chips"><span class="chip">分布</span><span class="chip">每题</span><span class="chip">难度</span><span class="chip">区分度</span><span class="chip">报告</span></div>
+      </div>
+      <div class="shot">
+        <div class="shot-frame"><div class="bar"><i></i><i></i><i></i><em>比赛 · 统计</em></div><img src="docs/assets/screenshots/statistics.png" alt="比赛统计" loading="lazy"><div class="label"><b>比赛统计</b> · 讲评直接投</div></div>
+      </div>
+    </article>
+
+    <article class="feature rev reveal">
+      <div class="copy">
+        <div class="kicker"><span></span>06 / 本机</div>
+        <h3>数据在机房，<br>备份也在手边。</h3>
+        <p>默认只允许本机访问；需要学生从其他电脑访问时再开局域网。首次启动随机管理员密码，支持自动备份、恢复和独立评测账户。</p>
+        <div class="chips"><span class="chip">本地数据</span><span class="chip">随机密码</span><span class="chip">备份</span><span class="chip">恢复</span><span class="chip">独立账户</span></div>
+      </div>
+      <div class="shot">
+        <div class="shot-frame"><div class="bar"><i></i><i></i><i></i><em>管理 · 系统与备份</em></div><img src="docs/assets/screenshots/system.png" alt="系统检查与备份" loading="lazy"><div class="label"><b>本机数据</b> · 自己掌握</div></div>
+      </div>
+    </article>
+  </div>
+</section>
+
+<section class="diff">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <div class="eyebrow">一眼看懂区别</div>
+        <h2>普通 OJ 到 “交题” 为止。<br>OiJudge 继续往前走。</h2>
+      </div>
+      <p>如果你只需要一个在线判题页，OiJudge 会显得“多”；如果你要带班、办赛、收作业，它刚好。</p>
+    </div>
+    <div class="diff-table reveal">
+      <div class="diff-row"><div>常见 OJ</div><div><span>→</span>OiJudge</div></div>
+      <div class="diff-row"><div>题库、提交、判题、排名</div><div><span>+</span>出题流水线、比赛运营、批量作业、教学统计</div></div>
+      <div class="diff-row"><div>出题靠外部工具</div><div><span>+</span>题面、程序、数据、校验、对拍一处完成</div></div>
+      <div class="diff-row"><div>比赛主要是榜单</div><div><span>+</span>报名、封榜、大屏、奖项、证书、报告</div></div>
+      <div class="diff-row"><div>批量导入是上传文件</div><div><span>+</span>预览、草稿、后台进度、断点、发布、导出</div></div>
+      <div class="diff-row"><div>教学数据另外记</div><div><span>+</span>班级、训练、错题、标签掌握度</div></div>
+      <div class="diff-row"><div>数据在平台服务器</div><div><span>+</span>数据在本机，自己备份</div></div>
+    </div>
+  </div>
+</section>
+
+<section class="gallery" id="gallery">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <div class="eyebrow">真实界面</div>
+        <h2>不是概念图。</h2>
+      </div>
+      <p>截图来自本地演示数据，界面就是现在能用的版本。</p>
+    </div>
+    <div class="gallery-grid">
+      <a class="g-card reveal" href="docs/assets/screenshots/authoring.png" target="_blank"><img src="docs/assets/screenshots/authoring.png" alt="老师出题页" loading="lazy"><div><strong>老师出题</strong><span>题面、程序、数据</span></div></a>
+      <a class="g-card reveal" href="docs/assets/screenshots/ranking.png" target="_blank"><img src="docs/assets/screenshots/ranking.png" alt="正式榜单" loading="lazy"><div><strong>正式榜单</strong><span>实时排名与历史快照</span></div></a>
+      <a class="g-card reveal" href="docs/assets/screenshots/learning.png" target="_blank"><img src="docs/assets/screenshots/learning.png" alt="学生个人学习" loading="lazy"><div><strong>学生个人学习</strong><span>错题、提交、掌握度</span></div></a>
+      <a class="g-card reveal" href="docs/assets/screenshots/contest-admin.png" target="_blank"><img src="docs/assets/screenshots/contest-admin.png" alt="比赛控制台" loading="lazy"><div><strong>比赛控制台</strong><span>报名、参赛者、锁题</span></div></a>
+      <a class="g-card reveal" href="docs/assets/screenshots/admin.png" target="_blank"><img src="docs/assets/screenshots/admin.png" alt="用户管理" loading="lazy"><div><strong>用户与角色</strong><span>账号、权限、名单</span></div></a>
+      <a class="g-card reveal" href="docs/assets/screenshots/help.png" target="_blank"><img src="docs/assets/screenshots/help.png" alt="帮助中心" loading="lazy"><div><strong>应用内帮助</strong><span>不离开页面查步骤</span></div></a>
+    </div>
+  </div>
+</section>
+
+<section class="video-band">
+  <div class="wrap video-grid">
+    <div class="video-copy reveal">
+      <div class="eyebrow" style="color:#b8c9df">18 秒速览</div>
+      <h2>先看一遍，<br>再决定装不装。</h2>
+      <p>用 EAC design world 的 19-paperclip 模板制作：7 张真实界面截图 + 8 条关键词字幕，没有旁白和配乐，只有信息和画面。</p>
+      <a class="btn ghost" href="docs/assets/oi-judge-showcase.mp4" target="_blank">打开 MP4</a>
+    </div>
+    <div class="video-box reveal">
+      <video controls preload="metadata" poster="docs/assets/screenshots/showcase-contact-sheet.jpg">
+        <source src="docs/assets/oi-judge-showcase.mp4" type="video/mp4">
+      </video>
+    </div>
+  </div>
+</section>
+
+<section class="install" id="install">
+  <div class="wrap">
+    <div class="section-head reveal">
+      <div>
+        <div class="eyebrow">机房落地</div>
+        <h2>三步，开始用。</h2>
+      </div>
+      <p>一台教师机、一个浏览器、一个局域网。学生机不需要装任何东西。</p>
+    </div>
+    <div class="install-grid">
+      <div class="install-card reveal">
+        <div class="eyebrow" style="color:#ffb494">OiJudge v1.1.3</div>
+        <h2>把这台教师机，<br>变成机房的 OI 主控台。</h2>
+        <p>Windows 10 / 11。安装版和免安装版任选，数据都留在本机。第一次启动会生成随机管理员密码。</p>
+        <div class="hero-actions">
+          <a class="btn primary" href="https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases" target="_blank" rel="noreferrer">打开发布页</a>
+          <a class="btn ghost" href="https://github.com/LEOOOOOOOOOISME/oi-local-judge" target="_blank" rel="noreferrer">看项目</a>
+        </div>
+        <div class="fine">安装包当前未做发布者认证，Windows 可能提示“未知发布者”。</div>
+      </div>
+      <div>
+        <div class="steps">
+          <div class="step reveal"><b>1</b><div><strong>教师机安装 OiJudge</strong><span>下载安装版或免安装版，启动。</span></div></div>
+          <div class="step reveal"><b>2</b><div><strong>管理端开启局域网访问</strong><span>学生机在同一局域网内打开教师机地址。</span></div></div>
+          <div class="step reveal"><b>3</b><div><strong>学生用浏览器登录</strong><span>看题、提交、比赛、交作业，不安装客户端。</span></div></div>
+        </div>
+        <div class="fine">课前把班级、题目、比赛建好；课上直接开始。学生数据、提交和成绩都留在教师机。</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap footer-inner">
+    <div><b>OiJudge</b> · 一台电脑，接管整间机房的 OI 教学。</div>
+    <div>截图来自演示数据 · 当前版本 v1.1.3</div>
+  </div>
+</footer>
+
+<script>
+  const items = document.querySelectorAll('.reveal');
+  if ('IntersectionObserver' in window) {
+    const io = new IntersectionObserver((entries) => {
+      entries.forEach((entry) => {
+        if (entry.isIntersecting) { entry.target.classList.add('in'); io.unobserve(entry.target); }
+      });
+    }, { threshold: 0.08 });
+    items.forEach((el) => io.observe(el));
+  } else {
+    items.forEach((el) => el.classList.add('in'));
+  }
+</script>
+</body>
+</html>
