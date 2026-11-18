@@ -33,7 +33,14 @@
 }
 
 .objective-stem-input {
+  margin-bottom: 6px;
+}
+
+.objective-editor-hint {
   margin-bottom: 10px;
+  color: var(--text-3);
+  font-size: 11.5px;
+  line-height: 1.5;
 }
 
 .objective-editor-label {
@@ -272,7 +279,61 @@
   margin-bottom: 12px;
   line-height: 1.7;
   overflow-wrap: anywhere;
-  white-space: pre-wrap;
+}
+
+/* 题干是块级 Markdown 渲染结果，收紧首尾间距并约束图片/公式宽度。 */
+.objective-question-stem > :first-child {
+  margin-top: 0;
+}
+
+.objective-question-stem > :last-child {
+  margin-bottom: 0;
+}
+
+.objective-question-stem p {
+  margin: 0 0 8px;
+}
+
+.objective-question-stem img,
+.objective-option-text img {
+  max-width: 100%;
+  height: auto;
+}
+
+.objective-question-stem pre {
+  padding: 8px 10px;
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #f7f8fa;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.objective-question-stem :not(pre) > code {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: #f3f4f6;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.objective-question-stem .katex-display {
+  padding: 4px 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.objective-option-text .katex {
+  font-size: 1.02em;
+}
+
+.objective-option-text code {
+  padding: 0 3px;
+  border-radius: 3px;
+  background: #f3f4f6;
+  font-family: var(--mono);
+  font-size: 11.5px;
 }
 
 /* A/B/C/D 行式选项 */

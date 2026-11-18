@@ -235,10 +235,14 @@ export function ObjectiveQuestionEditor({
             className="objective-stem-input"
             value={question.stem}
             onChange={(event) => patchQuestion(question.id, { stem: event.target.value })}
-            placeholder="题干"
+            placeholder="题干（支持 Markdown 与 $...$ / $$...$$ 公式）"
             autoSize={{ minRows: 2, maxRows: 5 }}
             disabled={disabled}
           />
+          <div className="objective-editor-hint">
+            题干支持 Markdown、行内公式 $...$ 与块级公式 $$...$$；选项支持行内
+            Markdown 与公式。作答页会渲染后再展示。
+          </div>
 
           {question.kind === 'single' || question.kind === 'multiple' ? (
             <div className="objective-editor-options">
@@ -256,7 +260,7 @@ export function ObjectiveQuestionEditor({
                   <Input
                     value={option.text}
                     onChange={(event) => updateOption(question, optionIndex, { text: event.target.value })}
-                    placeholder="选项内容"
+                    placeholder="选项内容（支持行内 Markdown / $...$）"
                     disabled={disabled}
                   />
                   <Button
