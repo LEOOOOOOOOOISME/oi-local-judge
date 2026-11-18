@@ -65,6 +65,36 @@
       "route": "/students/2/learning",
       "width": 1440,
       "height": 900
+    },
+    {
+      "file": "data-plan.png",
+      "route": "/admin/problems/1",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "contest-admin.png",
+      "route": "/admin/contests/1",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "contest-screen.png",
+      "route": "/contest/2/screen",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "system.png",
+      "route": "/admin/system",
+      "width": 1440,
+      "height": 900
+    },
+    {
+      "file": "help.png",
+      "route": "/help",
+      "width": 1440,
+      "height": 900
     }
   ]
 }

@@ -224,9 +224,15 @@ async function main() {
     const pageErrors = [];
     page.on('pageerror', (error) => pageErrors.push(error.message));
 
-    const screenshot = async (name, route, { ready, settleMs = 400, scrollTo } = {}) => {
+    const screenshot = async (name, route, { ready, click, settleMs = 400, scrollTo } = {}) => {
       await page.goto(`${baseUrl}${route}`, { waitUntil: 'domcontentloaded' });
       if (ready) await page.locator(ready).first().waitFor({ state: 'visible', timeout: 45_000 });
+      if (click) {
+        const tab = page.getByRole('tab', { name: click, exact: true });
+        if (await tab.count()) await tab.first().click();
+        else await page.getByText(click, { exact: true }).first().click();
+        await delay(500);
+      }
       await page.waitForFunction(() => document.fonts?.status === 'loaded').catch(() => {});
       if (scrollTo) {
         const target = scrollTo.last ? page.locator(scrollTo.selector).last() : page.locator(scrollTo.selector).first();
@@ -350,6 +356,45 @@ async function main() {
     captured.push(
       await screenshot('learning.png', `/students/${seedData.students[0].id}/learning`, {
         ready: 'text=学习概览',
+        settleMs: 800,
+      }),
+    );
+
+    // 11. 出题数据计划：把“生成几组数据、每组多少分”变成可编辑表格。
+    await screenshot('data-plan.png', `/admin/problems/${seedData.problemIds[0]}`, {
+      ready: 'text=基本信息',
+      click: '数据计划',
+      settleMs: 800,
+    }).then((shot) => captured.push(shot));
+
+    // 12. 比赛控制台：报名、参赛者、锁题、Hack、班级统计和报告入口。
+    captured.push(
+      await screenshot('contest-admin.png', `/admin/contests/${seedData.contestId}`, {
+        ready: 'text=报名管理',
+        settleMs: 800,
+      }),
+    );
+
+    // 13. 比赛大屏：现场展示排名、倒计时和实时状态。
+    captured.push(
+      await screenshot('contest-screen.png', `/contest/${seedData.runningContestId}/screen`, {
+        ready: '.screen-header',
+        settleMs: 800,
+      }),
+    );
+
+    // 14. 系统页：诊断、运行指标、版本升级与备份。
+    captured.push(
+      await screenshot('system.png', '/admin/system', {
+        ready: 'text=系统诊断',
+        settleMs: 800,
+      }),
+    );
+
+    // 15. 帮助中心：不离开页面就能查任务说明。
+    captured.push(
+      await screenshot('help.png', '/help', {
+        ready: 'text=帮助中心',
         settleMs: 800,
       }),
     );
