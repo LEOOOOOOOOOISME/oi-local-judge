@@ -2,6 +2,32 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-18 / Round 160（v1.2.0 客观题发布）
+
+### 完成
+
+- 答题卡随滚动自动定位当前题，点击/聚焦仍优先；无 IntersectionObserver 时降级。
+- 版本升至 `1.2.0`。
+- README 与 Release Notes 增加客观题、Y 题号、混排比赛说明。
+- 全量 124 文件 / 1097 用例通过；`npm run build` 通过。
+
+### 发布
+
+- Tag：`v1.2.0`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.2.0
+- CI run：`44329266198` — **success**
+- 非 prerelease、Latest
+- 资产：
+  - `OiJudge-Setup-1.2.0.exe` 252,972,554 B
+  - `oi-local-judge-1.2.0-win-x64.zip` 359,745,177 B
+  - `SHA256SUMS.txt`
+
+### 边界
+
+- 未导入洛谷 1001 示例题；客观题题干仍为现有纯文本渲染。
+- setter 仍保留现有全局出题权限模型。
+- 滚动锁为时间型，极慢设备长距离平滑滚动可能短暂不同步。
+
 ## 2026-11-15 / Round 159（客观题产品化）
 
 ### 完成
@@ -46,8 +72,17 @@
 
 ### 边界
 
-- 视频为静帧截图 + 关键词字幕，不是逐镜头实拍或复杂动效；没有配乐。
 - 截图来自演示数据，不含真实用户敏感信息。
+
+### 追加：24 秒机房宣传片
+
+- 新建 `showcase-film.html`：6 个镜头、真实界面推拉、大字关键词、开场“还在到处搬文件？”、结尾“一台电脑，整间机房”。
+- 用 EAC 19-paperclip 项目制作：
+  - 24 秒 / 1920×1080 / 30fps
+  - 本地生成 120 BPM 配乐
+  - 输出 `docs/assets/oi-judge-promo.mp4`
+  - 生成 `promo-contact-sheet.jpg` 分镜
+- 这是动态宣传片，不再是静帧截图轮播。
 
 ## 2026-11-15 / Round 158（README 图文重写）
 
