@@ -175,7 +175,7 @@ OiJudge 把这条线往后延伸了一大截：
 
 1. 打开发布页：
    <https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases>
-2. 下载安装版 `OiJudge-Setup-1.1.3.exe`，或免安装版 `oi-local-judge-1.1.3-win-x64.zip`
+2. 下载安装版 `OiJudge-Setup-1.2.0.exe`，或免安装版 `oi-local-judge-1.2.0-win-x64.zip`
 3. 启动 OiJudge
 4. 浏览器自动打开管理页
 5. 首次启动会显示随机管理员密码，登录后修改
