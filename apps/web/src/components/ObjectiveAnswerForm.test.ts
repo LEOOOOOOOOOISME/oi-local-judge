@@ -7,6 +7,7 @@ import {
   buildObjectiveNavItems,
   countAnsweredObjective,
   isObjectiveAnswerAnswered,
+  pickScrollActiveObjectiveId,
   toObjectiveAnswerPayload,
 } from './ObjectiveAnswerModel';
 
@@ -84,6 +85,27 @@ describe('objective answer model', () => {
       'blank',
     ]);
     expect(items.map((item) => item.index)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('picks the visible question closest to the viewport top while scrolling', () => {
+    // 部分滚出视口顶部的题仍占据阅读线，应优先于下方的题。
+    expect(
+      pickScrollActiveObjectiveId([
+        { id: 5, top: -120 },
+        { id: 6, top: 40 },
+        { id: 7, top: 300 },
+      ]),
+    ).toBe(5);
+    // 不依赖数组顺序，按 top 最小者选择。
+    expect(
+      pickScrollActiveObjectiveId([
+        { id: 7, top: 300 },
+        { id: 6, top: 40 },
+      ]),
+    ).toBe(6);
+    // 没有可见题时保持现状；无效 top 被忽略。
+    expect(pickScrollActiveObjectiveId([])).toBeNull();
+    expect(pickScrollActiveObjectiveId([{ id: 9, top: Number.NaN }])).toBeNull();
   });
 });
 
