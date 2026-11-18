@@ -13,6 +13,7 @@ import {
   objectiveQuestionOptions,
   pickScrollActiveObjectiveId,
 } from './ObjectiveAnswerModel';
+import { ObjectiveRichText } from './ObjectiveRichText';
 
 const KIND_TAG_COLOR: Record<ObjectiveQuestionKind, string> = {
   single: 'blue',
@@ -238,7 +239,10 @@ export function ObjectiveAnswerForm({
                   本题共 {question.points} 分
                 </span>
               </div>
-              <div className="objective-question-stem">{question.stem}</div>
+              <ObjectiveRichText
+                className="objective-question-stem"
+                text={question.stem}
+              />
 
               {question.kind === 'single' ? (
                 <Radio.Group
@@ -254,7 +258,9 @@ export function ObjectiveAnswerForm({
                       className="objective-option"
                     >
                       <span className="objective-option-key">{option.key}</span>
-                      <span className="objective-option-text">{option.text}</span>
+                      <span className="objective-option-text">
+                        <ObjectiveRichText inline text={option.text} />
+                      </span>
                     </Radio>
                   ))}
                 </Radio.Group>
@@ -274,7 +280,9 @@ export function ObjectiveAnswerForm({
                       className="objective-option"
                     >
                       <span className="objective-option-key">{option.key}</span>
-                      <span className="objective-option-text">{option.text}</span>
+                      <span className="objective-option-text">
+                        <ObjectiveRichText inline text={option.text} />
+                      </span>
                     </Checkbox>
                   ))}
                 </Checkbox.Group>
@@ -296,7 +304,9 @@ export function ObjectiveAnswerForm({
                       <span className="objective-option-key">
                         {String.fromCharCode(65 + optionIndex)}
                       </span>
-                      <span className="objective-option-text">{option.text}</span>
+                      <span className="objective-option-text">
+                        <ObjectiveRichText inline text={option.text} />
+                      </span>
                     </Radio>
                   ))}
                 </Radio.Group>
