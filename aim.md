@@ -2,7 +2,7 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`ebb9dcc test(e2e): include objective spec in browser suite`  
+当前 HEAD：`18f859e merge: rich text objective stems and options`  
 发布 tag：`v1.2.0`  
 当前 Release：`v1.2.0`（正式版，Latest）
 
@@ -738,6 +738,20 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - `OiJudge-Setup-1.2.0.exe` 252,972,554 B
   - `oi-local-judge-1.2.0-win-x64.zip` 359,745,177 B
   - `SHA256SUMS.txt`
+
+## 3.16 客观题 Markdown + LaTeX（v1.2.0 后新增，未单独发版）
+
+- 客观题题干支持块级 Markdown；选项支持行内 Markdown。
+- 支持 `$...$`、`$$...$$`、`\[...\]`、`\(...\)`、代码块、图片、表格。
+- 前端管线固定 markdown-it → sanitize-html → dangerouslySetInnerHTML；脚本/事件属性/javascript: 链接被移除。
+- 管理端题干/选项提示支持 Markdown 与公式，存储结构不变。
+- 添加 `katex/dist/katex.min.css`；web 声明 markdown-it/markdown-it-texmath/katex/sanitize-html。
+- 验证：
+  - 目标 8 文件 / 45 测试通过
+  - `npm run build` 通过
+  - 浏览器 E2E 3 passed
+- 注意：ProblemPage 懒加载 chunk 从约 31KB 增至约 796KB（gzip 250KB），局域网本地可接受，后续可再拆包。
+- 未导入洛谷示例题；MHTML 图片下载/题包构建仍未做。
 
 ---
 

@@ -2,6 +2,28 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-19 / Round 162（客观题 Markdown + LaTeX）
+
+### 完成
+
+- 新增 ObjectiveRichText：markdown-it + texmath/katex → sanitize-html → 安全插入。
+- 题干支持块级 Markdown，选项支持行内 Markdown。
+- 支持公式、代码块、图片、表格；脚本/事件属性/危险协议被净化。
+- 管理端题干/选项提示 Markdown + `$...$` 公式，存储结构不变。
+- web 声明 markdown-it/markdown-it-texmath/katex/sanitize-html。
+
+### 验证
+
+- 目标 8 文件 / 45 测试通过。
+- `npm run build` 通过。
+- 浏览器 E2E 3 passed。
+- 全量 125 文件测试本次受 Windows 环境超时/EPERM 干扰，未形成干净的全量结果；目标测试与构建通过。
+
+### 边界
+
+- ProblemPage 懒加载 chunk 约 796KB（gzip 250KB），后续可拆包。
+- 未导入洛谷示例题；MHTML 资源下载/题包生成未做。
+
 ## 2026-11-18 / Round 161（客观题浏览器 E2E）
 
 ### 完成
