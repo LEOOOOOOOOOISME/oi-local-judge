@@ -47,7 +47,13 @@
 
 ### 验证
 
-- 待补：构建、目标测试、浏览器 E2E、全历史 secret scan、CI、Release 资产。
+- 当前树 + 全历史 secret scan：0 命中（582 个跟踪文件、361 个提交、17 个 tag、4 个身份）。
+- 全量测试：125 文件 / 1106 用例通过（`npx vitest run --maxWorkers=2`，129.99s）。
+- `npm run build` 通过（server/desktop/web）。
+- `npm run build:native` 通过（ojrunner/ojinteract 重建）。
+- 浏览器 E2E：3 passed。
+- 重写前 HEAD `b677cd5`，重写后 HEAD `e5f5288`；`HEAD^{tree}` 均为 `922b35a5eac4b48e293c59f1476cd0ebc9e8c4a3`。
+- 重写后作者/提交者/tagger 无旧手机号邮箱；旧提交 SHA 全部变化。
 
 ## 2026-11-20 / Round 163（客观题创建 + 混排组卷 UI 全链路）
 

@@ -2,7 +2,7 @@
 
 最后更新：2026-11-20  
 当前分支：`main`  
-当前 HEAD：`9459bc5 docs: record mixed objective contest UI acceptance`  
+当前 HEAD：`v1.3.0`（tag）  
 发布 tag：`v1.3.0`  
 当前 Release：`v1.3.0`（正式版，Latest）
 
@@ -774,6 +774,12 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - 历史中的本机绝对路径用 `--replace-text` 脱敏。
   - 先创建完整 bundle 备份，再 force-push `main` 与 tags；旧提交 SHA 全部变化。
 - 版本：`1.2.0` → `1.3.0`，包含客观题 Markdown/LaTeX 与本次仓库清理。
+- 验证：
+  - 全量 125 文件 / 1106 用例通过
+  - `npm run build`、`npm run build:native` 通过
+  - 浏览器 E2E 3 passed
+  - 全历史 secret scan 0 命中
+  - 重写前后 HEAD tree 一致；361 commits / 17 tags；旧身份邮箱 0 残留
 
 ### 发布
 
