@@ -2,7 +2,7 @@
 
 最后更新：2026-11-11  
 当前分支：`main`  
-当前 HEAD：`18f859e merge: rich text objective stems and options`  
+当前 HEAD：`6c11abb docs: record objective Markdown and LaTeX support`  
 发布 tag：`v1.2.0`  
 当前 Release：`v1.2.0`（正式版，Latest）
 
