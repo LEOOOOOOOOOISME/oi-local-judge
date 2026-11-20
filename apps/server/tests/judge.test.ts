@@ -21,8 +21,18 @@ import { createUser } from '../src/storage/repos/users.js';
 import { migrate } from '../src/storage/migrate.js';
 
 const repoRoot = process.cwd();
-const WINLIBS_GXX =
-  'C:\\Users\\<user>\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\g++.exe';
+const WINLIBS_GXX = process.env.LOCALAPPDATA
+  ? join(
+      process.env.LOCALAPPDATA,
+      'Microsoft',
+      'WinGet',
+      'Packages',
+      'BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe',
+      'mingw64',
+      'bin',
+      'g++.exe',
+    )
+  : '';
 
 function resolveGxx(): string {
   if (process.env.OIJ_GXX) return process.env.OIJ_GXX;

@@ -41,6 +41,20 @@ native/interact/out/
 .env.*
 !.env.example
 
+# Secrets and credentials (never commit)
+secrets.json
+*.pem
+*.key
+*.pfx
+*.p12
+*.kdbx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+*.bundle
+*.bak
+
 # OS / editor
 Thumbs.db
 .DS_Store

@@ -318,8 +318,21 @@ function copyProductionDependencies() {
  * still works without this if the target machine has the same MinGW on PATH.
  */
 function copyMinGwRuntime() {
-  const WINLIBS_GXX =
-    'C:\\Users\\<user>\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\g++.exe';
+  // Resolve the per-user WinGet location from the environment; no developer
+  // profile path is committed. If LOCALAPPDATA is absent the candidate is
+  // skipped and the code falls back to `where g++`.
+  const WINLIBS_GXX = process.env.LOCALAPPDATA
+    ? join(
+        process.env.LOCALAPPDATA,
+        'Microsoft',
+        'WinGet',
+        'Packages',
+        'BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe',
+        'mingw64',
+        'bin',
+        'g++.exe',
+      )
+    : '';
   const candidates = [];
   if (process.env.OIJ_GXX) candidates.push(process.env.OIJ_GXX);
   candidates.push(WINLIBS_GXX);

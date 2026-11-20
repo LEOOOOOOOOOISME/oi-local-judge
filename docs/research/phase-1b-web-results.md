@@ -54,6 +54,6 @@ npm start                 # http://127.0.0.1:8787
 开发模式：
 
 ```powershell
-$env:OIJ_PORT='8790'; $env:OIJ_DATA_DIR='<repo>\oi-local-judge\.devdata'; node apps/server/dist/cli.js
+$env:OIJ_PORT='8790'; $env:OIJ_DATA_DIR="$PWD\.devdata"; node apps/server/dist/cli.js
 npm run web:dev           # http://127.0.0.1:5173
 ```

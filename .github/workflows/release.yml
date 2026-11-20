@@ -81,6 +81,9 @@ jobs:
           g++ --version
           if (-not (Test-Path $env:OIJ_GXX)) { throw "OIJ_GXX points to a missing file: $env:OIJ_GXX" }
 
+      - name: Scan for secrets and personal data
+        run: node tools/security/scan-secrets.mjs --history
+
       - name: Install npm dependencies
         run: npm ci
 

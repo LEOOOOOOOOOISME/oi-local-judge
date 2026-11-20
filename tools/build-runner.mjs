@@ -8,8 +8,22 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-const WINLIBS_GXX =
-  'C:\\Users\\<user>\\AppData\\Local\\Microsoft\\WinGet\\Packages\\BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe\\mingw64\\bin\\g++.exe';
+// WinGet installs packages under the current user's LOCALAPPDATA. Build the
+// path from the environment instead of hard-coding a developer's profile, so
+// the repository carries no local user name. An empty value simply fails the
+// existsSync check below and falls through to g++ on PATH.
+const WINLIBS_GXX = process.env.LOCALAPPDATA
+  ? join(
+      process.env.LOCALAPPDATA,
+      'Microsoft',
+      'WinGet',
+      'Packages',
+      'BrechtSanders.WinLibs.POSIX.UCRT_Microsoft.Winget.Source_8wekyb3d8bbwe',
+      'mingw64',
+      'bin',
+      'g++.exe',
+    )
+  : '';
 
 export function resolveGxx() {
   if (process.env.OIJ_GXX) return process.env.OIJ_GXX;
