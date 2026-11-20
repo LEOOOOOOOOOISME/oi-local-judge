@@ -2,6 +2,53 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-20 / Round 164（仓库敏感信息清理 + v1.3.0 发布）
+
+### 扫描结果
+
+- 当前树 579 个跟踪文件、359 个提交、17 个 tag、全部 Git 身份。
+- 未发现 API Key、私钥、证书、数据库、`.env`、访问令牌或真实学生数据。
+- 发现并处理：
+  - 提交/标签作者邮箱为个人手机号邮箱，已公开在 GitHub。
+  - 根目录 `midphrasereport.txt` 含本机绝对路径和默认管理员密码说明。
+  - 构建脚本、测试、研究文档含 `C:\Users\<name>` / `D:\Documents\...` 路径。
+
+### 当前树清理
+
+- 删除 `midphrasereport.txt`。
+- g++ 路径改为从 `LOCALAPPDATA` 推导，去掉硬编码用户名：
+  - `tools/build-runner.mjs`
+  - `tools/build-portable.mjs`
+  - `apps/server/tests/judge.test.ts`
+  - `apps/server/tests/runner.test.ts`
+- `docs/research/phase-1b-web-results.md` 改用 `$PWD`。
+- `.gitignore` 增加 `secrets.json`、私钥/证书、SSH key、数据库、bundle/bak 规则。
+
+### 新增门禁
+
+- `tools/security/scan-secrets.mjs`：当前树 + `--history` 全历史扫描。
+- `package.json`：`scan:secrets` / `scan:secrets:history`。
+- `.github/workflows/security.yml`：push/PR 全历史扫描。
+- `.github/workflows/release.yml`：构建前执行全历史扫描。
+- `SECURITY.md`：支持版本、私有漏洞报告、密钥与部署边界。
+
+### 历史重写
+
+- 先创建完整 bundle 备份（23 refs，20,277,350 B）。
+- 用 git-filter-repo 重写：
+  - 作者/提交者/tagger 邮箱改为 GitHub noreply。
+  - 历史中的本机绝对路径脱敏。
+- force-push `main` 和全部 tags；旧提交 SHA 全部变化。
+
+### 版本
+
+- `1.2.0` → `1.3.0`（5 个 manifest + package-lock）。
+- 客观题 Markdown/LaTeX 富文本随本版本正式发布。
+
+### 验证
+
+- 待补：构建、目标测试、浏览器 E2E、全历史 secret scan、CI、Release 资产。
+
 ## 2026-11-20 / Round 163（客观题创建 + 混排组卷 UI 全链路）
 
 ### 验收链路

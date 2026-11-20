@@ -1,10 +1,10 @@
 # OI Local Judge — 目标、已完成与未完成
 
-最后更新：2026-11-11  
+最后更新：2026-11-20  
 当前分支：`main`  
-当前 HEAD：`6c11abb docs: record objective Markdown and LaTeX support`  
-发布 tag：`v1.2.0`  
-当前 Release：`v1.2.0`（正式版，Latest）
+当前 HEAD：`9459bc5 docs: record mixed objective contest UI acceptance`  
+发布 tag：`v1.3.0`  
+当前 Release：`v1.3.0`（正式版，Latest）
 
 ---
 
@@ -740,7 +740,7 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - `oi-local-judge-1.2.0-win-x64.zip` 359,745,177 B
   - `SHA256SUMS.txt`
 
-## 3.16 客观题 Markdown + LaTeX（v1.2.0 后新增，未单独发版）
+## 3.16 客观题 Markdown + LaTeX（v1.3.0 已发版）
 
 - 客观题题干支持块级 Markdown；选项支持行内 Markdown。
 - 支持 `$...$`、`$$...$$`、`\[...\]`、`\(...\)`、代码块、图片、表格。
@@ -753,6 +753,34 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - 浏览器 E2E 3 passed
 - 注意：ProblemPage 懒加载 chunk 从约 31KB 增至约 796KB（gzip 250KB），局域网本地可接受，后续可再拆包。
 - 未导入洛谷示例题；MHTML 图片下载/题包构建仍未做。
+
+## 3.17 仓库敏感信息清理 + v1.3.0 发布（2026-11-20）
+
+- 扫描范围：当前树 579 个跟踪文件、359 个提交、17 个 tag、全部作者/提交者/tagger 身份。
+- 未发现 API Key、私钥、证书、数据库、`.env`、访问令牌或真实学生数据。
+- 当前树清理：
+  - 删除根目录内部报告 `midphrasereport.txt`（含本机路径、默认管理员密码说明）。
+  - `tools/build-runner.mjs`、`tools/build-portable.mjs`、`judge.test.ts`、`runner.test.ts` 的 g++ 路径改为从 `LOCALAPPDATA` 推导，不再硬编码用户名。
+  - `docs/research/phase-1b-web-results.md` 的本机绝对路径改为 `$PWD`。
+  - `.gitignore` 增加 `secrets.json`、私钥/证书、SSH key、数据库、bundle/bak 规则。
+- 新增 `tools/security/scan-secrets.mjs`：
+  - 当前树：私钥、云厂商/GitHub/Slack/OpenAI/Google/Stripe token、手机号/手机号邮箱、本机路径、危险文件名。
+  - `--history`：扫描全部 diff、提交消息、作者/提交者/tagger 身份。
+  - `package.json` 增加 `scan:secrets` / `scan:secrets:history`。
+- 新增 `.github/workflows/security.yml`，push/PR 全历史扫描；release workflow 在构建前同样扫描。
+- 新增 `SECURITY.md`：支持版本、私有漏洞报告、密钥/数据边界、部署建议。
+- Git 历史重写：
+  - 全部提交与 tag 的作者/提交者/tagger 邮箱由个人手机号邮箱改为 GitHub noreply。
+  - 历史中的本机绝对路径用 `--replace-text` 脱敏。
+  - 先创建完整 bundle 备份，再 force-push `main` 与 tags；旧提交 SHA 全部变化。
+- 版本：`1.2.0` → `1.3.0`，包含客观题 Markdown/LaTeX 与本次仓库清理。
+
+### 发布
+
+- Tag：`v1.3.0`
+- Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.3.0
+- CI run：发布后补
+- 资产：`OiJudge-Setup-1.3.0.exe`、`oi-local-judge-1.3.0-win-x64.zip`、`SHA256SUMS.txt`
 
 ---
 
