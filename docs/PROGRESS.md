@@ -30,10 +30,12 @@
   - 赛前仍隐藏，非参赛者仍不可见
 - P1-6 Hack validator：无源码 validator 的题目禁止 Hack，返回 `HACK_REQUIRES_VALIDATOR`。
 - P1-7 Hack 目标必须 `finished` 且有 verdict；`syncOnlineOfficialScore` 忽略 `hacked_at`。
-- P1-8 ZIP 限额：
+- P1-8 ZIP/上传限额：
   - `unzipWithLimits` 在解压前检查条目数、单文件、总解压大小、压缩包大小
   - 题包导入、数据导入、比赛批量、批量判题统一走该入口
-  - 10 GiB 请求体缓冲仍未改为流式，只收紧了同步解压路径
+  - 批量上传播放路径 `/api/admin/batch/uploads` 已在 `preParsing` 前由专用 parser 流式落盘并边写边算 SHA-256
+  - 其余需要 Buffer 的后台上传从 10 GiB 降到 1 GiB，避免一次请求预留 10 GiB 内存
+  - 仍未把题包/数据/比赛批量改成逐 entry 流式解压
 - P1-9 部分修复：
   - 时钟自动结束/解封时回填 OI 正式分
   - 手工结束比赛时回填正式分
@@ -64,7 +66,7 @@
 - P0-1 默认安装仍不启用 worker 隔离（遵循既有“默认关闭”产品决策）；完整 AppContainer/网络隔离未做。
 - P0-3 剩余：generator / generation std 未进 runner；ranking 插件未隔离。
 - P1-1 剩余：磁盘水位熔断、按卷余量暂停队列。
-- P1-8 剩余：10 GiB 请求体仍整体进内存，未改流式上传。
+- P1-8 剩余：题包/数据/比赛批量仍整体缓冲，未做逐 entry 流式解压。
 - P1 性能：每提交重算两次正式榜、题目列表 N+1、同步 SQLite 阻塞。
 - P2-1/2 legacy 排名语义、公开榜实名；P2-6 dependsOn；P2-11~16。
 - P2-7 剩余：前端倒计时仍使用全局结束时间，未按个人 extra_time 显示。

@@ -76,9 +76,10 @@ export interface AdminBatchRouteOptions {
   maxSourceBytes?: number;
 }
 
-// Batch upload limit for admin routes – very large (10 GB) so admins are never
-// blocked by the body-size parser when importing student lists or bulk data.
-const MAX_BATCH_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
+// Legacy buffered upload endpoint. The streaming endpoint
+// `/api/admin/batch/uploads` is unbounded by this value and enforces the 5 GiB
+// ZIP limit while writing to disk.
+const MAX_BATCH_UPLOAD_BYTES = 1 * 1024 * 1024 * 1024;
 /** Default GET page size; keeps 5000-item batches from being returned at once. */
 const DEFAULT_PAGE_SIZE = 200;
 const MAX_PAGE_SIZE = 1000;

@@ -35,8 +35,8 @@ export function isAttachmentUploadUrl(url: string): boolean {
  *
  * `POST /api/admin/batch/uploads` receives the request stream itself so the ZIP
  * is written to disk incrementally instead of being buffered. Attachment
- * uploads are bounded to 50 MiB; every other admin upload keeps the historical
- * buffered behaviour (10 GiB P0 limit) because those routes consume a Buffer.
+ * uploads are bounded to 50 MiB; every other admin upload is capped at 1 GiB
+ * because those routes consume a Buffer.
  */
 export function adminBodyContentTypeParser(
   request: FastifyRequest,

@@ -23,8 +23,8 @@ export const MAX_BATCH_ZIP_BYTES = 5 * 1024 ** 3;
 export const MAX_BATCH_FILES = 200_000;
 export const MAX_BATCH_UNCOMPRESSED_BYTES = 10 * 1024 ** 3;
 export const MAX_BATCH_FILE_BYTES = 512 * 1024 ** 2;
-/** Hard upper bound for a single HTTP body (admin uploads, unchanged from P0). */
-export const MAX_ADMIN_BODY_BYTES = 10 * 1024 ** 3;
+/** Hard upper bound for a single buffered HTTP body (admin uploads). */
+export const MAX_ADMIN_BODY_BYTES = 1 * 1024 ** 3;
 /** How many distinct paths a preview tree sample may contain. */
 export const TREE_SAMPLE_LIMIT = 200;
 

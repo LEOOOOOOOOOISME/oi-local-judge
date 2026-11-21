@@ -50,9 +50,10 @@ import { importCenaProblem } from '../services/cena.js';
 import { buildCdf, importLemonProblem } from '../services/lemon.js';
 import { unzipWithLimits } from '../services/zip-limits.js';
 
-// Admin upload limit set to 10 GB so that administrators are never blocked by
-// the body-size parser when uploading problems, zips, assets, etc.
-const MAX_UPLOAD_BYTES = 10 * 1024 * 1024 * 1024;
+// Problem/ZIP uploads are buffered by Fastify; cap them at 1 GiB so a malformed
+// request cannot reserve the old 10 GiB. The batch upload endpoint has its own
+// streaming path and is not affected by this constant.
+const MAX_UPLOAD_BYTES = 1 * 1024 * 1024 * 1024;
 const ALLOWED_SOURCE_EXTENSIONS = new Set(['.cpp', '.cc', '.cxx', '.c', '.py', '.exe', '.txt']);
 
 function isAssetKind(value: string): value is AssetKind {
