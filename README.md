@@ -4,7 +4,7 @@
 
 老师在电脑上安装，学生用浏览器登录、看题、提交、查看成绩。题目、代码、成绩、比赛和数据都保存在这台电脑上，不需要另外准备一台专门运行系统的电脑。
 
-当前版本：**v1.3.0**
+当前版本：**v1.3.1**
 
 ![比赛总览](docs/assets/screenshots/contest.png)
 
@@ -131,6 +131,8 @@
 
 首次启动会生成随机管理员密码，第一次登录必须修改密码；旧版本的固定管理员密码会被强制修改。
 
+自助注册默认关闭；需要开放时设置 `OIJ_ALLOW_REGISTRATION=1` 并重启。
+
 支持自动备份、手动备份和恢复；升级前可以先做一次备份。
 
 ![登录页面](docs/assets/screenshots/login.png)
@@ -157,7 +159,7 @@
 
    <https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases>
 
-2. 下载 `OiJudge-Setup-1.3.0.exe`。
+2. 下载 `OiJudge-Setup-1.3.1.exe`。
 3. 双击安装，选择安装位置。
 4. 安装完成后启动 OiJudge。
 
@@ -166,7 +168,7 @@
 ### 方式二：免安装版
 
 1. 打开同一个发布页。
-2. 下载 `oi-local-judge-1.3.0-win-x64.zip`。
+2. 下载 `oi-local-judge-1.3.1-win-x64.zip`。
 3. 解压到普通文件夹。
 4. 双击 `OiJudge.exe` 启动。
 

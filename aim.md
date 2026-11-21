@@ -1,10 +1,10 @@
 # OI Local Judge — 目标、已完成与未完成
 
-最后更新：2026-11-20  
+最后更新：2026-11-21  
 当前分支：`main`  
-当前 HEAD：`v1.3.0`（tag）  
-发布 tag：`v1.3.0`  
-当前 Release：`v1.3.0`（正式版，Latest）
+当前 HEAD：`v1.3.1`（tag）  
+发布 tag：`v1.3.1`  
+当前 Release：`v1.3.1`（正式版，Latest）
 
 ---
 
@@ -793,6 +793,43 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
   - `SHA256SUMS.txt` 191 B（与 GitHub 资产 digest 一致）
 - 旧 v1.2.0 Release 资产保留；tag 已指向重写后的提交。
 - 边界：GitHub 仍可能通过旧提交 SHA 直接访问旧对象；分支、tag、Release 已全部指向新历史，彻底清除需 GitHub Support。
+
+## 3.18 代码审计修复 + v1.3.1 发布（2026-11-21）
+
+- 依据外部代码审计报告，修复 P0/P1/P2 中可安全落地的项。
+- 判题隔离：
+  - checker / validator / generator 通过 `ojrunner` 的 Job Object 执行
+  - 编译产物、输入、答案、输出复制到本次 workdir；worker 不再读 dataDir/编译缓存
+  - 运行期 stdout/stderr 配额，超限立即终止并判 OLE
+  - MLE 只在真正触限时判定，TLE 优先
+- 编译/输入：
+  - 编译诊断脱敏，不再回显 include 内容与路径
+  - 文件 IO 路径白名单与 workdir containment
+  - `.exe` 资产仅 admin 可传
+  - C11、客观题填空/多选、CSV 注入、NaN 防护
+- 比赛：
+  - Hack 目标必须 finished；无 validator 禁止 Hack
+  - 结束/解封回填 OI 正式分；解封后不再永久封榜；重测可降分
+  - 参赛者可读比赛内 hidden 题；WS 房间鉴权
+  - `extra_time` 参与提交截止与正式分同步
+- 账号/上传：
+  - 自助注册默认关闭，`OIJ_ALLOW_REGISTRATION=1` 开启
+  - CSV 导入生成 16 位一次性密码并强制改密
+  - 批量 ZIP 流式落盘；其余 buffered 上传上限 10 GiB → 1 GiB
+  - ZIP 解压前检查条目/单文件/总量
+- 提交：`49a8c85`、`7ae2c7c`、`701452b`、`244eb6d`、`85d8f37`、`dab58b6`、`bb30dd4`、`48458fb`、`e324a4d`、`15b5bd0`
+- 验证：
+  - 全量 129 文件 / 1129 用例通过
+  - `npm run build`、`npm run build:native` 通过
+  - 浏览器 E2E 3 passed
+  - 全历史 secret scan 0 命中
+
+### 发布
+
+- Tag：`v1.3.1`
+- Release：发布后补
+- CI run：发布后补
+- 资产：发布后补
 
 ---
 
