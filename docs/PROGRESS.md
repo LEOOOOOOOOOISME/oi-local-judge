@@ -14,6 +14,7 @@
 - P1-2 文件 IO 路径穿越：
   - create/update 只接受 `[A-Za-z0-9._-]{1,64}` 纯文件名
   - 判题时再次做 workdir containment，非法配置返回 SE
+- P1-3 Worker 可执行文件：判题/ Hack 时把编译产物复制到本次 workdir，worker 不再需要读取被拒绝的编译缓存目录；Windows worker 端到端仍未实测。
 - P1-4 WebSocket 比赛房间：非参赛者/非管理角色订阅 `contest:<id>` 返回 1008。
 - P1-5 contest-scoped 题目 ACL：
   - 已开始/进行中/已结束比赛的参赛者可读 hidden 题目
@@ -49,7 +50,6 @@
 - P0-1 默认安装仍不启用 worker 隔离（遵循既有“默认关闭”产品决策）；完整 AppContainer/网络隔离未做。
 - P0-3 剩余：checker/validator/generator/std 仍在服务账户下直接 spawn，未统一进 runner。
 - P1-1 stdout/stderr 运行期配额、磁盘水位熔断。
-- P1-3 worker 与编译缓存 ACL 冲突（需 Windows worker 实测）。
 - P1-8 剩余：10 GiB 请求体仍整体进内存，未改流式上传。
 - P1 性能：每提交重算两次正式榜、题目列表 N+1、同步 SQLite 阻塞。
 - P2-1/2 legacy 排名语义、公开榜实名；P2-6 dependsOn；P2-9 注册/默认密码；P2-11~16。

@@ -382,9 +382,15 @@ export async function judgeTestcase(args: {
     contestantOutput = safeOutput;
   }
 
+  const runExe = join(workdir, `contestant-${testcase.id}.exe`);
+  // The worker account cannot read the compile-cache directory (the worker
+  // isolation script denies the whole dataDir). Materialize the executable in
+  // the per-run workdir, which is explicitly granted to the worker.
+  copyFileSync(outExe, runExe);
+
   const run = await runSandboxed({
     runner: config.runnerPath,
-    exe: outExe,
+    exe: runExe,
     workdir,
     timeMs: timeLimitMs,
     wallMs: wallLimitMs,

@@ -1,4 +1,4 @@
-import { readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
@@ -241,9 +241,11 @@ export async function judgeHack(
       });
       return;
     }
+    const stdRunExe = join(workdir, 'std.exe');
+    copyFileSync(std.exe, stdRunExe);
     const stdRun = await runSandboxed({
       runner: config.runnerPath,
-      exe: std.exe,
+      exe: stdRunExe,
       workdir,
       timeMs: Math.max(1, problem.time_ms),
       wallMs: Math.max(1, problem.time_ms) + JUDGE_WALL_CLOCK_BUFFER_MS,
