@@ -6,6 +6,7 @@ import type { Config } from '../config.js';
 import { getAsset } from '../storage/repos/assets.js';
 import { ensureCompiledProgram } from '../judge/compile-cache.js';
 import { runSandboxed } from '../judge/runner.js';
+import { workerRunOptions } from '../judge/worker.js';
 import { runValidator } from '../judge/validator.js';
 import {
   caseFileName,
@@ -172,6 +173,8 @@ export function createDefaultGenerationRuntime(
         input: input.inputPath,
         workdir: input.workdir,
         timeMs: input.timeMs,
+        runner: options.config.runnerPath,
+        worker: workerRunOptions(options.config),
       });
       return { ok: result.ok, message: result.message };
     },

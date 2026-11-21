@@ -8,6 +8,7 @@ import type { Config } from '../config.js';
 import { ensureChecker } from '../judge/checker-cache.js';
 import { ensureCompiledProgram } from '../judge/compile-cache.js';
 import { judgeTestcase } from '../judge/pipeline.js';
+import { workerRunOptions } from '../judge/worker.js';
 import { isSafeIoFileName } from '../judge/io-file.js';
 import { runValidator } from '../judge/validator.js';
 import { requireRole } from '../security/auth.js';
@@ -1078,6 +1079,8 @@ export function registerAdminProblemRoutes(
           validator: compiled.exe,
           input: join(options.config.dataDir, testcase.input_path),
           workdir,
+          runner: options.config.runnerPath,
+          worker: workerRunOptions(options.config),
         });
         results.push({ testcaseId: testcase.id, ...result });
       }

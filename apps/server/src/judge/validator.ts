@@ -1,12 +1,20 @@
-import { spawn } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { judgeChildEnv } from './isolation.js';
+import { copyFileSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { defaultRunnerPath, runSandboxed } from './runner.js';
+import type { WorkerRunOptions } from './worker.js';
 
 export interface ValidatorRunOptions {
   validator: string;
   input: string;
   workdir: string;
   timeMs?: number;
+  /** Optional runner path override (tests). */
+  runner?: string;
+  /** Low-privilege account for the validator process. */
+  worker?: WorkerRunOptions;
+  /** Memory limit for the validator process. */
+  memoryMb?: number;
 }
 
 export interface ValidatorRunResult {
@@ -16,56 +24,82 @@ export interface ValidatorRunResult {
 
 const OUTPUT_LIMIT = 64 * 1024;
 
-/** Runs a trusted validator executable against one test input. */
-export function runValidator(options: ValidatorRunOptions): Promise<ValidatorRunResult> {
-  const timeoutMs = options.timeMs ?? 10_000;
-  return new Promise<ValidatorRunResult>((resolve) => {
-    let stdout = '';
-    let stderr = '';
-    let settled = false;
-    let timedOut = false;
-    const finish = (result: ValidatorRunResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
-    };
-    const child = spawn(options.validator, [], {
-      cwd: options.workdir,
-      env: judgeChildEnv(process.env, options.workdir),
-      windowsHide: true,
-      stdio: ['pipe', 'pipe', 'pipe'],
+function readCapped(path: string): string {
+  try {
+    const text = readFileSync(path, 'utf8');
+    return text.length <= OUTPUT_LIMIT ? text : text.slice(0, OUTPUT_LIMIT);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Runs a validator inside the native Job Object runner.
+ *
+ * The validator, its input and its stdio files are materialized in the per-run
+ * workdir because the worker account cannot read the data directory or the
+ * compile cache. Timeouts kill the whole job, not only the root process.
+ */
+export async function runValidator(
+  options: ValidatorRunOptions,
+): Promise<ValidatorRunResult> {
+  const timeoutMs =
+    Number.isFinite(options.timeMs) && (options.timeMs ?? 0) > 0
+      ? (options.timeMs as number)
+      : 10_000;
+  const token = `${process.pid}-${randomUUID()}`;
+  const validatorCopy = join(options.workdir, `.validator-${token}.exe`);
+  const inputFile = join(options.workdir, `.validator-${token}.in`);
+  const stdoutFile = join(options.workdir, `.validator-${token}.out`);
+  const stderrFile = join(options.workdir, `.validator-${token}.err`);
+  try {
+    copyFileSync(options.validator, validatorCopy);
+    // testlib's stdin reader on Windows expects CRLF line endings when fed
+    // through a redirected file; normalize so LF-only data validates.
+    const inputText = readFileSync(options.input, 'utf8').replace(/\r?\n/g, '\r\n');
+    writeFileSync(inputFile, inputText);
+    const run = await runSandboxed({
+      runner: options.runner ?? defaultRunnerPath(),
+      exe: validatorCopy,
+      workdir: options.workdir,
+      timeMs: timeoutMs,
+      wallMs: timeoutMs + 2000,
+      memoryMb: options.memoryMb ?? 512,
+      processLimit: 1,
+      outputLimitMb: 64,
+      stdinFile: inputFile,
+      stdoutFile,
+      stderrFile,
+      worker: options.worker,
     });
-    let inputText: string;
-    try {
-      // testlib's stdin reader on Windows expects CRLF line endings when fed
-      // through a pipe; normalize so LF-only data files validate consistently.
-      inputText = readFileSync(options.input, 'utf8').replace(/\r?\n/g, '\r\n');
-    } catch (err) {
-      child.kill();
-      return finish({ ok: false, message: `cannot read input: ${(err as Error).message}` });
+    const output = (readCapped(stderrFile) || readCapped(stdoutFile)).trim();
+    if (run.timedOut) {
+      return { ok: false, message: `validator timed out after ${timeoutMs}ms` };
     }
-    child.stdin.end(inputText);    const capture = (chunk: Buffer, target: 'out' | 'err') => {
-      const text = chunk.toString('utf8');
-      if (target === 'out') stdout = (stdout + text).slice(0, OUTPUT_LIMIT);
-      else stderr = (stderr + text).slice(0, OUTPUT_LIMIT);
+    if (run.outputLimitExceeded) {
+      return { ok: false, message: 'validator exceeded the 64 MiB output limit' };
+    }
+    if (run.exitCode === 0) {
+      return { ok: true, message: output || 'ok' };
+    }
+    return {
+      ok: false,
+      message: output || `validator exited with code ${run.exitCode}`,
     };
-    child.stdout?.on('data', (chunk: Buffer) => capture(chunk, 'out'));
-    child.stderr?.on('data', (chunk: Buffer) => capture(chunk, 'err'));
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, timeoutMs);
-    child.once('error', (err) => finish({ ok: false, message: err.message }));
-    child.once('close', (code) => {
-      const output = (stderr.trim() || stdout.trim()).slice(0, OUTPUT_LIMIT);
-      if (timedOut) {
-        finish({ ok: false, message: `validator timed out after ${timeoutMs}ms` });
-      } else if (code === 0) {
-        finish({ ok: true, message: output || 'ok' });
-      } else {
-        finish({ ok: false, message: output || `validator exited with code ${code ?? -1}` });
+  } catch (error) {
+    return {
+      ok: false,
+      message: `validator failed to run: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  } finally {
+    for (const file of [validatorCopy, inputFile, stdoutFile, stderrFile]) {
+      try {
+        unlinkSync(file);
+      } catch {
+        // best-effort cleanup
       }
-    });
-  });
+    }
+  }
 }

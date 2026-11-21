@@ -213,7 +213,13 @@ export async function judgeHack(
         });
         return;
       }
-      const validated = await runValidator({ validator: validator.exe, input: inputPath, workdir });
+      const validated = await runValidator({
+        validator: validator.exe,
+        input: inputPath,
+        workdir,
+        runner: config.runnerPath,
+        worker: workerRunOptions(config),
+      });
       if (!validated.ok) {
         updateHack(db, hackId, {
           status: 'invalid',

@@ -14,6 +14,8 @@ export interface RunOptions {
   runner?: string;
   /** Executable to run inside the job. */
   exe: string;
+  /** Arguments passed to the executable (checker/validator protocols). */
+  args?: string[];
   /** Working directory of the child process. */
   workdir: string;
   /** Optional low-privilege Windows account for the contestant process. */
@@ -134,6 +136,7 @@ export async function runSandboxed(o: RunOptions): Promise<RunResult> {
   const args = [
     '--exe',
     o.exe,
+    ...(o.args ?? []).flatMap((arg) => ['--arg', arg]),
     '--workdir',
     o.workdir,
     '--time-ms',

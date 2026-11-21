@@ -482,6 +482,8 @@ export async function judgeTestcase(args: {
       workdir,
       timeMs: 10_000,
       fullScore: testcase.points,
+      runner: config.runnerPath,
+      worker: workerRunOptions(config),
     });
     return {
       ...base,

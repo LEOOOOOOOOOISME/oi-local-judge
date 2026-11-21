@@ -44,7 +44,7 @@ function makeFiles(outputText: string): {
 }
 
 beforeAll(() => {
-  workDir = mkdtempSync(join(tmpdir(), 'oij-chk-'));
+  workDir = mkdtempSync(join(process.cwd(), 'native/runner/out', 'checker-test-'));
   compile('sum', 'testlib-sum.cpp');
   compile('partial', 'testlib-partial.cpp');
   compile('slow', 'testlib-slow.cpp');

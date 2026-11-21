@@ -9,17 +9,17 @@
 //      score is read from score_file (0..full_score).
 //
 // Timeouts and crashes map to SE; captured output is truncated to 64 KiB.
-import { spawn } from 'node:child_process';
-import { judgeChildEnv } from './isolation.js';
 import { randomUUID } from 'node:crypto';
+import { copyFileSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { readFile, unlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { Verdict } from '@oij/shared';
+import { defaultRunnerPath, runSandboxed } from './runner.js';
+import type { WorkerRunOptions } from './worker.js';
 
 export const CHECKER_OUTPUT_LIMIT = 64 * 1024;
 const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_LEMON_FULL_SCORE = 100;
-const KILL_FALLBACK_MS = 2_000;
 const EPSILON = 1e-9;
 const TRUNCATED_SUFFIX = '\n...[truncated]';
 
@@ -41,6 +41,12 @@ export interface CheckerOptions {
   timeMs: number;
   /** Lemon only: maximum score. Defaults to 100. */
   fullScore?: number;
+  /** Optional runner path override (tests). */
+  runner?: string;
+  /** Low-privilege account for the checker process. */
+  worker?: WorkerRunOptions;
+  /** Memory limit for the checker process. */
+  memoryMb?: number;
 }
 
 export interface CheckerResult {
@@ -51,7 +57,7 @@ export interface CheckerResult {
 
 interface ProcessResult {
   exitCode: number | null;
-  signal: NodeJS.Signals | null;
+  signal: string | null;
   stdout: string;
   stderr: string;
   stdoutTruncated: boolean;
@@ -65,118 +71,93 @@ interface CaptureResult {
   truncated: boolean;
 }
 
-function appendCapped(current: Buffer, chunk: Buffer): CaptureResult {
-  if (current.length >= CHECKER_OUTPUT_LIMIT) {
-    return { buffer: current, truncated: true };
+function readCapped(path: string): CaptureResult {
+  try {
+    const buffer = readFileSync(path);
+    if (buffer.length <= CHECKER_OUTPUT_LIMIT) return { buffer, truncated: false };
+    return { buffer: buffer.subarray(0, CHECKER_OUTPUT_LIMIT), truncated: true };
+  } catch {
+    return { buffer: Buffer.alloc(0), truncated: false };
   }
-  const room = CHECKER_OUTPUT_LIMIT - current.length;
-  if (chunk.length <= room) {
-    return { buffer: Buffer.concat([current, chunk]), truncated: false };
-  }
-  return { buffer: Buffer.concat([current, chunk.subarray(0, room)]), truncated: true };
 }
 
-function runProcess(
+/**
+ * Runs an author-supplied checker inside the native Job Object runner.
+ *
+ * The executable, its inputs and its output are copied into the per-run
+ * workdir first: under worker isolation the checker account cannot read the
+ * data directory or the compile cache. The runner then enforces the process
+ * limit, memory/CPU/wall limits and output quota, and kills the whole job on
+ * timeout instead of leaving checker children behind.
+ */
+async function runProcess(
   checker: string,
   args: string[],
   workdir: string,
   timeoutMs: number,
+  options: {
+    runner?: string;
+    worker?: WorkerRunOptions;
+    memoryMb?: number;
+  } = {},
 ): Promise<ProcessResult> {
-  return new Promise<ProcessResult>((resolve) => {
-    let stdout: Buffer = Buffer.alloc(0);
-    let stderr: Buffer = Buffer.alloc(0);
-    let stdoutTruncated = false;
-    let stderrTruncated = false;
-    let timedOut = false;
-    let settled = false;
-    let timer: NodeJS.Timeout | undefined;
-    let killFallback: NodeJS.Timeout | undefined;
-
-    const snapshot = (): Omit<ProcessResult, 'exitCode' | 'signal' | 'timedOut' | 'error'> => ({
-      stdout: stdout.toString('utf8'),
-      stderr: stderr.toString('utf8'),
-      stdoutTruncated,
-      stderrTruncated,
+  const token = `${process.pid}-${randomUUID()}`;
+  const checkerCopy = join(workdir, `.checker-${token}.exe`);
+  const stdinFile = join(workdir, `.checker-${token}.in`);
+  const stdoutFile = join(workdir, `.checker-${token}.out`);
+  const stderrFile = join(workdir, `.checker-${token}.err`);
+  try {
+    copyFileSync(checker, checkerCopy);
+    writeFileSync(stdinFile, '');
+    const run = await runSandboxed({
+      runner: options.runner ?? defaultRunnerPath(),
+      exe: checkerCopy,
+      args,
+      workdir,
+      timeMs: timeoutMs,
+      wallMs: timeoutMs + 2000,
+      memoryMb: options.memoryMb ?? 512,
+      processLimit: 1,
+      outputLimitMb: 64,
+      stdinFile,
+      stdoutFile,
+      stderrFile,
+      worker: options.worker,
     });
-
-    const finish = (result: ProcessResult): void => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      if (timer) {
-        clearTimeout(timer);
-      }
-      if (killFallback) {
-        clearTimeout(killFallback);
-      }
-      resolve(result);
+    const stdout = readCapped(stdoutFile);
+    const stderr = readCapped(stderrFile);
+    return {
+      exitCode: run.exitCode,
+      signal: run.signal === 0 ? null : `NTSTATUS ${run.signal}`,
+      stdout: stdout.buffer.toString('utf8'),
+      stderr: stderr.buffer.toString('utf8'),
+      stdoutTruncated: stdout.truncated,
+      stderrTruncated: stderr.truncated,
+      timedOut: run.timedOut,
+      ...(run.outputLimitExceeded
+        ? { error: new Error(`checker exceeded the ${64} MiB output limit`) }
+        : {}),
     };
-
-    let child;
-    try {
-      child = spawn(checker, args, {
-        cwd: workdir,
-        env: judgeChildEnv(process.env, workdir),
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    } catch (error) {
-      finish({
-        exitCode: null,
-        signal: null,
-        ...snapshot(),
-        timedOut: false,
-        error: error instanceof Error ? error : new Error(String(error)),
-      });
-      return;
+  } catch (error) {
+    return {
+      exitCode: null,
+      signal: null,
+      stdout: '',
+      stderr: '',
+      stdoutTruncated: false,
+      stderrTruncated: false,
+      timedOut: false,
+      error: error instanceof Error ? error : new Error(String(error)),
+    };
+  } finally {
+    for (const file of [checkerCopy, stdinFile, stdoutFile, stderrFile]) {
+      try {
+        unlinkSync(file);
+      } catch {
+        // best-effort cleanup
+      }
     }
-
-    child.stdout.on('data', (chunk: Buffer) => {
-      const captured = appendCapped(stdout, chunk);
-      stdout = captured.buffer;
-      stdoutTruncated ||= captured.truncated;
-    });
-    child.stderr.on('data', (chunk: Buffer) => {
-      const captured = appendCapped(stderr, chunk);
-      stderr = captured.buffer;
-      stderrTruncated ||= captured.truncated;
-    });
-
-    child.once('error', (error) => {
-      finish({
-        exitCode: null,
-        signal: null,
-        ...snapshot(),
-        timedOut,
-        error,
-      });
-    });
-
-    child.once('close', (code, signal) => {
-      finish({
-        exitCode: code,
-        signal,
-        ...snapshot(),
-        timedOut,
-        ...(timedOut ? { error: new Error(`checker timed out after ${timeoutMs} ms`) } : {}),
-      });
-    });
-
-    timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-      killFallback = setTimeout(() => {
-        finish({
-          exitCode: null,
-          signal: null,
-          ...snapshot(),
-          timedOut: true,
-          error: new Error(`checker timed out after ${timeoutMs} ms and did not exit`),
-        });
-      }, KILL_FALLBACK_MS);
-    }, timeoutMs);
-  });
+  }
 }
 
 function truncateOutput(text: string): string {
@@ -289,6 +270,7 @@ async function runLemon(
       ],
       options.workdir,
       options.timeMs,
+      { runner: options.runner, worker: options.worker, memoryMb: options.memoryMb },
     );
 
     const processMessage = pickMessage(result);
@@ -392,32 +374,66 @@ export async function runChecker(options: CheckerOptions): Promise<CheckerResult
     ...options,
     timeMs: timeoutMs,
   };
-
-  if (normalized.mode === 'testlib') {
-    const result = await runProcess(
-      normalized.checker,
-      [normalized.input, normalized.output, normalized.answer],
-      normalized.workdir,
-      timeoutMs,
-    );
-    return interpretTestlib(result, normalized.fullScore);
-  }
-
-  if (normalized.mode === 'lemon') {
-    const fullScore = normalized.fullScore ?? DEFAULT_LEMON_FULL_SCORE;
-    if (!Number.isFinite(fullScore) || fullScore <= 0) {
-      return {
-        status: 'SE',
-        score: 0,
-        message: `invalid lemon fullScore: ${String(normalized.fullScore)}`,
-      };
-    }
-    return runLemon(normalized, fullScore);
-  }
-
-  return {
-    status: 'SE',
-    score: 0,
-    message: `unknown checker mode: ${String(normalized.mode)}`,
+  const token = `${process.pid}-${randomUUID()}`;
+  const inputCopy = join(normalized.workdir, `.checker-input-${token}`);
+  const outputCopy = join(normalized.workdir, `.checker-output-${token}`);
+  const answerCopy = join(normalized.workdir, `.checker-answer-${token}`);
+  const prepared: CheckerOptions = {
+    ...normalized,
+    input: inputCopy,
+    output: outputCopy,
+    answer: answerCopy,
   };
+  try {
+    copyFileSync(normalized.input, inputCopy);
+    copyFileSync(normalized.output, outputCopy);
+    copyFileSync(normalized.answer, answerCopy);
+  } catch (error) {
+    return {
+      status: 'SE',
+      score: 0,
+      message: `checker input files could not be prepared: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    };
+  }
+
+  try {
+    if (prepared.mode === 'testlib') {
+      const result = await runProcess(
+        prepared.checker,
+        [prepared.input, prepared.output, prepared.answer],
+        prepared.workdir,
+        timeoutMs,
+        { runner: normalized.runner, worker: normalized.worker, memoryMb: normalized.memoryMb },
+      );
+      return interpretTestlib(result, prepared.fullScore);
+    }
+
+    if (prepared.mode === 'lemon') {
+      const fullScore = prepared.fullScore ?? DEFAULT_LEMON_FULL_SCORE;
+      if (!Number.isFinite(fullScore) || fullScore <= 0) {
+        return {
+          status: 'SE',
+          score: 0,
+          message: `invalid lemon fullScore: ${String(prepared.fullScore)}`,
+        };
+      }
+      return await runLemon(prepared, fullScore);
+    }
+
+    return {
+      status: 'SE',
+      score: 0,
+      message: `unknown checker mode: ${String(prepared.mode)}`,
+    };
+  } finally {
+    for (const file of [inputCopy, outputCopy, answerCopy]) {
+      try {
+        unlinkSync(file);
+      } catch {
+        // best-effort cleanup
+      }
+    }
+  }
 }

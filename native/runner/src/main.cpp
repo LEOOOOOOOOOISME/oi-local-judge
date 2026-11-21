@@ -74,6 +74,7 @@ struct Options {
   int memoryMb = 256;
   int processLimit = 1;
   int outputLimitMb = 0;
+  std::vector<std::wstring> extraArgs;
   // Fail instead of silently running as the service account when the server
   // requires isolation. Credentials themselves arrive through the environment
   // (never argv, which is visible to other users).
@@ -345,12 +346,16 @@ bool parseOptions(const std::vector<std::wstring>& args, Options* opt, std::stri
       if (!nextInt(&opt->processLimit)) return false;
     } else if (key == L"--output-limit-mb") {
       if (!nextInt(&opt->outputLimitMb)) return false;
+    } else if (key == L"--arg") {
+      std::wstring value;
+      if (!next(&value)) return false;
+      opt->extraArgs.push_back(value);
     } else if (key == L"--worker-required") {
       opt->workerRequired = true;
     } else if (key == L"--help" || key == L"-h") {
       *error = "usage: ojrunner --exe <path> [--workdir <dir>] [--time-ms <n>] "
                "[--wall-ms <n>] [--memory-mb <n>] [--process-limit <n>] "
-               "[--output-limit-mb <n>] "
+               "[--output-limit-mb <n>] [--arg <value>]... "
                "[--input <file>] [--output <file>] [--stderr <file>] "
                "[--worker-required]";
       return false;
@@ -584,6 +589,14 @@ int run(const Options& opt, Result* out) {
   }
 
   std::wstring commandLine = L"\"" + opt.exe + L"\"";
+  for (const std::wstring& arg : opt.extraArgs) {
+    commandLine += L" \"";
+    for (wchar_t ch : arg) {
+      if (ch == L'"') commandLine += L"\\\"";
+      else commandLine.push_back(ch);
+    }
+    commandLine += L"\"";
+  }
   std::vector<wchar_t> commandBuffer(commandLine.begin(), commandLine.end());
   commandBuffer.push_back(L'\0');
 
