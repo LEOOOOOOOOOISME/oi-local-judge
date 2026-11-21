@@ -54,6 +54,13 @@
 - 浏览器 E2E：3 passed。
 - 重写前 HEAD `b677cd5`，重写后 HEAD `e5f5288`；`HEAD^{tree}` 均为 `922b35a5eac4b48e293c59f1476cd0ebc9e8c4a3`。
 - 重写后作者/提交者/tagger 无旧手机号邮箱；旧提交 SHA 全部变化。
+- Release CI：run `44733305221`，success（7m26s），v1.3.0 为 Latest。
+- 资产：
+  - `OiJudge-Setup-1.3.0.exe` 253,134,248 B
+  - `oi-local-judge-1.3.0-win-x64.zip` 360,010,690 B
+  - `SHA256SUMS.txt` 191 B，内容与 GitHub 资产 digest 一致
+- 旧 v1.2.0 Release 资产仍保留，tag 已指向重写后的提交。
+- 边界：GitHub 仍可能通过旧提交 SHA 直接访问旧对象；分支、tag、Release 已全部指向新历史，彻底清除需 GitHub Support。
 
 ## 2026-11-20 / Round 163（客观题创建 + 混排组卷 UI 全链路）
 

@@ -785,8 +785,14 @@ D:\Desktop\LEO\c++\code\gen\2\3\Sdata-self\A\source
 
 - Tag：`v1.3.0`
 - Release：https://github.com/LEOOOOOOOOOISME/oi-local-judge/releases/tag/v1.3.0
-- CI run：发布后补
-- 资产：`OiJudge-Setup-1.3.0.exe`、`oi-local-judge-1.3.0-win-x64.zip`、`SHA256SUMS.txt`
+- CI run：`44733305221`，success（7m26s）
+- Latest：是；非 prerelease
+- 资产：
+  - `OiJudge-Setup-1.3.0.exe` 253,134,248 B
+  - `oi-local-judge-1.3.0-win-x64.zip` 360,010,690 B
+  - `SHA256SUMS.txt` 191 B（与 GitHub 资产 digest 一致）
+- 旧 v1.2.0 Release 资产保留；tag 已指向重写后的提交。
+- 边界：GitHub 仍可能通过旧提交 SHA 直接访问旧对象；分支、tag、Release 已全部指向新历史，彻底清除需 GitHub Support。
 
 ---
 
