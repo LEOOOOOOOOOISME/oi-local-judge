@@ -11,11 +11,12 @@
   - 新增诊断脱敏：只保留 `文件:行:列: error/warning`，删除 include 链、源码摘录和本机路径
   - 新增“`#include ../../../../secrets.json` 不回显内容”回归测试
 - P0-3 部分收紧：`.exe` 资产只允许 admin 上传，setter 上传返回 403。
-- P0-3 checker/validator 沙箱化（部分）：
-  - native runner 新增 `--arg`，支持 checker/validator 的命令行参数
-  - checker、validator、输入/答案/输出全部复制到本次 workdir，再通过 Job Object + 可选 worker 账户执行
+- P0-3 checker/validator/generator 沙箱化（部分）：
+  - native runner 新增 `--arg`，支持 checker/validator/generator 的命令行参数
+  - checker、validator、generator、输入/答案/输出全部复制到本次 workdir，再通过 Job Object + 可选 worker 账户执行
   - 超时终止整棵进程树；输出配额 64 MiB
-  - generator 与 generation 的 std 仍直接 spawn，ranking 插件仍在主进程
+  - generation 的 std 也复制到 workdir 并以 worker 运行
+  - ranking 插件仍在主进程
 - P1-1 运行期输出配额：
   - runner 每 50ms 检查 stdout+stderr 总大小，超过题目 `output_mb` 立即终止 Job 并标记 `outputLimitExceeded`
   - pipeline 判 OLE；Hack 的 std 运行也传入同样配额
@@ -64,7 +65,7 @@
 ### 尚未修复（需架构改造/Windows 实测）
 
 - P0-1 默认安装仍不启用 worker 隔离（遵循既有“默认关闭”产品决策）；完整 AppContainer/网络隔离未做。
-- P0-3 剩余：generator / generation std 未进 runner；ranking 插件未隔离。
+- P0-3 剩余：ranking 插件未隔离。
 - P1-1 剩余：磁盘水位熔断、按卷余量暂停队列。
 - P1-8 剩余：题包/数据/比赛批量仍整体缓冲，未做逐 entry 流式解压。
 - P1 性能：每提交重算两次正式榜、题目列表 N+1、同步 SQLite 阻塞。

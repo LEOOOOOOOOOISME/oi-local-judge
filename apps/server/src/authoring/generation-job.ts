@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
@@ -111,7 +111,11 @@ export function createDefaultGenerationRuntime(
       return { ok: result.ok, exe: result.exe, message: result.message };
     },
     async generate(input) {
-      const result = await runContractGenerator(input);
+      const result = await runContractGenerator({
+        ...input,
+        runner: options.config.runnerPath,
+        worker: workerRunOptions(options.config),
+      });
       return {
         ok: result.ok,
         stdout: result.stdout,
@@ -121,18 +125,22 @@ export function createDefaultGenerationRuntime(
     },
     async runStd(input) {
       const stderrFile = join(input.workdir, 'std.stderr.txt');
+      const stdRunExe = join(input.workdir, 'std-run.exe');
+      copyFileSync(input.exe, stdRunExe);
       try {
         const run = await runSandboxed({
           runner: options.config.runnerPath,
-          exe: input.exe,
+          exe: stdRunExe,
           workdir: input.workdir,
           timeMs: input.timeMs,
           wallMs: input.wallMs,
           memoryMb: input.memoryMb,
           processLimit: 1,
+          outputLimitMb: Math.max(1, Math.ceil(input.outputLimitBytes / (1024 * 1024))),
           stdinFile: input.inputPath,
           stdoutFile: input.outputPath,
           stderrFile,
+          worker: workerRunOptions(options.config),
         });
         const ok =
           run.exitCode === 0 &&

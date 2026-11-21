@@ -6,6 +6,7 @@ import type { Config } from '../config.js';
 import { outputMatches } from '../judge/pipeline.js';
 import { runGenerator } from '../judge/generator.js';
 import { runSandboxed } from '../judge/runner.js';
+import { workerRunOptions } from '../judge/worker.js';
 import { ensureCompiledProgram } from '../judge/compile-cache.js';
 import { getAsset } from '../storage/repos/assets.js';
 import {
@@ -107,6 +108,8 @@ export function registerAdminToolRoutes(
           seed,
           workdir: tmpRoot,
           timeMs: 10_000,
+          runner: options.config.runnerPath,
+          worker: workerRunOptions(options.config),
         });
         if (!gen.ok) {
           return reply.code(400).send({ ok: false, error: { code: 'GENERATE_FAILED', message: gen.message } });
@@ -186,7 +189,14 @@ export function registerAdminToolRoutes(
         const seed = seedStart + i;
         const workdir = mkdtempSync(join(tmpRoot, 'stress-'));
         try {
-          const gen = await runGenerator({ generator: generatorExe, seed, workdir, timeMs: 10_000 });
+          const gen = await runGenerator({
+            generator: generatorExe,
+            seed,
+            workdir,
+            timeMs: 10_000,
+            runner: options.config.runnerPath,
+            worker: workerRunOptions(options.config),
+          });
           if (!gen.ok) {
             return reply.code(400).send({ ok: false, error: { code: 'GENERATE_FAILED', message: gen.message } });
           }

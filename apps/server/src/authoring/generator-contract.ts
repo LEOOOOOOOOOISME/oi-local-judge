@@ -1,4 +1,8 @@
-import { spawn } from 'node:child_process';
+import { copyFileSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { join } from 'node:path';
+import { defaultRunnerPath, runSandboxed } from '../judge/runner.js';
+import type { WorkerRunOptions } from '../judge/worker.js';
 
 export interface ContractGeneratorInput {
   generator: string;
@@ -9,6 +13,12 @@ export interface ContractGeneratorInput {
   workdir: string;
   timeMs?: number;
   maxStdoutBytes?: number;
+  /** Optional runner path override (tests). */
+  runner?: string;
+  /** Low-privilege account for the generator process. */
+  worker?: WorkerRunOptions;
+  /** Memory limit for the generator process. */
+  memoryMb?: number;
 }
 
 export interface ContractGeneratorResult {
@@ -36,105 +46,100 @@ export function buildGeneratorArgs(
   ];
 }
 
-export function runContractGenerator(
+function readCapped(path: string, limit: number): { text: string; bytes: number } {
+  try {
+    const buffer = readFileSync(path);
+    const bytes = buffer.length;
+    return {
+      text: (bytes <= limit ? buffer : buffer.subarray(0, limit)).toString('utf8'),
+      bytes,
+    };
+  } catch {
+    return { text: '', bytes: 0 };
+  }
+}
+
+/**
+ * Runs a contract generator inside the native Job Object runner. The generator
+ * account cannot read the data directory or compile cache; the executable and
+ * stdio files live in the per-run workdir.
+ */
+export async function runContractGenerator(
   input: ContractGeneratorInput,
 ): Promise<ContractGeneratorResult> {
   const timeoutMs = input.timeMs ?? DEFAULT_TIMEOUT_MS;
   const maxStdoutBytes = input.maxStdoutBytes ?? DEFAULT_MAX_STDOUT;
-  return new Promise<ContractGeneratorResult>((resolve) => {
-    const chunks: Buffer[] = [];
-    let stderr = '';
-    let bytes = 0;
-    let overflow = false;
-    let timedOut = false;
-    let settled = false;
-
-    const finish = (result: ContractGeneratorResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(result);
+  const token = `${process.pid}-${randomUUID()}`;
+  const generatorCopy = join(input.workdir, `.generator-${token}.exe`);
+  const stdinFile = join(input.workdir, `.generator-${token}.in`);
+  const stdoutFile = join(input.workdir, `.generator-${token}.out`);
+  const stderrFile = join(input.workdir, `.generator-${token}.err`);
+  try {
+    copyFileSync(input.generator, generatorCopy);
+    writeFileSync(stdinFile, '');
+    const run = await runSandboxed({
+      runner: input.runner ?? defaultRunnerPath(),
+      exe: generatorCopy,
+      args: buildGeneratorArgs(input),
+      workdir: input.workdir,
+      timeMs: timeoutMs,
+      wallMs: timeoutMs + 2000,
+      memoryMb: input.memoryMb ?? 512,
+      processLimit: 1,
+      outputLimitMb: Math.max(1, Math.ceil(maxStdoutBytes / (1024 * 1024))),
+      stdinFile,
+      stdoutFile,
+      stderrFile,
+      worker: input.worker,
+    });
+    const stdout = readCapped(stdoutFile, maxStdoutBytes);
+    const stderr = readCapped(stderrFile, 64 * 1024).text;
+    const overflow = run.outputLimitExceeded || stdout.bytes > maxStdoutBytes;
+    const base = {
+      stderr,
+      bytes: stdout.bytes,
+      timedOut: run.timedOut,
+      overflow,
     };
-
-    const child = spawn(input.generator, buildGeneratorArgs(input), {
-      cwd: input.workdir,
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-
-    child.stdout?.on('data', (chunk: Buffer) => {
-      if (overflow) return;
-      bytes += chunk.length;
-      if (bytes > maxStdoutBytes) {
-        overflow = true;
-        child.kill();
-        return;
-      }
-      chunks.push(chunk);
-    });
-
-    child.stderr?.on('data', (chunk: Buffer) => {
-      if (stderr.length < 64 * 1024) stderr += chunk.toString('utf8');
-    });
-
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill();
-    }, timeoutMs);
-
-    child.once('error', (error) => {
-      finish({
+    if (run.timedOut) {
+      return { ...base, ok: false, stdout: stdout.text, message: `generator timed out after ${timeoutMs}ms` };
+    }
+    if (overflow) {
+      return {
+        ...base,
         ok: false,
-        stdout: Buffer.concat(chunks).toString('utf8'),
-        stderr,
-        message: error.message,
-        bytes,
-        timedOut,
-        overflow,
-      });
-    });
-
-    child.once('close', (code) => {
-      const stdout = Buffer.concat(chunks).toString('utf8');
-      if (timedOut) {
-        finish({
-          ok: false,
-          stdout,
-          stderr,
-          message: `generator timed out after ${timeoutMs}ms`,
-          bytes,
-          timedOut,
-          overflow,
-        });
-        return;
+        stdout: '',
+        message: `generator stdout exceeded ${maxStdoutBytes} bytes`,
+      };
+    }
+    if (run.exitCode === 0) {
+      return { ...base, ok: true, stdout: stdout.text, message: 'ok' };
+    }
+    return {
+      ...base,
+      ok: false,
+      stdout: stdout.text,
+      message: `generator exited with code ${run.exitCode}${stderr ? `: ${stderr.trim()}` : ''}`,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      stdout: '',
+      stderr: '',
+      message: `generator failed to run: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+      bytes: 0,
+      timedOut: false,
+      overflow: false,
+    };
+  } finally {
+    for (const file of [generatorCopy, stdinFile, stdoutFile, stderrFile]) {
+      try {
+        unlinkSync(file);
+      } catch {
+        // best-effort cleanup
       }
-      if (overflow) {
-        finish({
-          ok: false,
-          stdout: '',
-          stderr,
-          message: `generator stdout exceeded ${maxStdoutBytes} bytes`,
-          bytes,
-          timedOut,
-          overflow,
-        });
-        return;
-      }
-      if (code === 0) {
-        finish({ ok: true, stdout, stderr, message: 'ok', bytes, timedOut, overflow });
-        return;
-      }
-      finish({
-        ok: false,
-        stdout,
-        stderr,
-        message: `generator exited with code ${code ?? -1}${
-          stderr ? `: ${stderr.trim()}` : ''
-        }`,
-        bytes,
-        timedOut,
-        overflow,
-      });
-    });
-  });
+    }
+  }
 }
