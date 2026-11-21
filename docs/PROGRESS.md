@@ -183,7 +183,9 @@
   - 学生端 0 安装 / 1 台教师电脑 / 数据留在本机
   - 真实界面，直接投屏
 - 导出 `docs/assets/oi-judge-cover.png`（1920×1080）与 `docs/assets/oi-judge-cover-1280.jpg`。
+- 另导出 4:3 `docs/assets/oi-judge-cover-4x3.png`（1440×1080）与 `docs/assets/oi-judge-cover-4x3-1024.jpg`。
 - EAC 设计项目 `e7ee47a9-1fc1-45d2-ba52-c97c7c05839a`，已保存 `cover.html` 修订 r1（artifact `75f77fbe-50d8-4d9f-8cab-223699384baf`）。
+- EAC 4:3 项目 `b7d783e0-c98a-41b7-b0a2-ee5bac4184ab`，已保存 `cover-4x3.html` 修订 r1（artifact `04d94729-8a41-4fab-9cca-9a932be573cf`）。
 - 落地页视频封面改为新封面。
 
 ## 2026-11-18 / Round 159（OiJudge 特色图文 + EAC 24 秒宣传片）
