@@ -539,6 +539,8 @@ export interface ImportUsersResult {
   created: string[];
   skipped: string[];
   errors: Array<{ line: number; message: string }>;
+  /** Generated one-time passwords, returned only for rows without a password. */
+  initialPasswords?: Record<string, string>;
 }
 
 export interface ContestParticipant {

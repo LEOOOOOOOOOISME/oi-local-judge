@@ -83,7 +83,7 @@ export function AdminUsersPage() {
   const [statusLoading, setStatusLoading] = useState<number | null>(null);
   const [importOpen, setImportOpen] = useState(false);
   const [importCsv, setImportCsv] = useState('');
-  const [defaultPassword, setDefaultPassword] = useState('123456');
+  const [defaultPassword, setDefaultPassword] = useState('');
   const [importResult, setImportResult] = useState<ImportUsersResult | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
@@ -205,7 +205,7 @@ export function AdminUsersPage() {
 
   const openImport = () => {
     setImportCsv('');
-    setDefaultPassword('123456');
+    setDefaultPassword('');
     setImportResult(null);
     setImportError(null);
     setImportOpen(true);
@@ -221,7 +221,7 @@ export function AdminUsersPage() {
     try {
       const result = await apiPost<ImportUsersResult>('/api/admin/users/import', {
         csv: importCsv,
-        defaultPassword,
+        ...(defaultPassword.trim() ? { defaultPassword: defaultPassword.trim() } : {}),
       });
       setImportResult(result);
       void queryClient.invalidateQueries({ queryKey: ['admin-users'] });
@@ -544,13 +544,13 @@ export function AdminUsersPage() {
         <Space direction="vertical" size={10} style={{ width: '100%' }}>
           <span className="muted">
             CSV 列：username,password,realName,className,role；首行表头可省略。
-            密码为空时使用默认密码；重复用户名会被跳过，错误行会显示行号。
+            密码为空时自动生成 16 位一次性密码；导入账号首次登录必须改密。
           </span>
           <Input.Password
             addonBefore="默认密码"
             value={defaultPassword}
             onChange={(event) => setDefaultPassword(event.target.value)}
-            placeholder="123456"
+            placeholder="留空则自动生成"
           />
           <Input.TextArea
             rows={10}
@@ -586,6 +586,17 @@ export function AdminUsersPage() {
                         <Tag key={name} color="gold">
                           {name}
                         </Tag>
+                      ))}
+                    </div>
+                  ) : null}
+                  {importResult.initialPasswords &&
+                  Object.keys(importResult.initialPasswords).length > 0 ? (
+                    <div>
+                      一次性密码（请立即保存，只显示这一次）：
+                      {Object.entries(importResult.initialPasswords).map(([name, password]) => (
+                        <div key={name} className="mono">
+                          {name} / {password}
+                        </div>
                       ))}
                     </div>
                   ) : null}
