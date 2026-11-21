@@ -37,6 +37,7 @@ import { authenticateRequest, requireAuth, requireRole } from './security/auth.j
 import { migrate } from './storage/migrate.js';
 import { openDatabase } from './storage/db.js';
 import { repairLegacyTestcasePaths } from './services/problems.js';
+import { getContest, isContestParticipant } from './storage/repos/contests.js';
 import {
   recordRequest,
   startEventLoopMonitor,
@@ -233,7 +234,15 @@ export async function buildApp(opts: AppOptions = {}): Promise<FastifyInstance> 
     if (authenticated.user.role === 'admin') rooms.push('admin');
     const rawContestId = (request.query as { contestId?: unknown } | undefined)?.contestId;
     const contestId = typeof rawContestId === 'string' ? Number(rawContestId) : Number.NaN;
-    if (Number.isInteger(contestId) && contestId > 0) rooms.push(`contest:${contestId}`);
+    if (Number.isInteger(contestId) && contestId > 0) {
+      const contest = getContest(db, contestId);
+      const staff = ['admin', 'setter', 'contestmanager'].includes(authenticated.user.role);
+      if (contest && !staff && !isContestParticipant(db, contestId, authenticated.user.id)) {
+        socket.close(1008, 'forbidden');
+        return;
+      }
+      if (contest) rooms.push(`contest:${contestId}`);
+    }
     hub.subscribe(socket, rooms);
 
     socket.send(JSON.stringify({ v: 1, type: 'hello', data: { userId: authenticated.user.id } }));

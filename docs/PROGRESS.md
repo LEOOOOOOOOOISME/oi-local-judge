@@ -2,6 +2,51 @@
 
 > 每轮结束时更新本文件，并先提交代码。提交说明写清“做了什么、为什么、边界”。
 
+## 2026-11-21 / Round 165（代码审计报告第一批修复）
+
+### 已修复
+
+- P0-2 编译期文件泄漏：
+  - g++ 增加 `-fno-diagnostics-show-caret` / 无色诊断
+  - 新增诊断脱敏：只保留 `文件:行:列: error/warning`，删除 include 链、源码摘录和本机路径
+  - 新增“`#include ../../../../secrets.json` 不回显内容”回归测试
+- P0-3 部分收紧：`.exe` 资产只允许 admin 上传，setter 上传返回 403。
+- P1-2 文件 IO 路径穿越：
+  - create/update 只接受 `[A-Za-z0-9._-]{1,64}` 纯文件名
+  - 判题时再次做 workdir containment，非法配置返回 SE
+- P1-4 WebSocket 比赛房间：非参赛者/非管理角色订阅 `contest:<id>` 返回 1008。
+- P1-7 Hack 目标必须 `finished` 且有 verdict；`syncOnlineOfficialScore` 忽略 `hacked_at`。
+- P1-9 部分修复：
+  - 时钟自动结束/解封时回填 OI 正式分
+  - 手工结束比赛时回填正式分
+  - 解封/结束后 legacy/team 榜不再永久套用 freeze_at
+  - 重测可把 OI 正式分降下来（按最佳 finished 在线提交重算）
+- P2-3 MLE：去掉 90% 峰值误判，改为实际触限；TLE 优先于 MLE。
+- P2-4 客观题：填空只接受一个值；空答案键/空多选不再 AC。
+- P2-5 C11：使用 gcc + `-std=c11` 编译，不再必 CE。
+- P2-8 CSS/Electron：span style 白名单；外链交给系统浏览器，禁止窗口内导航。
+- P2-10 CSV：`= + - @` 开头单元格前置单引号，防止公式注入。
+- P2-17 NaN：`OIJ_JUDGE_CONCURRENCY=abc` 回退默认值；`limit=abc` 返回 400。
+
+### 验证
+
+- 全量测试：128 文件 / 1119 用例通过。
+- `npm run build` 通过；`npm run build:native` 通过。
+- 浏览器 E2E：3 passed。
+- 新增回归：编译泄漏、路径穿越、Hack 未完成目标、WS 越权、OI 结束回填、MLE、C11、CSV、NaN、CSS。
+
+### 尚未修复（需架构改造/Windows 实测）
+
+- P0-1 默认安装仍不启用 worker 隔离（遵循既有“默认关闭”产品决策）；完整 AppContainer/网络隔离未做。
+- P0-3 剩余：checker/validator/generator/std 仍在服务账户下直接 spawn，未统一进 runner。
+- P1-1 stdout/stderr 运行期配额、磁盘水位熔断。
+- P1-3 worker 与编译缓存 ACL 冲突（需 Windows worker 实测）。
+- P1-5 contest-scoped 题目 ACL。
+- P1-6 Hack validator 强制（当前仍允许无 validator 题目 hack）。
+- P1-8 ZIP 流式/解压总量限制、10 GiB 内存缓冲。
+- P1 性能：每提交重算两次正式榜、题目列表 N+1、同步 SQLite 阻塞。
+- P2-1/2 legacy 排名语义、公开榜实名；P2-6 dependsOn；P2-7 extra_time；P2-9 注册/默认密码；P2-11~16。
+
 ## 2026-11-20 / Round 164（仓库敏感信息清理 + v1.3.0 发布）
 
 ### 扫描结果

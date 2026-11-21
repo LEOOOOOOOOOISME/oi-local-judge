@@ -113,14 +113,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
         : 'optional';
   const workerUser = env.OIJ_WORKER_USER?.trim() || workerFile.user || undefined;
   const workerPassword = env.OIJ_WORKER_PASSWORD ?? workerFile.password;
+  const concurrencyInput = Number(
+    env.OIJ_JUDGE_CONCURRENCY ?? persisted.judgeConcurrency ?? defaultConcurrency,
+  );
+  // An invalid env value must not turn into NaN: the scheduler would start no
+  // workers and the queue would silently stop.
+  const judgeConcurrency = Number.isFinite(concurrencyInput)
+    ? Math.min(8, Math.max(1, Math.trunc(concurrencyInput)))
+    : defaultConcurrency;
   return {
     host,
     port: Number(env.OIJ_PORT ?? persisted.port ?? 8787),
     dataDir,
-    judgeConcurrency: Math.max(
-      1,
-      Number(env.OIJ_JUDGE_CONCURRENCY ?? persisted.judgeConcurrency ?? defaultConcurrency),
-    ),
+    judgeConcurrency,
     gxx: env.OIJ_GXX !== undefined ? detectGxx(env) : (persisted.gxx ?? detectGxx(env)),
     runnerPath: env.OIJ_RUNNER ?? join(process.cwd(), 'native/runner/out/ojrunner.exe'),
     interactRunnerPath:

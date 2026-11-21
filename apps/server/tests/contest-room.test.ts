@@ -129,6 +129,9 @@ describe('contest websocket rooms', () => {
     const admin = createUser(db, { username: 'admin', passwordHash: 'x', role: 'admin' });
     const adminToken = signSession({ userId: admin, version: 0 }, config.sessionSecret, 3600);
     const contestId = createContest(db, { name: 'Room', problemIds: [] });
+    db.prepare(
+      "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",
+    ).run(contestId, alice.userId);
 
     const aliceSocket = await connectSocket(port, alice.token, `?contestId=${contestId}`);
     expect(subscriptions[subscriptions.length - 1]).toEqual([

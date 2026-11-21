@@ -136,6 +136,8 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
         target.contest_id !== contestId ||
         target.problem_id !== problemId ||
         target.phase !== 'contest' ||
+        target.status !== 'finished' ||
+        target.verdict === null ||
         target.hacked_at !== null
       ) {
         return reply.code(400).send({ ok: false, error: { code: 'BAD_TARGET' } });

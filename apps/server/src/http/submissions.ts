@@ -155,16 +155,35 @@ export function registerSubmissionRoutes(
       beforeId?: string;
       limit?: string;
     };
-  }>('/api/submissions', { preHandler: auth }, async (request) => {
+  }>('/api/submissions', { preHandler: auth }, async (request, reply) => {
     const canViewAll = ['admin', 'setter', 'contestmanager'].includes(request.user!.role);
     const requestedUser = request.query.userId === 'me' ? request.user!.id : Number(request.query.userId);
     const userId = Number.isInteger(requestedUser) && requestedUser > 0 ? requestedUser : request.user!.id;
+    const parseId = (value: string | undefined): number | undefined => {
+      if (value === undefined) return undefined;
+      const parsed = Number(value);
+      return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+    };
+    const limit = request.query.limit === undefined ? 20 : Number(request.query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > 100) {
+      return reply
+        .code(400)
+        .send({ ok: false, error: { code: 'BAD_LIMIT', message: 'limit must be 1..100' } });
+    }
+    for (const key of ['problemId', 'contestId', 'beforeId'] as const) {
+      if (request.query[key] !== undefined && parseId(request.query[key]) === undefined) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'BAD_QUERY', message: `${key} must be a positive integer` },
+        });
+      }
+    }
     const rows = listSubmissions(options.db, {
       userId: canViewAll ? (userId || undefined) : request.user!.id,
-      problemId: request.query.problemId ? Number(request.query.problemId) : undefined,
-      contestId: request.query.contestId ? Number(request.query.contestId) : undefined,
-      beforeId: request.query.beforeId ? Number(request.query.beforeId) : undefined,
-      limit: request.query.limit ? Number(request.query.limit) : 20,
+      problemId: parseId(request.query.problemId),
+      contestId: parseId(request.query.contestId),
+      beforeId: parseId(request.query.beforeId),
+      limit,
     });
     return { ok: true, data: rows.map((row) => getSubmissionDetail(options.db, row.id)) };
   });

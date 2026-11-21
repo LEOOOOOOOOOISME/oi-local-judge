@@ -34,3 +34,19 @@ export function freezeOfficialAfterHack(
 export function isOfficialFrozen(contest: { official_frozen_until: number | null }, now = Date.now()): boolean {
   return contest.official_frozen_until !== null && contest.official_frozen_until > now;
 }
+
+/**
+ * Freeze cutoff for legacy/team boards. `freeze_at` is a historical timestamp,
+ * so it must stop applying once the contest is unfrozen or ended; simply
+ * checking `freeze_at !== null` would hide every post-freeze submission
+ * forever.
+ */
+export function effectiveFreezeAt(
+  contest: { freeze_at: number | null; unfreeze_at: number | null; status: string },
+  now = Date.now(),
+): number | null {
+  if (contest.freeze_at === null) return null;
+  if (contest.status === 'ended') return null;
+  if (contest.unfreeze_at !== null && now >= contest.unfreeze_at) return null;
+  return contest.freeze_at;
+}

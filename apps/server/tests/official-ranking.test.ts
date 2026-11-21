@@ -156,6 +156,14 @@ describe('official ranking service', () => {
     );
     syncOnlineOfficialScore(db, lower);
     expect(getOfficialScore(db, contestId, u1, problemId)?.score).toBe(60);
+
+    // Rejudging the selected AC submission down must lower the official cell;
+    // otherwise a corrected verdict is ignored forever.
+    db.prepare("UPDATE submissions SET status='finished', verdict='WA', score=40 WHERE id=?").run(
+      first,
+    );
+    syncOnlineOfficialScore(db, first);
+    expect(getOfficialScore(db, contestId, u1, problemId)?.score).toBe(40);
   });
 
   it('computes ACM ordering and archived status', async () => {

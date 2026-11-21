@@ -59,6 +59,26 @@ const SANITIZE_OPTIONS: sanitizeHtml.IOptions = {
   },
   allowedSchemes: ['http', 'https', 'mailto'],
   allowProtocolRelative: false,
+  // KaTeX uses a small set of presentational span styles. Everything else
+  // (position:fixed, inset, background:url(...), z-index, ...) is removed so a
+  // discussion post cannot cover or restyle the whole page.
+  allowedStyles: {
+    span: {
+      'vertical-align': [
+        /^(?:baseline|middle|sub|super|top|bottom|-?\d+(?:\.\d+)?(?:em|ex|px|pt|%)?)$/,
+      ],
+      'margin-right': [/^-?\d+(?:\.\d+)?(?:em|ex|px|pt|%)?$/],
+      'margin-left': [/^-?\d+(?:\.\d+)?(?:em|ex|px|pt|%)?$/],
+      'margin-top': [/^-?\d+(?:\.\d+)?(?:em|ex|px|pt|%)?$/],
+      'margin-bottom': [/^-?\d+(?:\.\d+)?(?:em|ex|px|pt|%)?$/],
+      height: [/^\d+(?:\.\d+)?(?:em|ex|px|pt|%)?$/],
+      top: [/^-?\d+(?:\.\d+)?(?:em|ex|px|pt|%)?$/],
+      position: [/^relative$/],
+      'font-size': [/^\d+(?:\.\d+)?(?:em|ex|px|pt|%)?$/],
+      color: [/^#[0-9a-f]{3,8}$/i, /^rgba?\([\d\s.,%]+\)$/i],
+      'border-bottom': [/^1px solid (?:currentColor|#[0-9a-f]{3,8})$/i],
+    },
+  },
   transformTags: {
     a: sanitizeHtml.simpleTransform('a', { rel: 'noopener noreferrer' }, true),
   },

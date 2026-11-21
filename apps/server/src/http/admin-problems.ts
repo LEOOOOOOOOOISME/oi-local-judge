@@ -8,6 +8,7 @@ import type { Config } from '../config.js';
 import { ensureChecker } from '../judge/checker-cache.js';
 import { ensureCompiledProgram } from '../judge/compile-cache.js';
 import { judgeTestcase } from '../judge/pipeline.js';
+import { isSafeIoFileName } from '../judge/io-file.js';
 import { runValidator } from '../judge/validator.js';
 import { requireRole } from '../security/auth.js';
 import {
@@ -528,6 +529,20 @@ export function registerAdminProblemRoutes(
         error: { code: 'BAD_REQUEST', message: 'title, timeMs and memoryMb are required' },
       });
     }
+    const inputFile = body.inputFile ?? null;
+    const outputFile = body.outputFile ?? null;
+    if (
+      (inputFile !== null && !isSafeIoFileName(inputFile)) ||
+      (outputFile !== null && !isSafeIoFileName(outputFile))
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: {
+          code: 'INVALID_IO_FILE',
+          message: 'inputFile/outputFile must be plain file names without path separators',
+        },
+      });
+    }
     // Admin-created problems belong to their creator by default; only explicit
     // imports/seeds are system-owned. The UI may send an explicit user/team owner.
     const ownerType = body.ownerType ?? 'user';
@@ -542,8 +557,8 @@ export function registerAdminProblemRoutes(
         timeMs: Number(body.timeMs),
         memoryMb: Number(body.memoryMb),
         ioMode: body.ioMode === 'file' ? 'file' : 'stdio',
-        inputFile: body.inputFile ?? null,
-        outputFile: body.outputFile ?? null,
+        inputFile,
+        outputFile,
         statementHtml: body.statement ?? '',
         objective: body.objective,
         ownerType,
@@ -723,6 +738,22 @@ export function registerAdminProblemRoutes(
       return reply.code(404).send({ ok: false, error: { code: 'NOT_FOUND' } });
     }
     const body = request.body ?? {};
+    if (
+      (body.inputFile !== undefined &&
+        body.inputFile !== null &&
+        !isSafeIoFileName(body.inputFile)) ||
+      (body.outputFile !== undefined &&
+        body.outputFile !== null &&
+        !isSafeIoFileName(body.outputFile))
+    ) {
+      return reply.code(400).send({
+        ok: false,
+        error: {
+          code: 'INVALID_IO_FILE',
+          message: 'inputFile/outputFile must be plain file names without path separators',
+        },
+      });
+    }
     try {
       const updated = updateProblemWithOwner(options.db, problemId, {
         title: typeof body.title === 'string' ? body.title : undefined,
@@ -815,6 +846,15 @@ export function registerAdminProblemRoutes(
         return reply.code(400).send({
           ok: false,
           error: { code: 'BAD_FILE', message: `unsupported file name: ${name}` },
+        });
+      }
+      // An uploaded .exe checker/validator runs with the service account. Keep
+      // that capability admin-only; setters must upload source that the server
+      // compiles itself.
+      if (extension === '.exe' && request.user!.role !== 'admin') {
+        return reply.code(403).send({
+          ok: false,
+          error: { code: 'EXE_ADMIN_ONLY', message: '.exe assets require the admin role' },
         });
       }
       const body = request.body;

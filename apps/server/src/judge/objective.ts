@@ -44,11 +44,13 @@ function gradeQuestion(
     return { verdict: 'WA', score: 0, message: '未作答' };
   }
   if (question.kind === 'fill') {
-    const expected = answers.map((answer) => normalizeText(answer, question));
+    const expected = new Set(answers.map((answer) => normalizeText(answer, question)));
     const actual = (Array.isArray(value) ? value : [value]).map((answer) =>
       normalizeText(String(answer), question),
     );
-    const ok = actual.length > 0 && actual.every((answer) => expected.includes(answer));
+    // A fill question has exactly one blank. Accepting an array let a student
+    // submit every configured alternative at once and get AC.
+    const ok = actual.length === 1 && expected.has(actual[0]);
     return ok
       ? { verdict: 'AC', score: question.points, message: '' }
       : { verdict: 'WA', score: 0, message: '答案不正确' };
@@ -58,6 +60,13 @@ function gradeQuestion(
   if (question.kind === 'multiple') {
     const correct = new Set(answers);
     const chosen = new Set(selected);
+    // An empty answer key is a broken configuration, not a correct answer.
+    if (correct.size === 0) {
+      return { verdict: 'WA', score: 0, message: '题目未配置正确答案' };
+    }
+    if (chosen.size === 0) {
+      return { verdict: 'WA', score: 0, message: '未作答' };
+    }
     let correctChosen = 0;
     let wrongChosen = false;
     for (const key of chosen) {

@@ -7,6 +7,7 @@ import { signSession } from '../src/security/session.js';
 import { openDatabase } from '../src/storage/db.js';
 import { migrate } from '../src/storage/migrate.js';
 import { createUser } from '../src/storage/repos/users.js';
+import { createContest } from '../src/storage/repos/contests.js';
 
 const cleanups: Array<() => Promise<void> | void> = [];
 
@@ -37,6 +38,19 @@ describe('server', () => {
     });
   });
 
+  it('rejects non-numeric submission list limits instead of hitting SQLite', async () => {
+    const { app, db, config } = await setup();
+    const userId = createUser(db, { username: 'limit-user', passwordHash: 'x' });
+    const cookie = `oij.sid=${signSession({ userId, version: 0 }, config.sessionSecret, 3600)}`;
+    const res = await app.inject({
+      method: 'GET',
+      url: '/api/submissions?limit=abc',
+      headers: { cookie },
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json()).toMatchObject({ ok: false, error: { code: 'BAD_LIMIT' } });
+  });
+
   it('serves the desktop shell', async () => {
     const { app } = await setup();
     const res = await app.inject({ method: 'GET', url: '/' });
@@ -51,6 +65,31 @@ describe('server', () => {
     const address = app.server.address();
     if (!address || typeof address === 'string') throw new Error('no port');
     const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws`);
+    const code = await new Promise<number>((resolve, reject) => {
+      ws.on('close', (c) => resolve(c));
+      ws.on('error', reject);
+      setTimeout(() => reject(new Error('timeout')), 3000);
+    });
+    expect(code).toBe(1008);
+  });
+
+  it('rejects a websocket subscription to a contest the user cannot see', async () => {
+    const { app, db, config } = await setup();
+    const userId = createUser(db, { username: 'outsider', passwordHash: hashPassword('secret') });
+    const contestId = createContest(db, {
+      name: 'Private Contest',
+      mode: 'oi',
+      problemIds: [],
+      startAt: Date.now() - 1000,
+      endAt: Date.now() + 60_000,
+    });
+    const token = signSession({ userId, version: 0 }, config.sessionSecret, 3600);
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const address = app.server.address();
+    if (!address || typeof address === 'string') throw new Error('no port');
+    const ws = new WebSocket(`ws://127.0.0.1:${address.port}/ws?contestId=${contestId}`, {
+      headers: { Cookie: `oij.sid=${token}` },
+    });
     const code = await new Promise<number>((resolve, reject) => {
       ws.on('close', (c) => resolve(c));
       ws.on('error', reject);

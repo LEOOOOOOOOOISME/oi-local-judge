@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { listContests, setContestStatus } from '../storage/repos/contests.js';
+import { seedOfficialScoresFromSubmissions } from '../storage/repos/official-scores.js';
 import { invalidateOfficialRanking } from './official-ranking.js';
 
 export interface ContestClockTransition {
@@ -39,6 +40,12 @@ export function tickContests(db: DatabaseSync, now = Date.now()): ContestClockTr
 
     if (to !== from) {
       setContestStatus(db, contest.id, to);
+      // Automatic end/unfreeze must publish the post-freeze submissions the
+      // same way the manual routes do. Team boards also stop applying freeze_at
+      // once the status leaves 'frozen'.
+      if (contest.mode === 'oi' && (to === 'ended' || (from === 'frozen' && to === 'running'))) {
+        seedOfficialScoresFromSubmissions(db, contest.id);
+      }
       invalidateOfficialRanking(db, contest.id);
       transitions.push({ contestId: contest.id, from, to, at: now });
     }

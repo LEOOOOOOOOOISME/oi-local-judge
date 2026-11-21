@@ -42,6 +42,7 @@ import {
 import { parseOutputAnswers, writeAnswerFiles } from './output-only.js';
 import { runInteractive } from './interactive.js';
 import { syncOnlineOfficialScore } from './official-score.js';
+import { resolveWorkdirFile } from './io-file.js';
 import {
   diffOfficialRanking,
   getOfficialRanking,
@@ -364,9 +365,21 @@ export async function judgeTestcase(args: {
   let stdinFile = inputPath;
   let contestantOutput = stdoutFile;
   if (problem.io_mode === 'file' && problem.input_file && problem.output_file) {
-    stdinFile = join(workdir, problem.input_file);
+    const safeStdin = resolveWorkdirFile(workdir, problem.input_file);
+    const safeOutput = resolveWorkdirFile(workdir, problem.output_file);
+    if (!safeStdin || !safeOutput) {
+      return {
+        testcaseId: testcase.id,
+        timeMs: 0,
+        memoryKb: 0,
+        score: 0,
+        verdict: 'SE',
+        message: 'invalid file IO name in problem configuration',
+      };
+    }
+    stdinFile = safeStdin;
     copyFileSync(inputPath, stdinFile);
-    contestantOutput = join(workdir, problem.output_file);
+    contestantOutput = safeOutput;
   }
 
   const run = await runSandboxed({
@@ -393,17 +406,8 @@ export async function judgeTestcase(args: {
     score: 0,
   };
 
-  if (run.oom) {
-    return {
-      ...base,
-      verdict: 'MLE',
-      message: clipMessage(
-        `memory limit exceeded (peak ${run.peakMemKb} KB, limit ${problem.memory_mb} MB)`,
-      ),
-    };
-  }
-  // TLE if the wall-clock watchdog fired, the CPU-quota kill surfaced as
-  // STATUS_QUOTA_EXCEEDED, or the measured CPU time already exceeded the limit.
+  // TLE is decided before MLE: a timed-out run may also have touched most of
+  // its memory budget, but the time limit is the primary failure.
   if (
     run.timedOut ||
     run.exitCode === STATUS_QUOTA_EXCEEDED ||
@@ -414,6 +418,15 @@ export async function judgeTestcase(args: {
       verdict: 'TLE',
       message: clipMessage(
         `time limit exceeded (cpu ${run.cpuMs} ms, wall ${run.wallMs} ms, limit ${timeLimitMs} ms)`,
+      ),
+    };
+  }
+  if (run.oom) {
+    return {
+      ...base,
+      verdict: 'MLE',
+      message: clipMessage(
+        `memory limit exceeded (peak ${run.peakMemKb} KB, limit ${problem.memory_mb} MB)`,
       ),
     };
   }

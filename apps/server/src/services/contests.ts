@@ -14,6 +14,7 @@ import { listContestSubmissions } from '../storage/repos/submissions.js';
 import { seedOfficialScoresFromSubmissions } from '../storage/repos/official-scores.js';
 import { getUserById } from '../storage/repos/users.js';
 import { getOfficialRanking, invalidateOfficialRanking } from './official-ranking.js';
+import { effectiveFreezeAt } from './official-freeze.js';
 
 export interface ContestRankingRow extends RankingRow {
   username: string;
@@ -112,7 +113,7 @@ export function getContestRanking(
     problemIds,
     userIds,
     submissions,
-    freezeAt: contest.freeze_at,
+    freezeAt: effectiveFreezeAt(contest),
   }) as unknown as ContestRankingRow[];
 
   for (const row of rows) {
@@ -154,6 +155,12 @@ export function unfreezeContest(db: DatabaseSync, contestId: number): void {
 
 export function endContest(db: DatabaseSync, contestId: number): void {
   setContestStatus(db, contestId, 'ended');
+  // Ending a contest must publish every submission, including those made after
+  // the freeze snapshot. Otherwise an OI board can stay stuck at freeze time.
+  const contest = getContest(db, contestId);
+  if (contest?.mode === 'oi') {
+    seedOfficialScoresFromSubmissions(db, contestId);
+  }
   invalidateOfficialRanking(db, contestId);
 }
 

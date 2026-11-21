@@ -15,6 +15,7 @@ const db = openDatabase(join(root, 'test.db'));
 const config = { ...loadConfig({ ...process.env, OIJ_DATA_DIR: root }), dataDir: root };
 let app: Awaited<ReturnType<typeof buildApp>>;
 let adminCookie = '';
+let setterCookie = '';
 let contestantCookie = '';
 
 beforeAll(async () => {
@@ -30,7 +31,13 @@ beforeAll(async () => {
     passwordHash: hashPassword('alice123'),
     role: 'contestant',
   });
+  const setterId = createUser(db, {
+    username: 'setter',
+    passwordHash: hashPassword('setter123'),
+    role: 'setter',
+  });
   adminCookie = `oij.sid=${signSession({ userId: adminId, version: 0 }, config.sessionSecret, 3600)}`;
+  setterCookie = `oij.sid=${signSession({ userId: setterId, version: 0 }, config.sessionSecret, 3600)}`;
   contestantCookie = `oij.sid=${signSession(
     { userId: contestantId, version: 0 },
     config.sessionSecret,
@@ -229,6 +236,75 @@ describe('admin problem assets and data', () => {
     expect(body.data.results.map((row) => row.verdict)).toEqual(['AC', 'AC']);
     expect(body.data.score).toBe(200);
   }, 30_000);
+
+  it('rejects path traversal in file IO names', async () => {
+    const badCreate = await app.inject({
+      method: 'POST',
+      url: '/api/admin/problems',
+      headers: { cookie: adminCookie },
+      payload: {
+        title: 'Path Traversal',
+        timeMs: 1000,
+        memoryMb: 64,
+        ioMode: 'file',
+        inputFile: '../../secrets.json',
+        outputFile: 'out.txt',
+      },
+    });
+    expect(badCreate.statusCode).toBe(400);
+    expect(badCreate.body).toContain('INVALID_IO_FILE');
+
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/admin/problems',
+      headers: { cookie: adminCookie },
+      payload: {
+        title: 'Safe File IO',
+        timeMs: 1000,
+        memoryMb: 64,
+        ioMode: 'file',
+        inputFile: 'input.txt',
+        outputFile: 'output.txt',
+      },
+    });
+    expect(created.statusCode).toBe(201);
+    const problemId = (created.json() as { data: { id: number } }).data.id;
+
+    const badUpdate = await app.inject({
+      method: 'PUT',
+      url: `/api/admin/problems/${problemId}`,
+      headers: { cookie: adminCookie },
+      payload: { outputFile: '..\\..\\db\\oijudge.db' },
+    });
+    expect(badUpdate.statusCode).toBe(400);
+    expect(badUpdate.body).toContain('INVALID_IO_FILE');
+  });
+
+  it('allows only admins to upload executable assets', async () => {
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/admin/problems',
+      headers: { cookie: adminCookie },
+      payload: { title: 'EXE Asset', timeMs: 1000, memoryMb: 64 },
+    });
+    const problemId = (created.json() as { data: { id: number } }).data.id;
+    const asSetter = await app.inject({
+      method: 'POST',
+      url: `/api/admin/problems/${problemId}/assets/checker?name=checker.exe`,
+      headers: { cookie: setterCookie, 'content-type': 'application/octet-stream' },
+      payload: Buffer.from('MZ'),
+    });
+    expect(asSetter.statusCode).toBe(403);
+    expect(asSetter.body).toContain('EXE_ADMIN_ONLY');
+
+    const asAdmin = await app.inject({
+      method: 'POST',
+      url: `/api/admin/problems/${problemId}/assets/checker?name=checker.exe`,
+      headers: { cookie: adminCookie, 'content-type': 'application/octet-stream' },
+      payload: Buffer.from('MZ'),
+    });
+    expect(asAdmin.statusCode).toBe(201);
+  });
 
   it('forbids contestants from the admin API', async () => {
     const res = await app.inject({

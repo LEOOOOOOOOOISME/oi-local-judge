@@ -199,10 +199,7 @@ export async function buildContestReport(
   };
 }
 
-function csvCell(value: unknown): string {
-  const text = value === null || value === undefined ? '' : String(value);
-  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
+import { csvCell } from './csv.js';
 
 function csvLine(cells: unknown[]): string {
   return cells.map(csvCell).join(',');

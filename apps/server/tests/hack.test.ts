@@ -210,6 +210,31 @@ describe('contest hack', () => {
     expect(getOfficialScore(db, contestId, targetId, problemId)?.score).toBe(100);
   }, 30_000);
 
+  it('rejects a target that has not finished judging', async () => {
+    const locked = await app.inject({
+      method: 'POST',
+      url: `/api/contests/${contestId}/problems/${problemId}/lock`,
+      headers: { cookie: hackerCookie },
+    });
+    expect(locked.statusCode, locked.body).toBe(200);
+    const queued = createSubmission(db, {
+      contestId,
+      problemId,
+      userId: targetId,
+      language: 'cpp17',
+      sourcePath: 'subs/target.cpp',
+      sourceHash: 'queued-target',
+    });
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/contests/${contestId}/problems/${problemId}/hacks`,
+      headers: { cookie: hackerCookie },
+      payload: { targetSubmissionId: queued, input: '1 1\n' },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toContain('BAD_TARGET');
+  });
+
   it('attributes a hack to the registered team its hacker represents', async () => {
     const teamId = insertTeam(db, { name: 'Hackers', ownerId: hackerId, createdAt: 1 });
     insertTeamMember(db, { teamId, userId: hackerId, role: 'captain', joinedAt: 1 });

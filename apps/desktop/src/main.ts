@@ -5,6 +5,7 @@ import {
   dialog,
   Menu,
   nativeImage,
+  shell,
   Tray,
   utilityProcess,
 } from 'electron';
@@ -450,6 +451,16 @@ async function createWindow(port: number): Promise<BrowserWindow> {
   });
   created.on('closed', () => {
     if (win === created) win = null;
+  });
+  const appOrigin = `http://127.0.0.1:${port}`;
+  created.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+  created.webContents.on('will-navigate', (event, url) => {
+    if (url.startsWith(`${appOrigin}/`) || url === appOrigin) return;
+    event.preventDefault();
+    if (/^https?:\/\//i.test(url)) void shell.openExternal(url);
   });
   await created.loadURL(`http://127.0.0.1:${port}/`);
   return created;

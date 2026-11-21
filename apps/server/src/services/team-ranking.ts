@@ -10,6 +10,7 @@ import { listHacks } from '../storage/repos/hacks.js';
 import { getProblem } from '../storage/repos/problems.js';
 import { listContestSubmissions } from '../storage/repos/submissions.js';
 import { parseRankingConfig } from './official-ranking.js';
+import { effectiveFreezeAt } from './official-freeze.js';
 
 export interface TeamRankingProblem {
   id: number;
@@ -126,7 +127,7 @@ export function getTeamRanking(
   const preset: RankingPreset = parsed.pluginName
     ? presetForMode(contest.mode)
     : parsed.config.preset;
-  const freezeAt = contest.freeze_at ?? null;
+  const freezeAt = effectiveFreezeAt(contest);
   const config: RankingConfig = {
     ...parsed.config,
     preset,

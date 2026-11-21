@@ -791,7 +791,9 @@ int run(const Options& opt, Result* out) {
   // The memory limit makes allocations fail instead of killing the process. A
   // program can therefore hang (or die slowly) inside its allocation-failure /
   // terminate path even though the limit clearly capped it; classify by peak.
-  if (out->peakMemKb * 1024LL >= limitBytes * 9LL / 10LL) {
+  // Only an actual at-limit peak counts: the old 90% threshold misclassified
+  // legitimate programs that merely used most of their budget.
+  if (out->peakMemKb * 1024LL >= limitBytes) {
     out->oom = true;
   }
   if (!out->timedOut &&

@@ -6,6 +6,7 @@ import {
   getBatchJob,
   type BatchJobRow,
 } from '../storage/repos/batches.js';
+import { csvCell } from './csv.js';
 
 /**
  * Batch result export.
@@ -458,11 +459,6 @@ export function buildBatchExportSummary(
 // ---------------------------------------------------------------------------
 // CSV
 // ---------------------------------------------------------------------------
-
-export function csvCell(value: unknown): string {
-  const text = value === null || value === undefined ? '' : String(value);
-  return /[",\r\n]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
 
 export function csvLine(cells: readonly unknown[]): string {
   return `${cells.map(csvCell).join(',')}\r\n`;

@@ -83,6 +83,45 @@ describe('objective grading', () => {
     expect(graded.results[2].verdict).toBe('WA');
   });
 
+  it('does not accept multiple fill alternatives or an empty multiple key', () => {
+    const graded = gradeObjective(
+      {
+        questions: [
+          {
+            id: 1,
+            kind: 'fill',
+            stem: '颜色',
+            answers: ['color', 'colour'],
+            points: 10,
+          },
+          {
+            id: 2,
+            kind: 'multiple',
+            stem: '空答案键',
+            options: [{ key: 'A', text: 'A' }],
+            answers: [],
+            points: 10,
+          },
+          {
+            id: 3,
+            kind: 'multiple',
+            stem: '未选择',
+            options: [{ key: 'A', text: 'A' }],
+            answers: ['A'],
+            points: 10,
+          },
+        ],
+      },
+      [
+        { questionId: 1, value: ['color', 'colour'] },
+        { questionId: 2, value: [] },
+        { questionId: 3, value: [] },
+      ],
+    );
+    expect(graded.results.map((row) => row.verdict)).toEqual(['WA', 'WA', 'WA']);
+    expect(graded.score).toBe(0);
+  });
+
   it('judges an objective submission end-to-end and hides answers publicly', async () => {
     const problemId = createProblem(db, {
       title: 'Objective',

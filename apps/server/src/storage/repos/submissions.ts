@@ -241,7 +241,10 @@ export function listSubmissions(db: DatabaseSync, filter: ListSubmissionsFilter)
     params.push(filter.beforeId);
   }
   const where = clauses.length ? `WHERE ${clauses.join(' AND ')}` : '';
-  const limit = Math.min(Math.max(filter.limit ?? 20, 1), 100);
+  const requestedLimit = filter.limit ?? 20;
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.min(Math.max(Math.trunc(requestedLimit), 1), 100)
+    : 20;
   return db
     .prepare(`SELECT * FROM submissions ${where} ORDER BY id DESC LIMIT ?`)
     .all(...params, limit) as unknown as SubmissionRow[];

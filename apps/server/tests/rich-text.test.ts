@@ -29,6 +29,16 @@ describe('rich text renderer', () => {
     expect(html).toContain('rel="noopener noreferrer"');
   });
 
+  it('strips dangerous inline CSS but keeps KaTeX layout styles', () => {
+    const html = renderRichText(
+      '<span style="position:fixed;inset:0;background:url(https://evil.test/x);z-index:999;vertical-align:middle">x</span>',
+    );
+    expect(html).not.toMatch(/position\s*:\s*fixed/i);
+    expect(html).not.toMatch(/background/i);
+    expect(html).not.toMatch(/z-index/i);
+    expect(html).toContain('vertical-align:middle');
+  });
+
   it('treats legacy rendered HTML as HTML and plain source as markdown', () => {
     expect(renderStatementHtml('<p>legacy <b>html</b></p><script>x</script>')).toBe(
       '<p>legacy <b>html</b></p>',
