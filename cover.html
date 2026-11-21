@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>OiJudge 机房生产力封面</title>
+<style>
+  :root{
+    --ink:#08111e;
+    --ink2:#0d1a2b;
+    --white:#f7f9fb;
+    --muted:#a4b6cc;
+    --orange:#ff6b35;
+    --orange2:#ffab7e;
+    --teal:#38d6c2;
+    --line:rgba(255,255,255,.14);
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{width:1920px;height:1080px;overflow:hidden;background:var(--ink)}
+  body{font-family:"Microsoft YaHei","PingFang SC","Noto Sans SC",system-ui,sans-serif;color:var(--white)}
+  #cover{
+    position:relative;width:1920px;height:1080px;overflow:hidden;
+    background:
+      radial-gradient(1150px 700px at 18% 8%,rgba(77,141,255,.20),transparent 62%),
+      radial-gradient(1050px 720px at 94% 18%,rgba(255,107,53,.18),transparent 66%),
+      linear-gradient(135deg,#08111e 0%,#0b1727 56%,#07101b 100%);
+  }
+  #cover::before{
+    content:"";position:absolute;inset:0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);
+    background-size:64px 64px;
+    mask-image:linear-gradient(to bottom,black 4%,transparent 92%);
+  }
+  #cover::after{
+    content:"";position:absolute;inset:0;pointer-events:none;
+    background:radial-gradient(ellipse at center,transparent 48%,rgba(0,0,0,.48) 100%);
+  }
+  .grid{position:absolute;inset:0;padding:58px 78px}
+  header{display:flex;justify-content:space-between;align-items:center;position:relative;z-index:20}
+  .brand{display:flex;align-items:center;gap:13px;font-size:25px;font-weight:900;letter-spacing:-.03em}
+  .mark{
+    width:42px;height:42px;border-radius:12px;
+    background:linear-gradient(135deg,var(--orange),#ffc19f);
+    display:grid;place-items:center;color:#0a1422;font-size:21px;font-weight:950;
+    box-shadow:0 14px 35px rgba(255,107,53,.3);
+  }
+  .header-right{display:flex;align-items:center;gap:14px;font-size:13px;font-weight:800;letter-spacing:.14em;color:#8fa5bd}
+  .header-right b{color:#d8e5f3;font-weight:900}
+  .header-right .dot{width:7px;height:7px;border-radius:50%;background:var(--teal);box-shadow:0 0 14px rgba(56,214,194,.8)}
+
+  .left{position:absolute;left:88px;top:220px;width:850px;z-index:10}
+  .eyebrow{display:flex;align-items:center;gap:13px;font-size:17px;font-weight:900;letter-spacing:.14em;color:#c8d8e9}
+  .eyebrow::before{content:"";width:38px;height:4px;border-radius:4px;background:var(--orange)}
+  h1{margin:24px 0 24px;font-size:116px;line-height:1.02;letter-spacing:-.065em;font-weight:950}
+  h1 .accent{display:inline-block;color:var(--orange2);position:relative}
+  h1 .accent::after{content:"";position:absolute;left:0;right:0;bottom:5px;height:10px;background:rgba(255,107,53,.24);border-radius:4px;z-index:-1}
+  .sub{font-size:29px;line-height:1.6;color:#c2d3e6;font-weight:800;letter-spacing:.01em}
+  .sub b{color:#fff}
+  .chips{display:flex;flex-wrap:wrap;gap:10px;margin-top:30px}
+  .chip{display:flex;align-items:center;gap:8px;padding:10px 14px;border-radius:9px;background:rgba(255,255,255,.07);border:1px solid rgba(255,255,255,.16);font-size:15px;font-weight:800;color:#dbe8f5}
+  .chip.hot{background:rgba(255,107,53,.18);border-color:rgba(255,107,53,.42);color:#ffd1bc}
+  .chip i{width:7px;height:7px;border-radius:50%;background:var(--teal);font-style:normal}
+  .chip.hot i{background:var(--orange)}
+  .numbers{display:flex;gap:46px;margin-top:42px;padding-top:24px;border-top:1px solid var(--line);width:660px}
+  .number strong{display:block;font-size:48px;line-height:1;letter-spacing:-.04em;font-weight:950}
+  .number span{display:block;margin-top:8px;font-size:13px;letter-spacing:.1em;color:#8fa5bc;font-weight:800}
+
+  .visual{position:absolute;inset:0;z-index:5}
+  .card{position:absolute;background:#0e1a2a;border:1px solid rgba(255,255,255,.2);border-radius:12px;overflow:hidden;box-shadow:0 36px 90px rgba(0,0,0,.5)}
+  .card .bar{height:26px;display:flex;align-items:center;gap:5px;padding:0 9px;background:#142135;border-bottom:1px solid rgba(255,255,255,.08)}
+  .card .bar i{width:6px;height:6px;border-radius:50%;background:#b8c7d9}
+  .card .bar span{margin-left:7px;font-size:9px;color:#9fb3ca;letter-spacing:.08em;font-weight:700}
+  .card img{display:block;width:100%;height:auto}
+  .c-authoring{width:540px;right:440px;top:86px;transform:rotate(4.5deg);opacity:.86;z-index:1}
+  .c-ranking{width:500px;right:560px;top:430px;transform:rotate(-5.5deg);z-index:2}
+  .c-stats{width:760px;right:66px;top:235px;transform:rotate(-2.2deg);z-index:4;border-color:rgba(255,107,53,.45);box-shadow:0 42px 100px rgba(0,0,0,.55),0 0 0 1px rgba(255,107,53,.18)}
+  .card-label{position:absolute;z-index:7;padding:9px 13px;border-radius:8px;background:rgba(8,15,26,.9);border:1px solid rgba(255,255,255,.18);font-size:14px;font-weight:900;color:#fff}
+  .card-label b{color:var(--orange2)}
+  .l-stats{right:92px;top:204px;transform:rotate(-2deg)}
+  .l-authoring{right:470px;top:54px;transform:rotate(3deg)}
+  .l-ranking{right:600px;top:392px;transform:rotate(-4deg)}
+  .sticker{
+    position:absolute;right:100px;top:770px;z-index:8;
+    padding:16px 20px;border-radius:10px;background:var(--orange);color:#0a1422;
+    font-size:20px;font-weight:950;transform:rotate(-2deg);
+    box-shadow:0 20px 50px rgba(255,107,53,.3);
+  }
+  .sticker small{display:block;font-size:12px;font-weight:800;letter-spacing:.06em;margin-top:3px;color:rgba(10,20,34,.68)}
+
+  .watermark{
+    position:absolute;right:55px;bottom:-100px;z-index:1;
+    font-size:540px;line-height:1;font-weight:950;letter-spacing:-.1em;
+    color:rgba(255,255,255,.035);user-select:none;
+  }
+  footer{position:absolute;left:88px;right:88px;bottom:58px;z-index:15;display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,.12);padding-top:18px}
+  footer .leftmark{font-size:13px;letter-spacing:.16em;color:#8097af;font-weight:800}
+  footer .rightmark{font-size:14px;color:#b3c5d9;font-weight:800}
+  footer .rightmark b{color:var(--orange2);font-weight:900}
+  .corner{position:absolute;width:54px;height:54px;border-color:rgba(255,255,255,.16);z-index:2}
+  .corner.tl{left:32px;top:32px;border-left:1px solid;border-top:1px solid}
+  .corner.br{right:32px;bottom:32px;border-right:1px solid;border-bottom:1px solid}
+</style>
+</head>
+<body>
+<div id="cover">
+  <div class="corner tl"></div>
+  <div class="corner br"></div>
+  <div class="grid">
+    <header>
+      <div class="brand"><span class="mark">O</span>OiJudge</div>
+      <div class="header-right"><span class="dot"></span><span>OI · 机房生产力工具</span><b>v1.2.0</b></div>
+    </header>
+
+    <div class="left">
+      <div class="eyebrow">OI 教学 · 比赛 · 作业 · 统计</div>
+      <h1>一台电脑，<br><span class="accent">接管整间机房</span></h1>
+      <div class="sub">出题 <b>·</b> 评测 <b>·</b> 比赛 <b>·</b> 收作业 <b>·</b> 讲评</div>
+      <div class="chips">
+        <div class="chip"><i></i>学生端 0 安装</div>
+        <div class="chip"><i></i>1 台教师电脑</div>
+        <div class="chip hot"><i></i>数据留在本机</div>
+      </div>
+      <div class="numbers">
+        <div class="number"><strong>0</strong><span>学生机安装</span></div>
+        <div class="number"><strong>1</strong><span>台教师电脑</span></div>
+        <div class="number"><strong>5</strong><span>个教学环节</span></div>
+      </div>
+    </div>
+
+    <div class="visual">
+      <div class="card c-authoring"><div class="bar"><i></i><i></i><i></i><span>老师 · 出题</span></div><img src="docs/assets/screenshots/authoring.png" alt="老师出题界面"></div>
+      <div class="card c-ranking"><div class="bar"><i></i><i></i><i></i><span>比赛 · 正式榜单</span></div><img src="docs/assets/screenshots/ranking.png" alt="正式榜单"></div>
+      <div class="card c-stats"><div class="bar"><i></i><i></i><i></i><span>比赛 · 统计</span></div><img src="docs/assets/screenshots/statistics.png" alt="比赛统计"></div>
+      <div class="card-label l-authoring">出题</div>
+      <div class="card-label l-ranking">正式榜</div>
+      <div class="card-label l-stats"><b>统计</b> · 讲评直接投</div>
+      <div class="sticker">真实界面，直接投屏。<small>不是概念图</small></div>
+    </div>
+
+    <div class="watermark">OI</div>
+
+    <footer>
+      <div class="leftmark">OiJudge · WINDOWS 10 / 11 · 本地数据</div>
+      <div class="rightmark">出题 / 评测 / 比赛 / 作业 / 讲评 <b>一套完成</b></div>
+    </footer>
+  </div>
+</div>
+</body>
+</html>

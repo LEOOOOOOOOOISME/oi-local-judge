@@ -4,7 +4,7 @@
 
 > 网页版：[打开 `showcase.html`](showcase.html)（更适合投屏或直接发给同事）
 
-![OiJudge 机房落地页封面](docs/assets/showcase-cover.png)
+![OiJudge 机房生产力封面](docs/assets/oi-judge-cover.png)
 
 平时说到 OJ，想到的往往是：
 
