@@ -1,5 +1,6 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
+import { generateInitialPassword } from '../services/bootstrap.js';
 import { hashPassword } from '../security/password.js';
 import { createUser, getUserById, getUserByUsername, listUsers, setUserPasswordHash, updateUserProfile } from '../storage/repos/users.js';
 
@@ -74,8 +75,14 @@ export function registerAdminUserRoutes(
     if (!text || typeof text !== 'string') {
       return reply.code(400).send({ ok: false, error: { code: 'EMPTY_CSV' } });
     }
-    const defaultPassword = request.body?.defaultPassword ?? '123456';
+    const defaultPassword = request.body?.defaultPassword;
+    if (defaultPassword !== undefined && defaultPassword.length < 4) {
+      return reply
+        .code(400)
+        .send({ ok: false, error: { code: 'BAD_PASSWORD', message: 'defaultPassword is too short' } });
+    }
     const created: string[] = [];
+    const initialPasswords: Record<string, string> = {};
     const skipped: string[] = [];
     const errors: Array<{ line: number; message: string }> = [];
     const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/).filter((line) => line.trim() !== '');
@@ -83,7 +90,9 @@ export function registerAdminUserRoutes(
       if (index === 0 && /username|用户名/i.test(line)) return;
       const parts = line.split(',').map((part) => part.trim());
       const username = parts[0];
-      const password = parts[1] || defaultPassword;
+      const explicitPassword = parts[1] || defaultPassword;
+      const generated = explicitPassword === undefined;
+      const password = explicitPassword ?? generateInitialPassword(16);
       if (!username) {
         errors.push({ line: index + 1, message: 'missing username' });
         return;
@@ -102,10 +111,14 @@ export function registerAdminUserRoutes(
         realName: parts[2] || null,
         className: parts[3] || null,
         role: parts[4] === 'admin' || parts[4] === 'setter' ? parts[4] : 'contestant',
+        // Imported accounts start with an operator-chosen or generated
+        // one-time password; force a change before normal use.
+        mustChangePassword: true,
       });
+      if (generated) initialPasswords[username] = password;
       created.push(username);
     });
-    return { ok: true, data: { created, skipped, errors } };
+    return { ok: true, data: { created, skipped, errors, initialPasswords } };
   });
 
   app.put<{

@@ -155,6 +155,25 @@ describe('admin contest management', () => {
     expect(result.data.created).toEqual(['dan']);
     expect(result.data.skipped).toEqual(['carol']);
 
+    const generated = await app.inject({
+      method: 'POST',
+      url: '/api/admin/users/import',
+      headers: { cookie },
+      payload: {
+        csv: '用户名,密码,姓名,班级,角色\ngenerated,,Generated,1班,contestant',
+      },
+    });
+    expect(generated.statusCode).toBe(200);
+    const generatedData = generated.json() as {
+      data: { created: string[]; initialPasswords: Record<string, string> };
+    };
+    expect(generatedData.data.created).toEqual(['generated']);
+    expect(generatedData.data.initialPasswords.generated).toMatch(/^[A-Za-z0-9]{16}$/);
+    const generatedRow = db
+      .prepare('SELECT must_change_password FROM users WHERE username = ?')
+      .get('generated') as unknown as { must_change_password: number };
+    expect(generatedRow.must_change_password).toBe(1);
+
     const updated = await app.inject({
       method: 'PUT',
       url: `/api/admin/users/${classBUser}`,
