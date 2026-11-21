@@ -251,6 +251,7 @@ export async function judgeHack(
       wallMs: Math.max(1, problem.time_ms) + JUDGE_WALL_CLOCK_BUFFER_MS,
       memoryMb: Math.max(1, problem.memory_mb),
       processLimit: 1,
+      outputLimitMb: Math.max(1, problem.output_mb ?? 64),
       stdinFile: inputPath,
       stdoutFile: stdOutPath,
       stderrFile: stdErrPath,

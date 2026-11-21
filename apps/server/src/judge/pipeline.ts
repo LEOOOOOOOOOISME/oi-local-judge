@@ -382,6 +382,8 @@ export async function judgeTestcase(args: {
     contestantOutput = safeOutput;
   }
 
+  const outputLimitMb = Math.max(1, Math.floor(problem.output_mb ?? 64));
+  const outputLimitBytes = outputLimitMb * 1024 * 1024;
   const runExe = join(workdir, `contestant-${testcase.id}.exe`);
   // The worker account cannot read the compile-cache directory (the worker
   // isolation script denies the whole dataDir). Materialize the executable in
@@ -396,6 +398,7 @@ export async function judgeTestcase(args: {
     wallMs: wallLimitMs,
     memoryMb: Math.max(1, problem.memory_mb),
     processLimit: 1,
+    outputLimitMb,
     stdinFile,
     stdoutFile,
     stderrFile,
@@ -440,8 +443,6 @@ export async function judgeTestcase(args: {
   // process killed for those reasons may have produced partial output) but
   // before RE/WA, so an output bomb is never misreported as a runtime error or
   // a wrong answer.
-  const outputLimitMb = Math.max(1, Math.floor(problem.output_mb ?? 64));
-  const outputLimitBytes = outputLimitMb * 1024 * 1024;
   const outputBytes = run.stdoutBytes + run.stderrBytes;
   if (outputBytes > outputLimitBytes) {
     return {

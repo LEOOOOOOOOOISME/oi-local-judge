@@ -73,6 +73,7 @@ struct Options {
   int wallMs = 3000;
   int memoryMb = 256;
   int processLimit = 1;
+  int outputLimitMb = 0;
   // Fail instead of silently running as the service account when the server
   // requires isolation. Credentials themselves arrive through the environment
   // (never argv, which is visible to other users).
@@ -143,6 +144,7 @@ struct Result {
   long long peakMemKb = 0;
   bool timedOut = false;
   bool oom = false;
+  bool outputLimitExceeded = false;
   int signal = 0;
   long long stdoutBytes = 0;
   long long stderrBytes = 0;
@@ -238,6 +240,8 @@ void emitJson(const Result& r) {
   s += r.timedOut ? "true" : "false";
   s += ",\"oom\":";
   s += r.oom ? "true" : "false";
+  s += ",\"outputLimitExceeded\":";
+  s += r.outputLimitExceeded ? "true" : "false";
   appendField(s, "signal", r.signal);
   appendField(s, "stdoutBytes", r.stdoutBytes);
   appendField(s, "stderrBytes", r.stderrBytes);
@@ -339,11 +343,14 @@ bool parseOptions(const std::vector<std::wstring>& args, Options* opt, std::stri
       if (!nextInt(&opt->memoryMb)) return false;
     } else if (key == L"--process-limit") {
       if (!nextInt(&opt->processLimit)) return false;
+    } else if (key == L"--output-limit-mb") {
+      if (!nextInt(&opt->outputLimitMb)) return false;
     } else if (key == L"--worker-required") {
       opt->workerRequired = true;
     } else if (key == L"--help" || key == L"-h") {
       *error = "usage: ojrunner --exe <path> [--workdir <dir>] [--time-ms <n>] "
                "[--wall-ms <n>] [--memory-mb <n>] [--process-limit <n>] "
+               "[--output-limit-mb <n>] "
                "[--input <file>] [--output <file>] [--stderr <file>] "
                "[--worker-required]";
       return false;
@@ -370,6 +377,10 @@ bool parseOptions(const std::vector<std::wstring>& args, Options* opt, std::stri
   }
   if (opt->processLimit <= 0) {
     *error = "--process-limit must be positive";
+    return false;
+  }
+  if (opt->outputLimitMb < 0) {
+    *error = "--output-limit-mb must be zero or positive";
     return false;
   }
   return true;
@@ -720,8 +731,33 @@ int run(const Options& opt, Result* out) {
     return 7;
   }
 
-  DWORD waitResult = WaitForSingleObject(pi.hProcess, static_cast<DWORD>(opt.wallMs));
-  const bool wallTimeout = (waitResult == WAIT_TIMEOUT);
+  const long long outputLimitBytes =
+      static_cast<long long>(opt.outputLimitMb) * 1024LL * 1024LL;
+  DWORD waitResult = WAIT_TIMEOUT;
+  bool wallTimeout = false;
+  while (true) {
+    // A 50 ms slice lets the runner enforce the output quota while the child is
+    // still writing; the previous code only checked the final file size.
+    waitResult = WaitForSingleObject(pi.hProcess, 50);
+    if (waitResult != WAIT_TIMEOUT) break;
+    const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                             std::chrono::steady_clock::now() - start)
+                             .count();
+    if (outputLimitBytes > 0 &&
+        fileSize(hOut) + fileSize(hErr) > outputLimitBytes) {
+      out->outputLimitExceeded = true;
+      const KillOutcome kill = terminateWholeJob(job, pi.hProcess);
+      out->reapMs = kill.reapMs;
+      out->killNote = "runtime output limit exceeded";
+      debugTrace("output limit exceeded: killing job, reapMs=%lld", kill.reapMs);
+      WaitForSingleObject(pi.hProcess, 5000);
+      break;
+    }
+    if (elapsed >= opt.wallMs) {
+      wallTimeout = true;
+      break;
+    }
+  }
   const auto end = std::chrono::steady_clock::now();
   if (wallTimeout) {
     out->timedOut = true;
@@ -743,7 +779,7 @@ int run(const Options& opt, Result* out) {
                          describeWin32Error(kill.fallbackError) + ")";
       }
     }
-  } else {
+  } else if (!out->outputLimitExceeded) {
     debugTrace("child exited before wall timeout (wait=%lu)", waitResult);
   }
   out->wallMs =

@@ -11,6 +11,10 @@
   - 新增诊断脱敏：只保留 `文件:行:列: error/warning`，删除 include 链、源码摘录和本机路径
   - 新增“`#include ../../../../secrets.json` 不回显内容”回归测试
 - P0-3 部分收紧：`.exe` 资产只允许 admin 上传，setter 上传返回 403。
+- P1-1 运行期输出配额：
+  - runner 每 50ms 检查 stdout+stderr 总大小，超过题目 `output_mb` 立即终止 Job 并标记 `outputLimitExceeded`
+  - pipeline 判 OLE；Hack 的 std 运行也传入同样配额
+  - 磁盘水位熔断仍未实现
 - P1-2 文件 IO 路径穿越：
   - create/update 只接受 `[A-Za-z0-9._-]{1,64}` 纯文件名
   - 判题时再次做 workdir containment，非法配置返回 SE
@@ -40,7 +44,7 @@
 
 ### 验证
 
-- 全量测试：129 文件 / 1127 用例通过。
+- 全量测试：129 文件 / 1128 用例通过。
 - `npm run build` 通过；`npm run build:native` 通过。
 - 浏览器 E2E：3 passed。
 - 新增回归：编译泄漏、路径穿越、Hack 未完成目标/无 validator、WS 越权、contest ACL、OI 结束回填/重测降分、加时、ZIP 限额、MLE、C11、CSV、NaN、CSS。
@@ -49,7 +53,7 @@
 
 - P0-1 默认安装仍不启用 worker 隔离（遵循既有“默认关闭”产品决策）；完整 AppContainer/网络隔离未做。
 - P0-3 剩余：checker/validator/generator/std 仍在服务账户下直接 spawn，未统一进 runner。
-- P1-1 stdout/stderr 运行期配额、磁盘水位熔断。
+- P1-1 剩余：磁盘水位熔断、按卷余量暂停队列。
 - P1-8 剩余：10 GiB 请求体仍整体进内存，未改流式上传。
 - P1 性能：每提交重算两次正式榜、题目列表 N+1、同步 SQLite 阻塞。
 - P2-1/2 legacy 排名语义、公开榜实名；P2-6 dependsOn；P2-9 注册/默认密码；P2-11~16。

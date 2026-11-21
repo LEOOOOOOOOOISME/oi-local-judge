@@ -26,6 +26,8 @@ export interface RunOptions {
   memoryMb: number;
   /** Active process limit of the job (1 = no child processes). */
   processLimit: number;
+  /** Kill the job once stdout+stderr exceed this many MiB (0 = disabled). */
+  outputLimitMb?: number;
   /** File redirected to the child's stdin. */
   stdinFile: string;
   /** File redirected to the child's stdout. */
@@ -43,6 +45,8 @@ export interface RunResult {
   peakMemKb: number;
   timedOut: boolean;
   oom: boolean;
+  /** The runner killed the job because stdout+stderr exceeded the quota. */
+  outputLimitExceeded: boolean;
   /** POSIX-style approximation of a crash NTSTATUS (0 when not a crash). */
   signal: number;
   stdoutBytes: number;
@@ -95,6 +99,10 @@ function parseRunnerOutput(stdout: string): RawRunnerResult {  const lines = std
     peakMemKb: assertNumber(parsed.peakMemKb, 'peakMemKb'),
     timedOut: assertBoolean(parsed.timedOut, 'timedOut'),
     oom: assertBoolean(parsed.oom, 'oom'),
+    outputLimitExceeded: assertBoolean(
+      parsed.outputLimitExceeded ?? false,
+      'outputLimitExceeded',
+    ),
     signal: assertNumber(parsed.signal, 'signal'),
     stdoutBytes: assertNumber(parsed.stdoutBytes, 'stdoutBytes'),
     stderrBytes: assertNumber(parsed.stderrBytes, 'stderrBytes'),
@@ -136,6 +144,9 @@ export async function runSandboxed(o: RunOptions): Promise<RunResult> {
     String(o.memoryMb),
     '--process-limit',
     String(o.processLimit),
+    ...(o.outputLimitMb !== undefined && o.outputLimitMb > 0
+      ? ['--output-limit-mb', String(o.outputLimitMb)]
+      : []),
     '--input',
     o.stdinFile,
     '--output',

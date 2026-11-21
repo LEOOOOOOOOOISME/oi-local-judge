@@ -33,7 +33,7 @@ function resolveGxx(): string {
   return 'g++';
 }
 
-type FixtureName = 'ok' | 'tle' | 'alloc';
+type FixtureName = 'ok' | 'tle' | 'alloc' | 'flood';
 
 let workdir = '';
 const exePath = {} as Record<FixtureName, string>;
@@ -61,7 +61,7 @@ beforeAll(() => {
   expect(existsSync(runner), 'build the runner first: node tools/build-runner.mjs').toBe(true);
   workdir = mkdtempSync(join(scratchRoot, 'runner-test-'));
   const gxx = resolveGxx();
-  for (const name of ['ok', 'tle', 'alloc'] as const) {
+  for (const name of ['ok', 'tle', 'alloc', 'flood'] as const) {
     const exe = join(workdir, `${name}.exe`);
     execFileSync(gxx, ['-O2', '-std=c++17', '-o', exe, join(fixturesDir, `${name}.cpp`)], {
       stdio: 'pipe',
@@ -118,6 +118,26 @@ describe('ojrunner sandbox', () => {
     // TLE is not a memory verdict.
     expect(r.oom).toBe(false);
     // The killed process must not be left behind.
+    await expectProcessGone(r.pid);
+  });
+
+  it('kills an output flood at the runtime quota', async () => {
+    const r = await runSandboxed({
+      runner,
+      exe: exePath.flood,
+      workdir,
+      timeMs: 5000,
+      wallMs: 5000,
+      memoryMb: 64,
+      processLimit: 1,
+      outputLimitMb: 1,
+      stdinFile: join(workdir, 'in.txt'),
+      stdoutFile: outPath('flood.out.txt'),
+      stderrFile: outPath('flood.err.txt'),
+    });
+    expect(r.outputLimitExceeded).toBe(true);
+    expect(r.timedOut).toBe(false);
+    expect(r.wallMs).toBeLessThan(4000);
     await expectProcessGone(r.pid);
   });
 
