@@ -8,6 +8,11 @@
 - 发布内容：代码审计修复（判题隔离、输出配额、上传限额、比赛正确性、账号安全）
 - 验证：129 文件 / 1129 用例通过；build/build:native 通过；E2E 3 passed；secret scan 0 命中
 - Release Notes：新增 v1.3.1 段
+- Release CI：run `44901960796`，success，v1.3.1 为 Latest
+- 资产：
+  - `OiJudge-Setup-1.3.1.exe` 253,152,231 B
+  - `oi-local-judge-1.3.1-win-x64.zip` 360,033,865 B
+  - `SHA256SUMS.txt` 191 B，与 GitHub 资产 digest 一致
 - 已知边界：默认不启用 worker 隔离；1 GiB buffered 上传；ranking 插件未隔离；安装包未签名
 
 ## 2026-11-21 / Round 165（代码审计报告第一批修复）
