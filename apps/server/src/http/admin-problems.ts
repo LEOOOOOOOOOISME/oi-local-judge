@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { basename, join, normalize } from 'node:path';
-import { zipSync, unzipSync } from 'fflate';
+import { zipSync } from 'fflate';
 import type { FastifyInstance, FastifyReply, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
@@ -47,6 +47,7 @@ import {
 } from '../services/problems.js';
 import { importCenaProblem } from '../services/cena.js';
 import { buildCdf, importLemonProblem } from '../services/lemon.js';
+import { unzipWithLimits } from '../services/zip-limits.js';
 
 // Admin upload limit set to 10 GB so that administrators are never blocked by
 // the body-size parser when uploading problems, zips, assets, etc.
@@ -408,7 +409,7 @@ export function registerAdminProblemRoutes(
       }
       let entries: Record<string, Uint8Array>;
       try {
-        entries = unzipSync(new Uint8Array(body));
+        entries = unzipWithLimits(new Uint8Array(body));
       } catch (err) {
         return reply.code(400).send({
           ok: false,
@@ -1125,7 +1126,7 @@ export function registerAdminProblemRoutes(
 
       let files: Record<string, Uint8Array>;
       try {
-        files = unzipSync(new Uint8Array(body));
+        files = unzipWithLimits(new Uint8Array(body));
       } catch (err) {
         return reply.code(400).send({
           ok: false,

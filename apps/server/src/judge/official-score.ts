@@ -1,5 +1,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import { getContest } from '../storage/repos/contests.js';
+import { getContestParticipantExtraTime } from '../storage/repos/contests.js';
 import { getOfficialScore, upsertOfficialScore } from '../storage/repos/official-scores.js';
 import { getSubmission } from '../storage/repos/submissions.js';
 import { isOfficialFrozen } from '../services/official-freeze.js';
@@ -20,7 +21,8 @@ export function syncOnlineOfficialScore(db: DatabaseSync, submissionId: number):
   if (!contest || contest.mode !== 'oi') return;
   if (contest.archived_at !== null || contest.status === 'frozen') return;
   if (isOfficialFrozen(contest)) return;
-  if (contest.end_at !== null && submission.created_at > contest.end_at) return;
+  const extraMs = getContestParticipantExtraTime(db, contest.id, submission.user_id) * 1000;
+  if (contest.end_at !== null && submission.created_at > contest.end_at + extraMs) return;
 
   const best = db
     .prepare(

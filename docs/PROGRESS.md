@@ -15,7 +15,15 @@
   - create/update 只接受 `[A-Za-z0-9._-]{1,64}` 纯文件名
   - 判题时再次做 workdir containment，非法配置返回 SE
 - P1-4 WebSocket 比赛房间：非参赛者/非管理角色订阅 `contest:<id>` 返回 1008。
+- P1-5 contest-scoped 题目 ACL：
+  - 已开始/进行中/已结束比赛的参赛者可读 hidden 题目
+  - 赛前仍隐藏，非参赛者仍不可见
+- P1-6 Hack validator：无源码 validator 的题目禁止 Hack，返回 `HACK_REQUIRES_VALIDATOR`。
 - P1-7 Hack 目标必须 `finished` 且有 verdict；`syncOnlineOfficialScore` 忽略 `hacked_at`。
+- P1-8 ZIP 限额：
+  - `unzipWithLimits` 在解压前检查条目数、单文件、总解压大小、压缩包大小
+  - 题包导入、数据导入、比赛批量、批量判题统一走该入口
+  - 10 GiB 请求体缓冲仍未改为流式，只收紧了同步解压路径
 - P1-9 部分修复：
   - 时钟自动结束/解封时回填 OI 正式分
   - 手工结束比赛时回填正式分
@@ -24,16 +32,17 @@
 - P2-3 MLE：去掉 90% 峰值误判，改为实际触限；TLE 优先于 MLE。
 - P2-4 客观题：填空只接受一个值；空答案键/空多选不再 AC。
 - P2-5 C11：使用 gcc + `-std=c11` 编译，不再必 CE。
+- P2-7 加时（后端）：`extra_time` 参与提交截止与正式分同步；前端倒计时仍按全局结束时间。
 - P2-8 CSS/Electron：span style 白名单；外链交给系统浏览器，禁止窗口内导航。
 - P2-10 CSV：`= + - @` 开头单元格前置单引号，防止公式注入。
 - P2-17 NaN：`OIJ_JUDGE_CONCURRENCY=abc` 回退默认值；`limit=abc` 返回 400。
 
 ### 验证
 
-- 全量测试：128 文件 / 1119 用例通过。
+- 全量测试：129 文件 / 1127 用例通过。
 - `npm run build` 通过；`npm run build:native` 通过。
 - 浏览器 E2E：3 passed。
-- 新增回归：编译泄漏、路径穿越、Hack 未完成目标、WS 越权、OI 结束回填、MLE、C11、CSV、NaN、CSS。
+- 新增回归：编译泄漏、路径穿越、Hack 未完成目标/无 validator、WS 越权、contest ACL、OI 结束回填/重测降分、加时、ZIP 限额、MLE、C11、CSV、NaN、CSS。
 
 ### 尚未修复（需架构改造/Windows 实测）
 
@@ -41,11 +50,10 @@
 - P0-3 剩余：checker/validator/generator/std 仍在服务账户下直接 spawn，未统一进 runner。
 - P1-1 stdout/stderr 运行期配额、磁盘水位熔断。
 - P1-3 worker 与编译缓存 ACL 冲突（需 Windows worker 实测）。
-- P1-5 contest-scoped 题目 ACL。
-- P1-6 Hack validator 强制（当前仍允许无 validator 题目 hack）。
-- P1-8 ZIP 流式/解压总量限制、10 GiB 内存缓冲。
+- P1-8 剩余：10 GiB 请求体仍整体进内存，未改流式上传。
 - P1 性能：每提交重算两次正式榜、题目列表 N+1、同步 SQLite 阻塞。
-- P2-1/2 legacy 排名语义、公开榜实名；P2-6 dependsOn；P2-7 extra_time；P2-9 注册/默认密码；P2-11~16。
+- P2-1/2 legacy 排名语义、公开榜实名；P2-6 dependsOn；P2-9 注册/默认密码；P2-11~16。
+- P2-7 剩余：前端倒计时仍使用全局结束时间，未按个人 extra_time 显示。
 
 ## 2026-11-20 / Round 164（仓库敏感信息清理 + v1.3.0 发布）
 

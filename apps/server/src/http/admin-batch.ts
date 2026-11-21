@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, normalize } from 'node:path';
 import { PassThrough, Readable } from 'node:stream';
-import { unzipSync } from 'fflate';
+import { unzipWithLimits } from '../services/zip-limits.js';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
@@ -113,7 +113,7 @@ function safePath(name: string): string | null {
 }
 
 function zipEntries(body: Buffer): Record<string, Uint8Array> {
-  return unzipSync(new Uint8Array(body));
+  return unzipWithLimits(new Uint8Array(body));
 }
 
 function parseOffset(value: string | undefined): number {

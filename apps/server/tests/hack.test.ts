@@ -7,7 +7,7 @@ import { ensureDataDirs, loadConfig } from '../src/config.js';
 import { submitSource } from '../src/services/submissions.js';
 import { hashPassword } from '../src/security/password.js';
 import { signSession } from '../src/security/session.js';
-import { upsertAsset } from '../src/storage/repos/assets.js';
+import { upsertAsset, deleteAsset } from '../src/storage/repos/assets.js';
 import { insertContestTeamRegistration } from '../src/storage/repos/contest-teams.js';
 import { createContest, getContest } from '../src/storage/repos/contests.js';
 import { getHack } from '../src/storage/repos/hacks.js';
@@ -63,6 +63,18 @@ beforeAll(async () => {
     language: 'cpp17',
     sha256: 'std',
     size: stdCode.length,
+  });
+  const validatorCode =
+    '#include <iostream>\nint main(){long long a,b;if(!(std::cin>>a>>b))return 1;if(a<0||b<0||a>1000000000||b>1000000000)return 1;return 0;}\n';
+  writeFileSync(join(root, 'assets', 'validator.cpp'), validatorCode);
+  upsertAsset(db, {
+    problemId,
+    kind: 'validator',
+    name: 'validator.cpp',
+    path: 'assets/validator.cpp',
+    language: 'cpp17',
+    sha256: 'validator',
+    size: validatorCode.length,
   });
   contestId = createContest(db, { name: 'Hack Contest', mode: 'oi', problemIds: [problemId] });
   db.prepare("UPDATE contests SET status = 'running' WHERE id = ?").run(contestId);
@@ -332,4 +344,27 @@ describe('contest hack', () => {
     expect(status).toBe('invalid');
     expect(getSubmission(db, secondTarget)!.hacked_at).toBeNull();
   }, 30_000);
+
+  it('requires a source validator for hacks', async () => {
+    deleteAsset(db, problemId, 'validator');
+    const target = createSubmission(db, {
+      contestId,
+      problemId,
+      userId: targetId,
+      language: 'cpp17',
+      sourcePath: 'subs/target.cpp',
+      sourceHash: 'no-validator-target',
+    });
+    db.prepare("UPDATE submissions SET status='finished', verdict='AC', score=100 WHERE id=?").run(
+      target,
+    );
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/contests/${contestId}/problems/${problemId}/hacks`,
+      headers: { cookie: hackerCookie },
+      payload: { targetSubmissionId: target, input: '1 1\n' },
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toContain('HACK_REQUIRES_VALIDATOR');
+  });
 });

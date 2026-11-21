@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { loadConfig } from '../src/config.js';
 import { submitSource } from '../src/services/submissions.js';
-import { ContestAccessError } from '../src/services/contest-access.js';
+import { ContestAccessError, resolveContestSubmission } from '../src/services/contest-access.js';
 import { addParticipant, createContest } from '../src/storage/repos/contests.js';
 import { createProblem } from '../src/storage/repos/problems.js';
 import { createUser } from '../src/storage/repos/users.js';
@@ -89,6 +89,37 @@ describe('contest submission access', () => {
     addParticipant(ctx.db, contestId, ctx.alice);
     expect(() => submit(ctx, ctx.alice, ctx.p2, contestId, 1500))
       .toThrowError(/not in this contest/i);
+    ctx.db.close();
+  });
+
+  it('accepts a participant with extra_time after the global end', () => {
+    const ctx = setup();
+    const contestId = createContest(ctx.db, {
+      name: 'C', startAt: 1000, endAt: 2000, problemIds: [ctx.p1],
+    });
+    addParticipant(ctx.db, contestId, ctx.alice);
+    ctx.db
+      .prepare('UPDATE contest_participants SET extra_time = 1 WHERE contest_id = ? AND user_id = ?')
+      .run(contestId, ctx.alice);
+    ctx.db.prepare("UPDATE contests SET status='ended' WHERE id=?").run(contestId);
+    expect(
+      resolveContestSubmission({
+        db: ctx.db,
+        contestId,
+        problemId: ctx.p1,
+        userId: ctx.alice,
+        now: 2030,
+      }).phase,
+    ).toBe('contest');
+    expect(
+      resolveContestSubmission({
+        db: ctx.db,
+        contestId,
+        problemId: ctx.p1,
+        userId: ctx.alice,
+        now: 3001,
+      }).phase,
+    ).toBe('correction');
     ctx.db.close();
   });
 

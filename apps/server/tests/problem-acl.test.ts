@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { openDatabase } from '../src/storage/db.js';
 import { migrate } from '../src/storage/migrate.js';
 import { createProblem, getProblem, type ProblemRow } from '../src/storage/repos/problems.js';
+import { createContest } from '../src/storage/repos/contests.js';
 import { createUser } from '../src/storage/repos/users.js';
 import {
   ProblemAclError,
@@ -163,6 +164,57 @@ describe('problem ACL service', () => {
     expect(canViewProblem(db, publicProblem, actor())).toBe(true);
     expect(canEditProblem(db, publicProblem, actor(bob))).toBe(false);
     expect(canManageProblemShares(db, publicProblem, actor(bob))).toBe(false);
+  });
+
+  it('lets contest participants read a hidden contest problem', () => {
+    const { db, alice, bob } = setup();
+    const problemId = createProblem(db, {
+      title: 'Hidden Contest Problem',
+      type: 'standard',
+      timeMs: 1000,
+      memoryMb: 64,
+      visibility: 'hidden',
+      testcases: [],
+    });
+    const contestId = createContest(db, {
+      name: 'Contest ACL',
+      mode: 'oi',
+      problemIds: [problemId],
+      startAt: Date.now() - 60_000,
+      endAt: Date.now() + 60_000,
+    });
+    db.prepare("UPDATE contests SET status='running' WHERE id=?").run(contestId);
+    db.prepare(
+      "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",
+    ).run(contestId, alice);
+    const problem = getProblem(db, problemId)!;
+    expect(canViewProblem(db, problem, { userId: alice })).toBe(true);
+    expect(canViewProblem(db, problem, { userId: bob })).toBe(false);
+    expect(canViewProblem(db, problem, {})).toBe(false);
+  });
+
+  it('keeps a hidden contest problem private before the start time', () => {
+    const { db, alice } = setup();
+    const problemId = createProblem(db, {
+      title: 'Future Contest Problem',
+      type: 'standard',
+      timeMs: 1000,
+      memoryMb: 64,
+      visibility: 'hidden',
+      testcases: [],
+    });
+    const contestId = createContest(db, {
+      name: 'Future Contest',
+      mode: 'oi',
+      problemIds: [problemId],
+      startAt: Date.now() + 60_000,
+      endAt: Date.now() + 120_000,
+    });
+    db.prepare("UPDATE contests SET status='running' WHERE id=?").run(contestId);
+    db.prepare(
+      "INSERT INTO contest_participants(contest_id, user_id, status) VALUES (?, ?, 'accepted')",
+    ).run(contestId, alice);
+    expect(canViewProblem(db, getProblem(db, problemId)!, { userId: alice })).toBe(false);
   });
 
   it('gives a team captain edit rights and members read-only rights', () => {

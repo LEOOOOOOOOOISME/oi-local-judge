@@ -357,6 +357,18 @@ export function getContestParticipantStatus(
   return null;
 }
 
+/** Per-participant extension in seconds (0 when absent). */
+export function getContestParticipantExtraTime(
+  db: DatabaseSync,
+  contestId: number,
+  userId: number,
+): number {
+  const row = db
+    .prepare('SELECT extra_time FROM contest_participants WHERE contest_id = ? AND user_id = ?')
+    .get(contestId, userId) as { extra_time: number } | undefined;
+  return row ? Math.max(0, Math.trunc(Number(row.extra_time) || 0)) : 0;
+}
+
 export function getParticipantRows(db: DatabaseSync, contestId: number) {
   return db
     .prepare(

@@ -6,6 +6,7 @@ import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
 import { judgeHack, promoteHack, revertHack } from '../judge/hack.js';
 import { getContest, getContestProblemEntries, isContestParticipant } from '../storage/repos/contests.js';
+import { getAsset } from '../storage/repos/assets.js';
 import {
   countRecentHacks,
   createHack,
@@ -151,6 +152,15 @@ export function registerHackRoutes(app: FastifyInstance, options: HackRouteOptio
       }
       if (Buffer.byteLength(input, 'utf8') > 1024 * 1024) {
         return reply.code(413).send({ ok: false, error: { code: 'INPUT_TOO_LARGE' } });
+      }
+      // Without a validator an arbitrary empty/oversized/malformed input can
+      // make an AC target fail, which is not a legitimate hack.
+      const validator = getAsset(options.db, problemId, 'validator');
+      if (!validator?.language) {
+        return reply.code(400).send({
+          ok: false,
+          error: { code: 'HACK_REQUIRES_VALIDATOR', message: 'problem has no source validator' },
+        });
       }
       const inputPath = `hacks/${contestId}/${randomUUID()}.in`;
       mkdirSync(join(options.config.dataDir, 'hacks', String(contestId)), { recursive: true });

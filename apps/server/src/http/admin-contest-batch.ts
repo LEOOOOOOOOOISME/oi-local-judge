@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { unzipSync } from 'fflate';
+import { unzipWithLimits } from '../services/zip-limits.js';
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Config } from '../config.js';
@@ -152,7 +152,7 @@ export function registerContestBatchRoutes(
 
     let files: Record<string, Uint8Array>;
     try {
-      files = unzipSync(new Uint8Array(body));
+      files = unzipWithLimits(new Uint8Array(body));
     } catch (err) {
       return reply.code(400).send({
         ok: false,

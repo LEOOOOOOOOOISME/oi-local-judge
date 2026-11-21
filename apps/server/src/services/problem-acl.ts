@@ -68,6 +68,35 @@ function isOwner(problem: ProblemRow, userId: number | undefined): boolean {
 }
 
 /**
+ * A contest problem belongs to the contest's visibility window. Participants
+ * may read it while the contest runs/freezes and afterwards for correction;
+ * before the start time it remains hidden. Non-participants never gain access
+ * through this path.
+ */
+function canViewProblemViaContest(
+  db: DatabaseSync,
+  problemId: number,
+  userId: number,
+  now = Date.now(),
+): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1
+       FROM contest_problems cp
+       JOIN contests c ON c.id = cp.contest_id
+       JOIN contest_participants p ON p.contest_id = c.id
+       WHERE cp.problem_id = ?
+         AND p.user_id = ?
+         AND p.status = 'accepted'
+         AND c.status IN ('running', 'frozen', 'ended', 'archived')
+         AND (c.start_at IS NULL OR c.start_at <= ?)
+       LIMIT 1`,
+    )
+    .get(problemId, userId, now) as { 1: number } | undefined;
+  return row !== undefined;
+}
+
+/**
  * A problem is readable when it is public, the actor owns it (directly or as a
  * team member), it was shared with the actor (directly or through a team), or
  * the actor is an admin. System-owned hidden problems are admin-only.
@@ -80,6 +109,9 @@ export function canViewProblem(
   if (actor.isAdmin) return true;
   const userId = actor.userId;
   if (userId === undefined) return problem.visibility === 'public';
+  // Contest participation is a read grant independent of ownership: imported
+  // (system-owned) problems are commonly hidden until the contest starts.
+  if (canViewProblemViaContest(db, problem.id, userId)) return true;
   if (problem.owner_type === 'system') return problem.visibility === 'public';
   if (isOwner(problem, userId)) return true;
   if (ownershipTeamRole(db, problem, userId) !== null) return true;

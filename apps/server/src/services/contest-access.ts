@@ -1,6 +1,7 @@
 import type { DatabaseSync } from 'node:sqlite';
 import {
   getContest,
+  getContestParticipantExtraTime,
   getContestParticipantStatus,
   getContestProblemIds,
   type ContestRow,
@@ -48,9 +49,14 @@ export function resolveContestSubmission(input: {
     throw new ContestAccessError('CONTEST_NOT_STARTED', 403, 'contest has not started');
   }
 
+  const extraMs = getContestParticipantExtraTime(input.db, contest.id, input.userId) * 1000;
+  const effectiveEnd = contest.end_at === null ? null : contest.end_at + extraMs;
   const ended =
-    contest.status === 'ended' ||
-    (contest.end_at !== null && now >= contest.end_at);
+    effectiveEnd === null
+      ? contest.status === 'ended'
+      : contest.status === 'ended'
+        ? now < contest.end_at! || extraMs === 0 || now >= effectiveEnd
+        : now >= effectiveEnd;
   if (ended) {
     return { phase: 'correction', contest };
   }
@@ -58,7 +64,17 @@ export function resolveContestSubmission(input: {
   if (contest.start_at !== null && now < contest.start_at) {
     throw new ContestAccessError('CONTEST_NOT_STARTED', 403, 'contest has not started');
   }
-  if (contest.status !== 'running' && contest.status !== 'frozen') {
+  const withinPersonalExtra =
+    contest.status === 'ended' &&
+    effectiveEnd !== null &&
+    contest.end_at !== null &&
+    now >= contest.end_at &&
+    now < effectiveEnd;
+  if (
+    contest.status !== 'running' &&
+    contest.status !== 'frozen' &&
+    !withinPersonalExtra
+  ) {
     throw new ContestAccessError('CONTEST_NOT_RUNNING', 403, 'contest is not running');
   }
   return { phase: 'contest', contest };
