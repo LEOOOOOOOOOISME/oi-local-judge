@@ -28,6 +28,7 @@ const config: Config = {
   adminPassword: 'admin123',
   sessionSecret: 'test-session-secret',
   sessionTtlSec: 3600,
+  allowRegistration: true,
 };
 
 let db: DatabaseSync;
@@ -356,6 +357,22 @@ describe('POST /api/auth/logout', () => {
 });
 
 describe('POST /api/auth/register', () => {
+  it('is disabled by default config and can be enabled explicitly', async () => {
+    const enabled = await app.inject({ method: 'GET', url: '/api/auth/registration' });
+    expect(enabled.json()).toEqual({ ok: true, data: { enabled: true } });
+
+    (config as { allowRegistration?: boolean }).allowRegistration = false;
+    const disabled = await app.inject({
+      method: 'POST',
+      url: '/api/auth/register',
+      payload: { username: 'selfreg', password: 'selfreg123' },
+    });
+    expect(disabled.statusCode).toBe(403);
+    expect(disabled.body).toContain('REGISTRATION_DISABLED');
+    const status = await app.inject({ method: 'GET', url: '/api/auth/registration' });
+    expect(status.json()).toEqual({ ok: true, data: { enabled: false } });
+    (config as { allowRegistration?: boolean }).allowRegistration = true;
+  });
   it('creates a contestant and logs in automatically', async () => {
     const response = await app.inject({
       method: 'POST',

@@ -1,4 +1,4 @@
-﻿// HTTP auth routes:
+// HTTP auth routes:
 //   POST /api/auth/login
 //   POST /api/auth/logout
 //   GET  /api/me
@@ -111,7 +111,21 @@ export async function registerAuthRoutes(
     };
   });
 
+  app.get('/api/auth/registration', async (_request, reply) => {
+    reply.header('cache-control', 'no-store');
+    return { ok: true, data: { enabled: config.allowRegistration === true } };
+  });
+
   app.post('/api/auth/register', async (request, reply) => {
+    if (config.allowRegistration !== true) {
+      return reply.code(403).send({
+        ok: false,
+        error: {
+          code: 'REGISTRATION_DISABLED',
+          message: 'self-registration is disabled; contact an administrator',
+        },
+      });
+    }
     const body = (request.body ?? {}) as LoginBody;
     const username = typeof body.username === 'string' ? body.username.trim() : '';
     const password = typeof body.password === 'string' ? body.password : '';

@@ -1,8 +1,9 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { App, Button, Card, Form, Input, Spin } from 'antd';
 import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
+import { apiGet } from '../api/client';
 
 interface LoginValues {
   username: string;
@@ -16,6 +17,21 @@ export function LoginPage() {
   const { message } = App.useApp();
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [registrationEnabled, setRegistrationEnabled] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    void apiGet<{ enabled: boolean }>('/api/auth/registration')
+      .then((data) => {
+        if (active) setRegistrationEnabled(data.enabled === true);
+      })
+      .catch(() => {
+        if (active) setRegistrationEnabled(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const rawNext = searchParams.get('next');
   const next = rawNext && rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/contests';
@@ -99,8 +115,12 @@ export function LoginPage() {
         )}
       </Card>
       <div className="login-footer">
-        <Link to="/register">注册账号</Link>
-        <span>·</span>
+        {registrationEnabled ? (
+          <>
+            <Link to="/register">注册账号</Link>
+            <span>·</span>
+          </>
+        ) : null}
         <Link to="/contests">先浏览比赛</Link>
         <span>·</span>
         <span>数据保存在本机</span>

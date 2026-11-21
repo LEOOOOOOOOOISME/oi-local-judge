@@ -24,6 +24,8 @@ export interface Config {
   tlsKeyPath?: string;
   /** Mark the session cookie Secure (TLS directly or a trusted reverse proxy). */
   secureCookies?: boolean;
+  /** Allow public self-registration. Disabled by default. */
+  allowRegistration?: boolean;
   /** optional = run as the service account when no worker account is configured. */
   workerIsolation?: WorkerIsolationMode;
   /** Low-privilege Windows account used by the native runner for contestant code. */
@@ -135,6 +137,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     // Generated/persisted on first start; the legacy default is migrated.
     sessionSecret: loadOrCreateSessionSecret(dataDir, env).secret,
     sessionTtlSec: Number(env.OIJ_SESSION_TTL ?? persisted.sessionTtlSec ?? 8 * 3600),
+    allowRegistration:
+      env.OIJ_ALLOW_REGISTRATION === '1' || env.OIJ_ALLOW_REGISTRATION === 'true',
     ...(tlsCertPath && tlsKeyPath ? { tlsCertPath, tlsKeyPath } : {}),
     secureCookies,
     workerIsolation,
